@@ -1,0 +1,44 @@
+name: Autograde
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  autograde:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify sealed paths unchanged
+        run: |
+          # Compare sealed paths to template repo's HEAD; fail if a student modified them.
+          # (Implementation: fetch parent ref recorded in .classroom/parent.json or
+          #  derive it from the org template repo, then `git diff --quiet` per path.)
+          echo "TODO: tamper check using .classroom/sealed-paths.json"
+
+      - name: Run tests
+        id: tests
+        run: |
+          # Iterate tests defined in .classroom/tests.json, execute each according
+          # to test_type (command / input_output / ...), aggregate passed/failed/points.
+          # Emit JSON to $GITHUB_OUTPUT for the publish step.
+          echo "TODO: run tests using .classroom/tests.json"
+
+      - name: Publish check run
+        if: always()
+        run: |
+          # POST a check run with conclusion + summary so it shows up on the commit
+          # and can be read by `gh teacher sync` from the GitHub API.
+          echo "TODO: publish check run"
+
+      - name: Update release notes for submission tag
+        if: startsWith(github.ref, 'refs/tags/submission-')
+        run: |
+          # If this push was a submission tag, edit the matching Release body to
+          # include the autograde summary (per roadmap: Release links to results).
+          echo "TODO: update release notes"
