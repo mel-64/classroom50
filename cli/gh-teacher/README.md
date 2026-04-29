@@ -18,7 +18,7 @@ go build .
 gh extension install .
 ```
 
-After that, `gh teacher --version` and `gh teacher whoami` are available. Re-run `go build .` after code changes; `gh extension install .` only needs to run once.
+After that, `gh teacher` is registered (see [Commands](#commands)). Re-run `go build .` after code changes; `gh extension install .` only needs to run once.
 
 ## Local checks
 
@@ -46,9 +46,19 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
 }
 ```
 
+## Commands
+
+| Command                                  | Description                                                       |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `gh teacher whoami`                      | Print the authenticated GitHub user.                              |
+| `gh teacher invite <org> <user>`         | Invite user to an org (use `--admin` for the org admin role).     |
+| `gh teacher invite <org>/<repo> <user>`  | Invite user to a specific repository as a push-permission collaborator. |
+
+Run `gh teacher <command> --help` for available flags. Commands that emit informational output accept `--quiet` / `-q` to suppress it; errors always go to stderr with a non-zero exit code.
+
 ## Layout
 
-Single `main.go` with a cobra root command and inline subcommands. Split into separate files (or a `cmd/` package) when individual commands grow non-trivial.
+`main.go` defines the cobra root command and registers subcommands. Each subcommand lives in its own file (`whoami.go`, `invite.go`, …) exposing a `<name>Cmd()` factory function. To add a new command, copy an existing file and follow the same pattern: factory returns `*cobra.Command`, write to `cmd.OutOrStdout()`, wrap errors with `fmt.Errorf("ctx: %w", err)`.
 
 ## Distribution
 
