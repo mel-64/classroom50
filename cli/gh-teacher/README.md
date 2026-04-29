@@ -51,6 +51,7 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
 | Command                                  | Description                                                       |
 | ---------------------------------------- | ----------------------------------------------------------------- |
 | `gh teacher whoami`                      | Print the authenticated GitHub user.                              |
+| `gh teacher auth`                        | Refresh the gh token with the `admin:org` scope (required for org invites). Pass `-s` to add other scopes. |
 | `gh teacher invite <org> <user>`         | Invite user to an org (use `--admin` for the org admin role).     |
 | `gh teacher invite <org>/<repo> <user>`  | Invite user to a specific repository as a push-permission collaborator. |
 
