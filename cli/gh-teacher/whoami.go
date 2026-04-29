@@ -13,6 +13,7 @@ func whoamiCmd() *cobra.Command {
 		Short: "Print the authenticated GitHub user",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			client, err := api.DefaultRESTClient()
 			if err != nil {
 				return fmt.Errorf("REST client: %w", err)

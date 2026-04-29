@@ -25,6 +25,7 @@ func authCmd() *cobra.Command {
 			"  gh teacher auth -s read:user,delete_repo",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			ghArgs := []string{"auth", "refresh", "-s", "admin:org"}
 			for _, s := range scopes {
 				ghArgs = append(ghArgs, "-s", s)

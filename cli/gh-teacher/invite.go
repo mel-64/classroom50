@@ -32,6 +32,7 @@ func inviteCmd() *cobra.Command {
 			"  gh teacher invite cs50-fall-2026/hello alice",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			target, username := args[0], args[1]
 
 			client, err := api.DefaultRESTClient()
