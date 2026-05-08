@@ -96,7 +96,10 @@ Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a ful
 ### Download students' submissions ([gh-teacher/](gh-teacher/))
 
 ```
-gh teacher download {org} {assignment}
+gh teacher download {org} {assignment}              # clones into {org}_submissions/
+gh teacher download -d {dir} {org} {assignment}     # clones into {dir}/
 ```
 
-1. Use `git` to clone all repos named `{username}-{assignment}` in `{org}`.
+1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name ends in `-{assignment}` (the `gh student accept` convention of `{username}-{assignment}`).
+1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{org}_submissions` so the cwd stays clean and one teacher can pull multiple orgs' submissions side-by-side; pass `-d` to override. Pass `--quiet` to git when the user passes `-q`.
+1. Skip targets that already exist on disk so re-runs pick up new submissions without aborting on the ones already cloned. Failures are reported per-repo on stderr; a non-zero exit code surfaces if any clone failed, after the rest still run.

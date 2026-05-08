@@ -20,6 +20,7 @@ func main() {
 	root.AddCommand(authCmd())
 	root.AddCommand(inviteCmd())
 	root.AddCommand(removeCmd())
+	root.AddCommand(downloadCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

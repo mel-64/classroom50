@@ -58,6 +58,7 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
 | `gh teacher invite <org>/<repo> <user>`  | Invite user to a specific repository. Default permission is `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running with a different `-p` updates the existing collaborator. |
 | `gh teacher remove <org> <user>`         | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. |
 | `gh teacher remove <org>/<repo> <user>`  | Remove user from a specific repository.                           |
+| `gh teacher download <org> <assignment>` | Clone every repo in `<org>` whose name ends in `-<assignment>` (the `gh student accept` convention) into `<org>_submissions/`. Override the destination with `-d/--dir`; existing target dirs are skipped so re-runs pick up new submissions. |
 
 Run `gh teacher <command> --help` for available flags. Commands that emit informational output accept `--quiet` / `-q` to suppress it; errors always go to stderr with a non-zero exit code.
 
