@@ -15,10 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// dirTimestampFormat is the suffix appended to the default submissions
-// directory so each run produces a fresh folder. Underscores keep the name
-// filesystem-safe across platforms; the loose ISO-8601 shape (`T` between
-// date and time) makes it sortable lexicographically.
+// dirTimestampFormat is the timestamp suffix on the default submissions dir.
+// Filesystem-safe across platforms and lexicographically sortable.
 const dirTimestampFormat = "2006_01_02_T_15_04_05"
 
 func downloadCmd() *cobra.Command {
@@ -35,7 +33,7 @@ func downloadCmd() *cobra.Command {
 			"Repos are cloned via `gh repo clone`, so authentication is inherited from the\n" +
 			"current gh session. The default destination is <org>_submissions_<timestamp>/\n" +
 			"in the current directory so each run produces a fresh folder, preserving\n" +
-			"prior downloads. Pass -d/--dir to override the destination — the value is\n" +
+			"prior downloads. Pass -d/--dir to override the destination; the value is\n" +
 			"used literally (no timestamp). When the target directory already exists,\n" +
 			"individual repos already on disk are skipped, so re-runs with -d pick up\n" +
 			"new submissions without aborting on the ones already cloned.",
@@ -52,9 +50,8 @@ func downloadCmd() *cobra.Command {
 			if assignment == "" {
 				return errors.New("assignment must not be empty")
 			}
-			// Both `-d` not passed and `-d ""` should resolve to the per-org
-			// default so we don't end up creating clones at the cwd root.
-			// Default gets a timestamp suffix; explicit -d is taken literally.
+			// `-d` unset or empty falls back to the timestamped default; an
+			// explicit `-d <name>` is taken literally (no timestamp).
 			dir = strings.TrimSpace(dir)
 			if dir == "" {
 				dir = fmt.Sprintf("%s_submissions_%s", org, time.Now().Format(dirTimestampFormat))
@@ -75,10 +72,7 @@ func downloadCmd() *cobra.Command {
 }
 
 func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assignment, dir string, quiet bool) error {
-	// `gh student accept` lowercases assignment when forming repo names, so the
-	// stored names are always lowercase regardless of how the teacher typed the
-	// arg. Lowercase here too so a `gh teacher download cs50 PSet1` invocation
-	// still matches `alice-pset1` etc.
+	// lowercase to match accept's naming (it lowercases when creating repos).
 	suffix := "-" + strings.ToLower(assignment)
 
 	repos, err := listOrgRepoNames(client, org)
@@ -86,13 +80,8 @@ func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assi
 		return err
 	}
 
-	// Match by `gh student accept`'s naming convention: <username>-<assignment>.
-	// `len(name) > len(suffix)` guarantees a non-empty username prefix; the
-	// HasSuffix check anchors the assignment slug at end-of-name. This match is
-	// intentionally per-spec — see cli/README.md. It can over-match when the
-	// org also contains unrelated repos that happen to end in -<assignment>
-	// (e.g., a `<org>-<assignment>` template fork). Teachers running download
-	// against a noisy org should keep classroom orgs focused.
+	// Match accept's naming: <username>-<assignment>. Suffix-only per spec;
+	// can over-match if the org has other repos ending in -<assignment>.
 	var matched []string
 	for _, name := range repos {
 		if len(name) > len(suffix) && strings.HasSuffix(name, suffix) {
@@ -117,9 +106,7 @@ func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assi
 	for _, name := range matched {
 		target := filepath.Join(dir, name)
 
-		// Skip-existing reported as its own line so the verb matches what
-		// happened — "Cloning X... Skipped" reads wrong since we didn't
-		// actually start a clone.
+		// "Skipped" line, not "Cloning ... Skipped" (we don't actually start a clone).
 		if _, err := os.Stat(target); err == nil {
 			if !quiet {
 				_, _ = fmt.Fprintf(out, "Skipped %s (already exists)\n", name)
@@ -132,9 +119,7 @@ func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assi
 		}
 
 		if !quiet {
-			// In verbose mode we print a full line so git's output starts
-			// cleanly on the next line; otherwise leave the line open and
-			// append "Done" / "Failed: ..." after the clone returns.
+			// verbose: full line so git output starts on a new line.
 			if verbose {
 				_, _ = fmt.Fprintf(out, "Cloning %s\n", name)
 			} else {
@@ -196,17 +181,12 @@ func listOrgRepoNames(client *api.RESTClient, org string) ([]string, error) {
 	return names, nil
 }
 
-// stderrTailCap bounds the stderr capture in non-verbose clones. Eight KiB
-// holds far more than git's actual error message (typically a handful of
-// lines); progress output that flows through stderr earlier in the run is
-// allowed to overflow because we only surface the trailing diagnostic.
+// stderrTailCap bounds non-verbose stderr capture; the actual error lives at the tail.
 const stderrTailCap = 8 * 1024
 
-// cloneOrgRepo shells out to `gh repo clone`. In verbose mode git's stdout
-// and stderr stream to the user's terminal; otherwise stdout is discarded
-// and the last <stderrTailCap> bytes of stderr are captured so the per-repo
-// "Failed: …" line carries git's actual diagnostic instead of just
-// "exit status 1".
+// cloneOrgRepo shells out to `gh repo clone`. Verbose streams git's output;
+// otherwise stdout is discarded and the tail of stderr is captured so failure
+// messages carry git's diagnostic rather than just "exit status 1".
 func cloneOrgRepo(out, errOut io.Writer, org, repo, target string, quiet bool) error {
 	args := []string{"repo", "clone", fmt.Sprintf("%s/%s", org, repo), target}
 	if quiet {
@@ -226,9 +206,7 @@ func cloneOrgRepo(out, errOut io.Writer, org, repo, target string, quiet bool) e
 
 	if err := cmd.Run(); err != nil {
 		if stderrTail != nil {
-			// Distill multi-line stderr (`Cloning into …`, progress, then the
-			// actual `fatal: …`) down to the trailing actionable line so the
-			// per-repo "Failed: …" output stays one line.
+			// trailing line is git's actionable error (e.g., `fatal: ...`).
 			if msg := lastNonEmptyLine(stderrTail.String()); msg != "" {
 				return fmt.Errorf("%w: %s", err, msg)
 			}
@@ -238,10 +216,8 @@ func cloneOrgRepo(out, errOut io.Writer, org, repo, target string, quiet bool) e
 	return nil
 }
 
-// tailWriter is an io.Writer that retains only the last cap bytes written to
-// it. Used to capture git's stderr without unbounded memory growth on chatty
-// clones — git's actionable error message is at the end of stderr (after any
-// progress output), so a bounded tail is sufficient for diagnostic purposes.
+// tailWriter is an io.Writer that retains only the last cap bytes written.
+// Bounds memory when capturing chatty stderr.
 type tailWriter struct {
 	buf []byte
 	cap int
@@ -255,13 +231,10 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	switch {
 	case n >= w.cap:
-		// p alone fills or overflows the window — keep its last cap bytes.
 		w.buf = append(w.buf[:0], p[n-w.cap:]...)
 	case len(w.buf)+n <= w.cap:
-		// fits in current window
 		w.buf = append(w.buf, p...)
 	default:
-		// drop oldest before appending so the total stays at cap
 		drop := len(w.buf) + n - w.cap
 		w.buf = append(w.buf[:0], w.buf[drop:]...)
 		w.buf = append(w.buf, p...)
@@ -273,8 +246,7 @@ func (w *tailWriter) String() string {
 	return string(w.buf)
 }
 
-// lastNonEmptyLine returns the last non-empty, whitespace-trimmed line of s.
-// Falls back to the entire trimmed string if no line breaks are present.
+// lastNonEmptyLine returns the last non-empty trimmed line of s.
 func lastNonEmptyLine(s string) string {
 	for i := len(s); i > 0; {
 		j := strings.LastIndexByte(s[:i], '\n')

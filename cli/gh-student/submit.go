@@ -21,8 +21,8 @@ import (
 func submitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "submit",
-		Short:   "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo’s latest .gitignore and .github",
-		Long:    "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo’s latest .gitignore and .github",
+		Short:   "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo's latest .gitignore and .github",
+		Long:    "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo's latest .gitignore and .github",
 		Example: "  gh student submit",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -104,11 +104,8 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		)
 	}
 
-	// .gitignore and .github/ are required template artifacts: every assignment
-	// template ships them, and submit relies on them being current. A 404 here
-	// signals a misconfigured template (or a wrong ref/repo in
-	// .classroom50.yml) — fail loudly so the teacher can fix it rather than
-	// silently submitting without instructor files.
+	// .gitignore and .github/ are required template artifacts; a 404 means
+	// a misconfigured template, so fail loudly.
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
 		return fmt.Errorf("fetch instructor .gitignore: %w", err)
 	}
@@ -255,9 +252,7 @@ func pushSnapshot(tmp string, remoteURL string, branch string, message string, o
 		return err
 	}
 
-	// fetch is best-effort: if it fails (e.g., empty remote on first submit), the
-	// push below still proceeds. Log the failure so --force-with-lease's degraded
-	// behavior is at least visible.
+	// fetch is best-effort; log so --force-with-lease's degraded behavior is visible.
 	if err := runGit(tmp, out, errOut, "fetch", "origin", branch+":refs/remotes/origin/"+branch); err != nil {
 		_, _ = fmt.Fprintf(errOut, "fetch origin %s failed; pushing without remote-tracking ref: %v\n", branch, err)
 	}
@@ -274,9 +269,7 @@ func runGit(dir string, out io.Writer, errOut io.Writer, args ...string) error {
 	cmd.Dir = dir
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	// Don't pass stdin to git: `git push` will otherwise prompt for credentials
-	// when the gh credential helper fails, which hangs non-interactive callers.
-	// GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on a prompt.
+	// no stdin + GIT_TERMINAL_PROMPT=0: fail fast on auth prompt instead of hanging.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 	if err := cmd.Run(); err != nil {

@@ -31,9 +31,7 @@ func inviteCmd() *cobra.Command {
 				return errors.New("username must not be empty")
 			}
 
-			// {org}/{repo} — must be exactly two slash-separated components, each
-			// non-empty. SplitN(...,3) catches "a/b/c" and surfaces it as invalid
-			// rather than silently dropping the trailing component.
+			// {org}/{repo}: exactly two non-empty components.
 			parts := strings.SplitN(target, "/", 3)
 			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 				return fmt.Errorf("invalid target %q: expected {org}/{repo}", target)
@@ -54,9 +52,7 @@ func inviteCmd() *cobra.Command {
 	return cmd
 }
 
-// inviteUserToPush invites the given user to the given repo with `push` permission.
-// Argument order mirrors the API path itself (org → repo → username) so positional
-// mistakes are caught visually at the call site.
+// inviteUserToPush adds username as a push-level collaborator on org/repo.
 func inviteUserToPush(client *api.RESTClient, out io.Writer, org, repo, username string) error {
 	body, err := json.Marshal(map[string]string{
 		"permission": "push",

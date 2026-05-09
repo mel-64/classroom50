@@ -15,40 +15,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ClassroomMetadataPath is the in-repo path of the per-assignment metadata
-// file written by `gh student accept` and read back by `gh student submit`.
+// ClassroomMetadataPath is the in-repo path of the per-assignment metadata file.
 const ClassroomMetadataPath = ".classroom50.yml"
 
-// ClassroomConfig is the on-disk shape of .classroom50.yml. Add new fields
-// here and they'll round-trip through both the writer (marshalQuotedYAML,
-// which forces double-quoted scalars on string values) and the reader
-// (yaml.Unmarshal in submit.go) without further plumbing.
+// ClassroomConfig is the on-disk shape of .classroom50.yml. Add a new
+// yaml-tagged field here and it round-trips through both writer and reader.
 type ClassroomConfig struct {
 	ClassroomID  string          `yaml:"classroom_id"`
 	AssignmentID string          `yaml:"assignment_id"`
 	Source       ClassroomSource `yaml:"source"`
 }
 
-// ClassroomSource records where the assignment's instructor files (.gitignore
-// and .github/) come from. `gh student submit` reads these to fetch the
-// latest instructor files at submission time.
+// ClassroomSource is the source.* block; submit reads it to fetch instructor files.
 type ClassroomSource struct {
 	Owner  string `yaml:"owner"`
 	Repo   string `yaml:"repo"`
 	Branch string `yaml:"branch"`
 }
 
-// WriteClassroomMetadata serializes cfg as YAML and uploads it to
-// <owner>/<repo>:<branch> at .classroom50.yml via the GitHub contents API.
-//
-// Idempotent: GETs the existing file's SHA first when present so re-runs
-// update in place rather than failing. Waits for the branch to be reachable
-// before reading, since freshly-generated repos take a moment to stabilize.
-//
-// This is the single seam between the accept workflow and the metadata
-// store. Replacing this with a remote metadata source means swapping the
-// body of this function — call sites build a ClassroomConfig and pass it,
-// without knowing how it's persisted.
+// WriteClassroomMetadata uploads cfg to <owner>/<repo>:<branch> at
+// .classroom50.yml. Idempotent: updates in place if the file already exists.
+// This function is the seam to swap for a remote metadata source later.
 func WriteClassroomMetadata(client *api.RESTClient, owner, repo, branch string, cfg ClassroomConfig) error {
 	yamlBytes, err := marshalQuotedYAML(cfg)
 	if err != nil {
@@ -63,10 +50,7 @@ func WriteClassroomMetadata(client *api.RESTClient, owner, repo, branch string, 
 		escapeContentPath(ClassroomMetadataPath),
 	)
 
-	// Wait for the branch to become reachable BEFORE asking about an existing
-	// file: a freshly-generated repo briefly returns 409 "Git Repository is
-	// empty" from the contents API while replication completes, and that 409
-	// is indistinguishable from a real conflict.
+	// fresh repos briefly 409 ("Git Repository is empty") on the contents API.
 	if err := waitForStableBranch(client, owner, repo, branch); err != nil {
 		return err
 	}
@@ -95,9 +79,8 @@ func WriteClassroomMetadata(client *api.RESTClient, owner, repo, branch string, 
 	return nil
 }
 
-// existingMetadataSHA returns the SHA of the metadata file at apiPath@branch
-// if it exists. A 404 (file not yet created) or 409 (repo still replicating)
-// yields an empty SHA with no error so the caller can do a create-as-PUT.
+// existingMetadataSHA returns the SHA of the metadata file, or "" if it
+// doesn't exist (404) or the repo is still replicating (409).
 func existingMetadataSHA(client *api.RESTClient, apiPath, branch string) (string, error) {
 	getPath := fmt.Sprintf("%s?ref=%s", apiPath, url.QueryEscape(branch))
 	var existing struct {
@@ -115,10 +98,7 @@ func existingMetadataSHA(client *api.RESTClient, apiPath, branch string) (string
 }
 
 // waitForStableBranch polls the branches API until two consecutive successful
-// reads return the same non-empty commit SHA, or returns an error after a
-// bounded number of attempts. Used to absorb the brief window after a
-// template-generated repo is created during which the contents API can't yet
-// find its branch.
+// reads agree on a non-empty commit SHA, or returns after 20 attempts.
 func waitForStableBranch(client *api.RESTClient, owner, repo, branch string) error {
 	path := fmt.Sprintf(
 		"repos/%s/%s/branches/%s",
@@ -138,16 +118,14 @@ func waitForStableBranch(client *api.RESTClient, owner, repo, branch string) err
 		}
 
 		if err := client.Get(path, &resp); err != nil {
-			// Transient error breaks the consecutive-reads chain — drop the
-			// baseline so we require a fresh pair of successful reads.
+			// transient error; drop the baseline.
 			lastSHA = ""
 			time.Sleep(time.Duration(250*(i+1)) * time.Millisecond)
 			continue
 		}
 
 		if resp.Commit.SHA == "" {
-			// Branch reachable but no commit reported; treat like a transient
-			// error and drop the baseline.
+			// no commit reported yet; drop the baseline.
 			lastSHA = ""
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -163,9 +141,7 @@ func waitForStableBranch(client *api.RESTClient, owner, repo, branch string) err
 	return fmt.Errorf("branch %s/%s:%s did not stabilize", owner, repo, branch)
 }
 
-// escapeContentPath URL-encodes each segment of a contents-API path
-// individually, preserving the slashes between segments. Shared with
-// submit.go's fetchRepoPath.
+// escapeContentPath URL-encodes each path segment, preserving slashes.
 func escapeContentPath(path string) string {
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
@@ -174,12 +150,8 @@ func escapeContentPath(path string) string {
 	return strings.Join(parts, "/")
 }
 
-// marshalQuotedYAML serializes v as YAML with all string values rendered as
-// double-quoted scalars (keys and non-string scalars pass through unchanged)
-// and 2-space indentation. Matches the format .classroom50.yml had before
-// the helper extraction, and defends against YAML auto-typing — a future
-// assignment slug like "yes", "null", or "2026" would otherwise round-trip
-// as a boolean, null, or integer.
+// marshalQuotedYAML serializes v as YAML with double-quoted string scalars
+// and 2-space indent. Defends against auto-typing of slugs like "yes" or "2026".
 func marshalQuotedYAML(v any) ([]byte, error) {
 	var node yaml.Node
 	if err := node.Encode(v); err != nil {
@@ -200,11 +172,8 @@ func marshalQuotedYAML(v any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// quoteStringValues walks the YAML tree and forces DoubleQuotedStyle on every
-// string-tagged scalar that isn't a mapping key. Mapping keys, numbers,
-// booleans, null, and structural nodes pass through unchanged. Generic over
-// the struct shape, so adding a new field to ClassroomConfig requires no
-// update here.
+// quoteStringValues forces DoubleQuotedStyle on every string-tagged scalar
+// value in n. Mapping keys, numbers, and booleans pass through.
 func quoteStringValues(n *yaml.Node) {
 	if n == nil {
 		return
@@ -215,8 +184,7 @@ func quoteStringValues(n *yaml.Node) {
 			quoteStringValues(c)
 		}
 	case yaml.MappingNode:
-		// Content alternates [key, value, key, value, ...] — quote values,
-		// recurse into them for nested mappings/sequences, leave keys alone.
+		// Content alternates [key, value, ...]; quote values, leave keys alone.
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			quoteStringValues(n.Content[i+1])
 		}

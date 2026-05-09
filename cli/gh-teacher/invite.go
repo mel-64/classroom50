@@ -140,13 +140,9 @@ func lookupUserID(client *api.RESTClient, username string) (int64, error) {
 	return user.ID, nil
 }
 
-// classifyOrgInviteError converts a raw error from POST /orgs/{org}/invitations
-// into an actionable user-facing message for the common failure modes
-// (missing scope, not an admin, org doesn't exist, already a member, pending
-// invite). Anything we don't recognize — non-HTTP errors (network/DNS/context
-// cancellation), unrecognized HTTP statuses, or 422s with an indeterminate
-// membership state — falls through to a single wrapped error that preserves
-// both the request context and the underlying cause for debugging.
+// classifyOrgInviteError converts a POST /orgs/{org}/invitations error into a
+// user-facing message for common failure modes. Unrecognized errors fall
+// through to a single wrapped error that preserves the request context.
 func classifyOrgInviteError(client *api.RESTClient, org, username, path string, err error) error {
 	if httpErr, ok := errors.AsType[*api.HTTPError](err); ok {
 		switch httpErr.StatusCode {
@@ -154,10 +150,8 @@ func classifyOrgInviteError(client *api.RESTClient, org, username, path string, 
 			return errors.New("authentication failed; run `gh teacher auth` to refresh your token")
 
 		case http.StatusForbidden:
-			// Distinguish "missing admin:org scope" from "has scope but isn't
-			// an admin". GitHub returns the token's current scopes in
-			// X-OAuth-Scopes; if the header is absent (e.g. fine-grained PAT)
-			// we fall back to a generic message that covers both.
+			// X-OAuth-Scopes distinguishes missing-scope from not-an-admin;
+			// absent (e.g. fine-grained PAT) falls back to a generic message.
 			scopes := httpErr.Headers.Get("X-OAuth-Scopes")
 			switch {
 			case scopes == "":
@@ -172,10 +166,8 @@ func classifyOrgInviteError(client *api.RESTClient, org, username, path string, 
 			return fmt.Errorf("%s: organization not found or not accessible", org)
 
 		case http.StatusUnprocessableEntity:
-			// 422 covers "already a member", "pending invite", "spam-blocked",
-			// "invitee blocked org", etc. A follow-up GET on the membership
-			// endpoint distinguishes the two common cases precisely. Other
-			// 422 reasons fall through to the wrapped error below.
+			// follow-up GET distinguishes already-member from pending-invite;
+			// other 422s fall through to the wrapped error below.
 			if state, ok := getMembershipState(client, org, username); ok {
 				switch state {
 				case "active":
@@ -189,8 +181,7 @@ func classifyOrgInviteError(client *api.RESTClient, org, username, path string, 
 	return fmt.Errorf("POST %s: %w", path, err)
 }
 
-// hasOrgAdminScope reports whether the comma-separated scope list from the
-// X-OAuth-Scopes response header includes admin:org.
+// hasOrgAdminScope reports whether the X-OAuth-Scopes value contains admin:org.
 func hasOrgAdminScope(scopes string) bool {
 	for _, s := range strings.Split(scopes, ",") {
 		if strings.TrimSpace(s) == "admin:org" {
@@ -200,9 +191,8 @@ func hasOrgAdminScope(scopes string) bool {
 	return false
 }
 
-// getMembershipState returns the user's membership state in org ("active"
-// or "pending"), or false if the lookup itself failed. Used only on the
-// post-422 disambiguation path.
+// getMembershipState returns the user's org membership state ("active" or
+// "pending"), or false on lookup failure.
 func getMembershipState(client *api.RESTClient, org, username string) (string, bool) {
 	path := fmt.Sprintf("orgs/%s/memberships/%s", url.PathEscape(org), url.PathEscape(username))
 	var resp struct {

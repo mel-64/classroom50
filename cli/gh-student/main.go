@@ -9,11 +9,7 @@ import (
 var (
 	version = "dev"
 
-	// verbose is the project-wide --verbose / -v flag. When true, subcommands
-	// surface per-step operational details (e.g. each REST call, each
-	// intermediate file write) instead of just the final outcome and the
-	// user's next action. Off by default so the success path stays focused
-	// on what the user cares about.
+	// verbose enables per-step operational output across subcommands.
 	verbose bool
 )
 
