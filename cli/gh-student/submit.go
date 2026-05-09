@@ -65,7 +65,7 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		return fmt.Errorf("not inside a Git repository")
 	}
 
-	config, err := readClassroomConfig(filepath.Join(root, ".classroom50.yml"))
+	config, err := readClassroomConfig(filepath.Join(root, ClassroomMetadataPath))
 	if err != nil {
 		return err
 	}
@@ -347,16 +347,6 @@ func copyFilePreservingMode(src string, dst string, mode os.FileMode) error {
 	}
 
 	return nil
-}
-
-type ClassroomConfig struct {
-	ClassroomID  string `yaml:"classroom_id"`
-	AssignmentID string `yaml:"assignment_id"`
-	Source       struct {
-		Owner  string `yaml:"owner"`
-		Repo   string `yaml:"repo"`
-		Branch string `yaml:"branch"`
-	} `yaml:"source"`
 }
 
 func readClassroomConfig(path string) (*ClassroomConfig, error) {

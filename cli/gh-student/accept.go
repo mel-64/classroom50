@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/spf13/cobra"
@@ -202,9 +200,22 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 	}
 
 	// 3) create .classroom50.yml metadata file in repo
-	if err := createYamlMetadata(client, out, username, assignment, org, classroom, sourceBranch); err != nil {
+	repoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
+	cfg := ClassroomConfig{
+		ClassroomID:  classroom,
+		AssignmentID: assignment,
+		Source: ClassroomSource{
+			Owner:  org,
+			Repo:   assignment,
+			Branch: sourceBranch,
+		},
+	}
+	if err := WriteClassroomMetadata(client, org, repoName, sourceBranch, cfg); err != nil {
 		return err
 	}
+	// "wrote" instead of "created": WriteClassroomMetadata upserts via
+	// GET-for-SHA → PUT, so re-runs update an existing file in place.
+	_, _ = fmt.Fprintf(out, "wrote %s in %s/%s\n", ClassroomMetadataPath, org, repoName)
 
 	// 4) tell the user how to clone their new repo (and warn them off if they're
 	//    currently inside a git repo, to avoid accidental nesting)
@@ -355,141 +366,6 @@ func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assig
 	_, _ = fmt.Fprintf(out, "invited %s to %s/%s with maintain permission\n", username, org, fullRepoName)
 
 	return nil
-}
-
-func escapeContentPath(path string) string {
-	parts := strings.Split(path, "/")
-	for i, part := range parts {
-		parts[i] = url.PathEscape(part)
-	}
-	return strings.Join(parts, "/")
-}
-func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignment, org, classroom, sourceBranch string) error {
-	path := ".classroom50.yml"
-	repoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
-
-	yamlContent := fmt.Sprintf(
-		"classroom_id: %q\n"+
-			"assignment_id: %q\n"+
-			"source:\n"+
-			"  owner: %q\n"+
-			"  repo: %q\n"+
-			"  branch: %q\n",
-		classroom,
-		assignment,
-		org,
-		assignment,
-		sourceBranch,
-	)
-
-	encodedContent := base64.StdEncoding.EncodeToString([]byte(yamlContent))
-
-	apiPath := fmt.Sprintf(
-		"repos/%s/%s/contents/%s",
-		url.PathEscape(org),
-		url.PathEscape(repoName),
-		escapeContentPath(path),
-	)
-
-	// Wait for the just-created repo's default branch to become reachable BEFORE
-	// asking about an existing file: a freshly-generated repo briefly returns
-	// 409 "Git Repository is empty" from the contents API while replication
-	// completes, and that 409 is indistinguishable from a real conflict.
-	if err := waitForStableBranch(client, org, repoName, sourceBranch); err != nil {
-		return err
-	}
-
-	var existing struct {
-		SHA string `json:"sha"`
-	}
-
-	getPath := fmt.Sprintf("%s?ref=%s", apiPath, url.QueryEscape(sourceBranch))
-	err := client.Get(getPath, &existing)
-	if err != nil {
-		// 404 means the file doesn't exist yet (the typical fresh-repo case).
-		// 409 means the repo is still empty/replicating; treat as "no existing
-		// file" and let the PUT below create it. Anything else is a real error.
-		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok {
-			if httpErr.StatusCode != http.StatusNotFound && httpErr.StatusCode != http.StatusConflict {
-				return fmt.Errorf("GET %s: %w", getPath, httpErr)
-			}
-		} else {
-			return fmt.Errorf("GET %s: %w", getPath, err)
-		}
-	}
-
-	body := map[string]any{
-		"message": fmt.Sprintf("create or update %s", path),
-		"content": encodedContent,
-		"branch":  sourceBranch,
-	}
-
-	if err == nil && existing.SHA != "" {
-		body["sha"] = existing.SHA
-	}
-
-	requestBody, marshalErr := json.Marshal(body)
-	if marshalErr != nil {
-		return fmt.Errorf("encode upsert %s request: %w", path, marshalErr)
-	}
-
-	var putResp struct {
-		Content struct {
-			Path string `json:"path"`
-			SHA  string `json:"sha"`
-		} `json:"content"`
-		Commit struct {
-			SHA string `json:"sha"`
-		} `json:"commit"`
-	}
-
-	if err := client.Put(apiPath, bytes.NewReader(requestBody), &putResp); err != nil {
-		return fmt.Errorf("PUT %s: %w", apiPath, err)
-	}
-
-	_, _ = fmt.Fprintf(out, "created %s in %s/%s\n", path, org, repoName)
-
-	return nil
-}
-
-func waitForStableBranch(client *api.RESTClient, org, repo, branch string) error {
-	path := fmt.Sprintf(
-		"repos/%s/%s/branches/%s",
-		url.PathEscape(org),
-		url.PathEscape(repo),
-		url.PathEscape(branch),
-	)
-
-	var lastSHA string
-	stableCount := 0
-
-	for i := range 20 {
-		var resp struct {
-			Name   string `json:"name"`
-			Commit struct {
-				SHA string `json:"sha"`
-			} `json:"commit"`
-		}
-
-		if err := client.Get(path, &resp); err != nil {
-			time.Sleep(time.Duration(250*(i+1)) * time.Millisecond)
-			continue
-		}
-
-		if resp.Commit.SHA != "" && resp.Commit.SHA == lastSHA {
-			stableCount++
-			if stableCount >= 2 {
-				return nil
-			}
-		} else {
-			lastSHA = resp.Commit.SHA
-			stableCount = 0
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return fmt.Errorf("branch %s/%s:%s did not stabilize", org, repo, branch)
 }
 
 func currentGitRoot() (string, bool, error) {
