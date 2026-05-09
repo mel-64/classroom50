@@ -40,19 +40,14 @@ Uses the API to create a repo from a template repo for the student called `{user
 gh student accept {org}/{classroom}/{assignment}
 ```
 
-1. If the student hasn't already accepted an invitation to the org itself, automatically accept that invitation first.
-    * There doesn't seem to be a way to do this, so the student might first have to visit `https://github.com/{org}`?
-1. Create a private repo called `{username}-{assignment}`, **canonicalized as lowercase**, in `{org}` using the assignment's repo template, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template>. Disable issues, projects, and wiki by default.
-1. Invite `{username}` to the repo with `maintain` permission, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>.
-1. Downgrade `{username}`'s permission from `admin` (default) to `maintain`, just for good measure, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>.
-    * There doesn't seem to be a way to modify an existing permission, but perhaps re-adding the same user with a lower permission will achieve such?
-1. Create a `.classroom50.yml` file in the student's repo on the `main` branch containing requisite metadata as key-value pairs, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#create-or-update-file-contents>:
+1. If the student has a pending org invitation, auto-accept it via `PATCH /user/memberships/orgs/{org}` with `{"state": "active"}`, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#update-an-organization-membership-for-the-authenticated-user>.
+1. Create a private repo called `{username}-{assignment}`, **canonicalized as lowercase**, in `{org}` using the assignment's repo template, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template>. Disable issues, projects, and wiki by default. If the repo already exists (HTTP 422 already-exists), short-circuit with an `Assignment already accepted` message rather than touching the existing repo.
+1. Add `{username}` as a `maintain` collaborator on the new repo via `PUT /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. The PUT is upsert: a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
+1. Create a `.classroom50.yml` file in the student's repo on the template's default branch containing requisite metadata as key-value pairs, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#create-or-update-file-contents>:
     * classroom ID
     * assignment ID
-    * Owner/Repo/Branch from which the repo was created.
-1. Use `git` to clone the newly created repo.
-    * Or just show the student the `git clone` command that they can now run.
-    * And/or check if the student is already inside a git repo, in which case they should be encouraged/required to clone the repo higher up in the file system, to avoid a repo in a repo.
+    * Owner/Repo/Branch from which the repo was created (the template repo's default branch is looked up at accept time so master/develop templates round-trip correctly).
+1. Tell the student how to clone the new repo, with a warning if they're currently inside a git repo (to avoid an accidental nested clone).
 
 ### Invite classmate (or TA) to a repo ([gh-student/](gh-student/), [gh-teacher/](gh-teacher/))
 
@@ -96,10 +91,11 @@ Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a ful
 ### Download students' submissions ([gh-teacher/](gh-teacher/))
 
 ```
-gh teacher download {org} {assignment}              # clones into {org}_submissions/
-gh teacher download -d {dir} {org} {assignment}     # clones into {dir}/
+gh teacher download {org} {assignment}              # clones into {org}_submissions_<timestamp>/
+gh teacher download -d {dir} {org} {assignment}     # clones into {dir}/ (literal, no timestamp)
+gh teacher download -v {org} {assignment}           # streams raw git output per repo
 ```
 
-1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name ends in `-{assignment}` (the `gh student accept` convention of `{username}-{assignment}`).
-1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{org}_submissions` so the cwd stays clean and one teacher can pull multiple orgs' submissions side-by-side; pass `-d` to override. Pass `--quiet` to git when the user passes `-q`.
-1. Skip targets that already exist on disk so re-runs pick up new submissions without aborting on the ones already cloned. Failures are reported per-repo on stderr; a non-zero exit code surfaces if any clone failed, after the rest still run.
+1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name ends in `-{assignment}` (the `gh student accept` convention of `{username}-{assignment}`). The `{assignment}` argument is lowercased before matching so teachers can pass any case; the suffix match itself is exact against the lowercase names that `gh student accept` creates.
+1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{org}_submissions_YYYY_MM_DD_T_HH_MM_SS` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup; pass `-d` to override (the value is taken literally, no timestamp appended). Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+1. Skip targets that already exist on disk so re-runs with `-d` pick up new submissions without aborting on the ones already cloned. Failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code, and a non-zero exit code surfaces if any clone failed after the rest still run.
