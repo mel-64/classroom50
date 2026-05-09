@@ -13,6 +13,96 @@ See the [GitHub CLI extensions docs](https://docs.github.com/en/github-cli/githu
 - [gh-teacher/](gh-teacher/) — instructor-facing extension.
 - [gh-student/](gh-student/) — student-facing extension.
 
+## Quick tutorial
+
+The full lifecycle, end-to-end. Each step assumes the previous ones are done.
+
+### 1. Install (from this repo)
+
+You'll need [Go](https://go.dev/doc/install), the [GitHub CLI (`gh`)](https://cli.github.com/), and an authenticated `gh` session (run `gh auth login` first if you haven't already). The extensions themselves aren't published yet, so install them from a local checkout:
+
+```
+git clone https://github.com/foundation50/classroom50-prototype
+cd classroom50-prototype
+
+# teacher extension
+(cd cli/gh-teacher && go build . && gh extension install .)
+
+# student extension
+(cd cli/gh-student && go build . && gh extension install .)
+```
+
+`gh teacher` and `gh student` are now available in your shell. Re-run `go build .` after pulling code changes; `gh extension install .` only needs to run once per extension.
+
+### 2. Teacher: set up the organization (manual, on github.com)
+
+The CLI doesn't create or configure orgs. Do these once, on github.com:
+
+1. **Create the organization** at <https://github.com/account/organizations/new>.
+2. **Set the org's base permission to "No permission"** at `https://github.com/organizations/{org}/settings/member_privileges` so students don't get implicit access to other repos in the org.
+3. **Create a template assignment repo.** Any repo you flag as a template (in the repo's Settings, tick "Template repository") works. **The template must be public** so students can read it: the "No permission" baseline from the previous step blocks org members from reading private repos they aren't explicit collaborators on, and a private template would 404 on `gh student accept`. The Free and Team plans don't have a way around this. (GitHub Enterprise Cloud has a third visibility called "internal" that all enterprise members can read without per-repo collaboration; on that plan an internal template works without going public. See [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).) See [`templates/example-assignment/`](../templates/example-assignment/) in this repo for the expected file structure (`.gitignore`, `.github/`, starter code, README); copy that layout into your own template repo.
+
+### 3. Teacher: refresh your gh token
+
+Org invitations require the `admin:org` OAuth scope, which `gh auth login` doesn't grant by default. Run once:
+
+```
+gh teacher auth
+```
+
+This shells out to `gh auth refresh -s admin:org` and opens a browser to authorize.
+
+### 4. Teacher: invite students to the org
+
+For each student:
+
+```
+gh teacher invite {org} {username}
+```
+
+The student gets an email invitation. They can accept it by visiting `https://github.com/{org}`, or just skip ahead to step 5: `gh student accept` auto-accepts any pending org invite for the authenticated user before creating the assignment repo. Common API failures (missing scope, not an admin, org not found, already a member, pending invite) surface as actionable messages instead of raw HTTP errors.
+
+### 5. Student: accept an assignment
+
+```
+gh student accept {org}/{classroom}/{assignment}
+```
+
+This creates a private copy of the template at `{org}/{username}-{assignment}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
+
+`{classroom}` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom_id`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
+
+### 6. Student: submit
+
+From inside the cloned repo:
+
+```
+gh student submit
+```
+
+This snapshots the current branch, fetches the latest instructor `.gitignore` and `.github/` from the template (both are required), and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
+
+### 7. Teacher: download submissions
+
+To pull every student's latest submission for an assignment:
+
+```
+gh teacher download {org} {assignment}
+```
+
+Each run produces a fresh timestamped folder (`{org}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
+
+### Debugging
+
+Pass `--verbose` / `-v` to any teacher or student command to see per-step operational details (each REST call, raw `git` output during clone, etc.):
+
+```
+gh student submit -v
+gh teacher download -v {org} {assignment}
+```
+
+For raw REST request/response logging, set `GH_DEBUG=api` in the environment; this is honored by the underlying [`go-gh`](https://github.com/cli/go-gh) library.
+
 ## Command spec
 
 The behavior below is the design target for both extensions. Implementation status lives in each subfolder's README.
@@ -77,14 +167,16 @@ gh teacher remove {org}/{repo} {username}    # remove from repository
 
 ### Submit an assignment ([gh-student/](gh-student/))
 
-Uses git to add, commit, and push the contents of the current branch to remote, after fetching the parent repo's latest `.gitignore` and `.github`.
+Snapshots the current working tree and force-pushes it to the assignment repo's `main` branch (hardcoded for now; templates whose default branch is `master`/`develop` will end up with a separate `main` after submit). Fetches the latest instructor `.gitignore` and `.github/` from the template recorded in `.classroom50.yml` first.
 
 ```
 gh student submit
 ```
 
-1. Use `git` or `curl` to get the latest contents of the teacher's `.gitignore` file and `.github` directory.
-1. Use `git add -A && git commit --allow-empty --message && git push` or, to avoid merge conflicts like `submit50`, use, e.g., `git clone --bare hello /tmp && git symbolic-ref HEAD refs/heads/main && git add --all && git commit --allow-empty --message && git push origin refs/heads/main`.
+1. Read `.classroom50.yml` from the local clone for `source.owner`, `source.repo`, and `source.branch`.
+1. Copy tracked + untracked-not-ignored files from the working tree into a temp directory so the submission isn't polluted by build artifacts or unrelated state.
+1. Fetch the latest instructor `.gitignore` and `.github/` from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>. Both are required template artifacts; a 404 on either signals a misconfigured template (or a tampered `.classroom50.yml`) and fails the submit so the teacher can fix it rather than silently submitting without instructor files.
+1. `git init` the temp directory, commit the snapshot, and force-push to the student's assignment repo. The snapshot semantics deliberately replace the remote branch with a fresh commit each time so submissions stay conflict-free.
 
 Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a full-diff tagged commit (on which the teacher can comment) and to create a release for that tag, with Markdown linking to autograding results (when ready).
 
