@@ -360,10 +360,10 @@ func readClassroomConfig(path string) (*ClassroomConfig, error) {
 	}
 
 	if config.ClassroomID == "" {
-		return nil, fmt.Errorf("missing classroom_id in %s", path)
+		return nil, fmt.Errorf("missing classroom in %s", path)
 	}
 	if config.AssignmentID == "" {
-		return nil, fmt.Errorf("missing assignment_id in %s", path)
+		return nil, fmt.Errorf("missing assignment in %s", path)
 	}
 	if config.Source.Owner == "" || config.Source.Repo == "" || config.Source.Branch == "" {
 		return nil, fmt.Errorf("missing source.owner/source.repo/source.branch: %s", path)

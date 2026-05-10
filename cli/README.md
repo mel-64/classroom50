@@ -72,7 +72,7 @@ gh student accept {org}/{classroom}/{assignment}
 
 This creates a private copy of the template at `{org}/{username}-{assignment}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
 
-`{classroom}` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom_id`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
+`{classroom}` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
 
 ### 6. Student: submit
 

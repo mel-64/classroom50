@@ -21,8 +21,8 @@ const ClassroomMetadataPath = ".classroom50.yml"
 // ClassroomConfig is the on-disk shape of .classroom50.yml. Add a new
 // yaml-tagged field here and it round-trips through both writer and reader.
 type ClassroomConfig struct {
-	ClassroomID  string          `yaml:"classroom_id"`
-	AssignmentID string          `yaml:"assignment_id"`
+	ClassroomID  string          `yaml:"classroom"`
+	AssignmentID string          `yaml:"assignment"`
 	Source       ClassroomSource `yaml:"source"`
 }
 
