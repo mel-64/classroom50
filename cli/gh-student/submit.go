@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -104,10 +105,10 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		)
 	}
 
-	// .gitignore and .github/ are required template artifacts; a 404 means
-	// a misconfigured template, so fail loudly.
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
-		return fmt.Errorf("fetch instructor .gitignore: %w", err)
+		if httpErr, ok := errors.AsType[*api.HTTPError](err); !ok || httpErr.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("fetch instructor .gitignore: %w", err)
+		}
 	}
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".github"); err != nil {
 		return fmt.Errorf("fetch instructor .github: %w", err)

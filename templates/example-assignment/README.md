@@ -9,8 +9,8 @@ copies).
 ## Files
 
 - [`hello.c`](hello.c): starter code; replace the TODO with code that prints `hello, world` and a newline.
-- [`.gitignore`](.gitignore): required template artifact. `gh student submit` re-fetches this from the template at submit time.
-- [`.github/`](.github/): required template artifact; reusable GitHub Actions workflows live here. `gh student submit` re-fetches this directory at submit time so any autograding the teacher updates flows back to existing student repos.
+- [`.gitignore`](.gitignore): optional template artifact. If present, `gh student submit` re-fetches this from the template at submit time.
+- [`.github/`](.github/): reusable GitHub Actions workflows live here. `gh student submit` re-fetches this directory at submit time so any autograding the teacher updates flows back to existing student repos.
 - This README: student-facing description of the assignment.
 
 ## Using it

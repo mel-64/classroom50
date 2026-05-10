@@ -40,7 +40,7 @@ The CLI doesn't create or configure orgs. Do these once, on github.com:
 
 1. **Create the organization** at <https://github.com/account/organizations/new>.
 2. **Set the org's base permission to "No permission"** at `https://github.com/organizations/{org}/settings/member_privileges` so students don't get implicit access to other repos in the org.
-3. **Create a template assignment repo.** Any repo you flag as a template (in the repo's Settings, tick "Template repository") works. **The template must be public** so students can read it: the "No permission" baseline from the previous step blocks org members from reading private repos they aren't explicit collaborators on, and a private template would 404 on `gh student accept`. The Free and Team plans don't have a way around this. (GitHub Enterprise Cloud has a third visibility called "internal" that all enterprise members can read without per-repo collaboration; on that plan an internal template works without going public. See [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).) See [`templates/example-assignment/`](../templates/example-assignment/) in this repo for the expected file structure (`.gitignore`, `.github/`, starter code, README); copy that layout into your own template repo.
+3. **Create a template assignment repo.** Any repo you flag as a template (in the repo's Settings, tick "Template repository") works. **The template must be public** so students can read it: the "No permission" baseline from the previous step blocks org members from reading private repos they aren't explicit collaborators on, and a private template would 404 on `gh student accept`. The Free and Team plans don't have a way around this. (GitHub Enterprise Cloud has a third visibility called "internal" that all enterprise members can read without per-repo collaboration; on that plan an internal template works without going public. See [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).) See [`templates/example-assignment/`](../templates/example-assignment/) in this repo for the expected file structure (`.github/`, starter code, README, and optional `.gitignore`); copy that layout into your own template repo.
 
 ### 3. Teacher: log in with the right scopes
 
@@ -82,7 +82,7 @@ From inside the cloned repo:
 gh student submit
 ```
 
-This snapshots the current branch, fetches the latest instructor `.gitignore` and `.github/` from the template (both are required), and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
+This snapshots the current branch, fetches the latest instructor `.gitignore` (if present) and `.github/` from the template, and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
 
 ### 7. Teacher: download submissions
 
@@ -177,7 +177,7 @@ gh student submit
 
 1. Read `.classroom50.yml` from the local clone for `source.owner`, `source.repo`, and `source.branch`.
 1. Copy tracked + untracked-not-ignored files from the working tree into a temp directory so the submission isn't polluted by build artifacts or unrelated state.
-1. Fetch the latest instructor `.gitignore` and `.github/` from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>. Both are required template artifacts; a 404 on either signals a misconfigured template (or a tampered `.classroom50.yml`) and fails the submit so the teacher can fix it rather than silently submitting without instructor files.
+1. Fetch the latest instructor `.gitignore` (if present) and `.github/` from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>.
 1. `git init` the temp directory, commit the snapshot, and force-push to the student's assignment repo. The snapshot semantics deliberately replace the remote branch with a fresh commit each time so submissions stay conflict-free.
 
 Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a full-diff tagged commit (on which the teacher can comment) and to create a release for that tag, with Markdown linking to autograding results (when ready).
