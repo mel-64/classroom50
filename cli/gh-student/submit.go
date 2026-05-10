@@ -81,19 +81,28 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 	}
 	remoteURL = strings.TrimSpace(remoteURL)
 
-	tmp, err := os.MkdirTemp("", "classroom50-submit-*")
+	tmpRoot, err := os.MkdirTemp("", "classroom50-submit-*")
 	if err != nil {
-		return fmt.Errorf("create temp submit repo: %w", err)
+		return fmt.Errorf("create temp submit area: %w", err)
 	}
 	defer func() {
-		_ = os.RemoveAll(tmp)
+		if err := os.RemoveAll(tmpRoot); err != nil {
+			_, _ = fmt.Fprintf(errOut, "warning: remove temp submit area %s: %v\n", tmpRoot, err)
+		}
 	}()
+
+	workTree := filepath.Join(tmpRoot, "worktree")
+	gitDir := filepath.Join(tmpRoot, "submission.git")
+
+	if err := os.MkdirAll(workTree, 0o755); err != nil {
+		return fmt.Errorf("create temporary submission worktree: %w", err)
+	}
 
 	if verbose {
 		_, _ = fmt.Fprintf(out, "Preparing submission snapshot from %s\n", root)
 	}
 
-	if err := copySubmittableFiles(root, tmp); err != nil {
+	if err := copySubmittableFiles(root, workTree); err != nil {
 		return err
 	}
 
@@ -105,12 +114,12 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		)
 	}
 
-	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
+	if err := fetchRepoPath(client, workTree, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
 		if !isNotFoundHTTPError(err) {
 			return fmt.Errorf("fetch instructor .gitignore: %w", err)
 		}
 	}
-	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".github"); err != nil {
+	if err := fetchRepoPath(client, workTree, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".github"); err != nil {
 		if !isNotFoundHTTPError(err) {
 			return fmt.Errorf("fetch instructor .github: %w", err)
 		}
@@ -120,7 +129,15 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		_, _ = fmt.Fprintf(out, "Pushing submission to %s %s\n", opts.Remote, opts.Branch)
 	}
 
-	if err := pushSnapshot(tmp, remoteURL, opts.Branch, opts.Message, out, errOut); err != nil {
+	if err := commitWorkTreeOnRemoteBranch(
+		gitDir,
+		workTree,
+		remoteURL,
+		opts.Branch,
+		opts.Message,
+		out,
+		errOut,
+	); err != nil {
 		return err
 	}
 
@@ -239,49 +256,69 @@ func fetchRepoPath(
 	}
 }
 
-func pushSnapshot(tmp string, remoteURL string, branch string, message string, out io.Writer, errOut io.Writer) error {
-	if err := runGit(tmp, out, errOut, "init"); err != nil {
-		return err
+func commitWorkTreeOnRemoteBranch(gitDir string, workTree string, remoteURL string, branch string, message string, out io.Writer, errOut io.Writer) error {
+	if err := runCmd(out, errOut, "", "git", "clone", "--bare", remoteURL, gitDir); err != nil {
+		return fmt.Errorf("clone remote history: %w", err)
 	}
 
-	if err := runGit(tmp, out, errOut, "checkout", "-B", branch); err != nil {
-		return err
+	git := func(args ...string) error {
+		return runGitWithDirAndTree(gitDir, workTree, out, errOut, args...)
 	}
 
-	if err := runGit(tmp, out, errOut, "add", "-A"); err != nil {
-		return err
+	ref := "refs/heads/" + branch
+
+	if err := git("symbolic-ref", "HEAD", ref); err != nil {
+		return fmt.Errorf("set HEAD to %s: %w", ref, err)
 	}
 
-	if err := runGit(tmp, out, errOut, "commit", "--allow-empty", "-m", message); err != nil {
-		return err
+	if err := git("add", "--all"); err != nil {
+		return fmt.Errorf("stage work tree: %w", err)
 	}
 
-	if err := runGit(tmp, out, errOut, "remote", "add", "origin", remoteURL); err != nil {
-		return err
+	if err := git("commit", "--allow-empty", "-m", message); err != nil {
+		return fmt.Errorf("commit submission: %w", err)
 	}
 
-	// fetch is best-effort; log so --force-with-lease's degraded behavior is visible.
-	if err := runGit(tmp, out, errOut, "fetch", "origin", branch+":refs/remotes/origin/"+branch); err != nil {
-		_, _ = fmt.Fprintf(errOut, "fetch origin %s failed; pushing without remote-tracking ref: %v\n", branch, err)
-	}
-
-	if err := runGit(tmp, out, errOut, "push", "--force-with-lease", "origin", "HEAD:refs/heads/"+branch); err != nil {
-		return fmt.Errorf("push submission snapshot: %w", err)
+	if err := git("push", "origin", "HEAD:"+ref); err != nil {
+		return fmt.Errorf("push submission: %w", err)
 	}
 
 	return nil
 }
 
-func runGit(dir string, out io.Writer, errOut io.Writer, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+func runGitWithDirAndTree(
+	gitDir string,
+	workTree string,
+	out io.Writer,
+	errOut io.Writer,
+	args ...string,
+) error {
+	fullArgs := append([]string{
+		"--git-dir", gitDir,
+		"--work-tree", workTree,
+	}, args...)
+
+	cmd := exec.Command("git", fullArgs...)
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	// no stdin + GIT_TERMINAL_PROMPT=0: fail fast on auth prompt instead of hanging.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
+		return fmt.Errorf("git %v: %w", fullArgs, err)
+	}
+
+	return nil
+}
+
+func runCmd(out io.Writer, errOut io.Writer, dir string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Stdout = out
+	cmd.Stderr = errOut
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %v: %w", name, args, err)
 	}
 
 	return nil
