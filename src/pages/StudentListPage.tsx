@@ -32,15 +32,15 @@ const StudentListPage = () => {
             <div className="flex p-6 text-lg text-white font-bold border-b-1 border-[#444]">
               <GraduationCap className="size-8 text-[#accefb] mr-2" /> Teacher
             </div>
-            <div className="py-4 text-xs">
+            <div className="py-4 text-sm">
               <Link to='/classes' className="text-center">‹ All Classes</Link>
             </div>
             <div className="py-2">
-              <h3>AP CS Principles</h3>
-              <p>Spring 2026</p>
+              <h3 className="font-bold">AP CS Principles</h3>
+              <p className="text-gray-500 text-sm">Spring 2026</p>
             </div>
             <div className="py-4">
-              <ul>
+              <ul className="[&>li]:py-2 [&>li>span]:pl-2">
                 <li className="flex">
                   <BookText />
                   <span>Assignments</span>
