@@ -9,17 +9,12 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as Student_listRouteImport } from './routes/student_list'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as AssignmentsRouteImport } from './routes/assignments'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OrgClassroomStudentsIndexRouteImport } from './routes/$org/$classroom/students/index'
 
-const Student_listRoute = Student_listRouteImport.update({
-  id: '/student_list',
-  path: '/student_list',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -40,20 +35,26 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrgClassroomStudentsIndexRoute =
+  OrgClassroomStudentsIndexRouteImport.update({
+    id: '/$org/$classroom/students/',
+    path: '/$org/$classroom/students/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
-  '/student_list': typeof Student_listRoute
+  '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
-  '/student_list': typeof Student_listRoute
+  '/$org/$classroom/students': typeof OrgClassroomStudentsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,20 +62,25 @@ export interface FileRoutesById {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
-  '/student_list': typeof Student_listRoute
+  '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/assignments' | '/classes' | '/login' | '/student_list'
+  fullPaths:
+    | '/'
+    | '/assignments'
+    | '/classes'
+    | '/login'
+    | '/$org/$classroom/students/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/assignments' | '/classes' | '/login' | '/student_list'
+  to: '/' | '/assignments' | '/classes' | '/login' | '/$org/$classroom/students'
   id:
     | '__root__'
     | '/'
     | '/assignments'
     | '/classes'
     | '/login'
-    | '/student_list'
+    | '/$org/$classroom/students/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -82,18 +88,11 @@ export interface RootRouteChildren {
   AssignmentsRoute: typeof AssignmentsRoute
   ClassesRoute: typeof ClassesRoute
   LoginRoute: typeof LoginRoute
-  Student_listRoute: typeof Student_listRoute
+  OrgClassroomStudentsIndexRoute: typeof OrgClassroomStudentsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/student_list': {
-      id: '/student_list'
-      path: '/student_list'
-      fullPath: '/student_list'
-      preLoaderRoute: typeof Student_listRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -122,6 +121,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$org/$classroom/students/': {
+      id: '/$org/$classroom/students/'
+      path: '/$org/$classroom/students'
+      fullPath: '/$org/$classroom/students/'
+      preLoaderRoute: typeof OrgClassroomStudentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -130,7 +136,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssignmentsRoute: AssignmentsRoute,
   ClassesRoute: ClassesRoute,
   LoginRoute: LoginRoute,
-  Student_listRoute: Student_listRoute,
+  OrgClassroomStudentsIndexRoute: OrgClassroomStudentsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
