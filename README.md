@@ -1,4 +1,4 @@
-# classroom50-prototype
+# classroom50-dev
 
 Prototype monorepo. Work in progress.
 

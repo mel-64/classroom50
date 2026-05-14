@@ -22,8 +22,8 @@ The full lifecycle, end-to-end. Each step assumes the previous ones are done.
 You'll need [Go](https://go.dev/doc/install) and the [GitHub CLI (`gh`)](https://cli.github.com/). The auth steps below (`gh teacher login` / `gh student login`) handle GitHub authentication, so you don't need to run `gh auth login` separately first. The extensions themselves aren't published yet, so install them from a local checkout:
 
 ```
-git clone https://github.com/foundation50/classroom50-prototype
-cd classroom50-prototype
+git clone https://github.com/foundation50/classroom50-dev
+cd classroom50-dev
 
 # teacher extension
 (cd cli/gh-teacher && go build . && gh extension install .)

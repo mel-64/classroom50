@@ -1,7 +1,7 @@
 # Example assignment: hello
 
 A minimal starter repo showing the file structure that
-`classroom50-prototype` expects from an assignment template
+`classroom50-dev` expects from an assignment template
 (`gh student accept` clones from a template, `gh student submit`
 fetches files back from it, `gh teacher download` collects student
 copies).
