@@ -6,9 +6,7 @@ const Drawer = ({ children }) => <div className="drawer lg:drawer-open">{childre
 export const DrawerContent = ({ children, className }) => <div className={`${className} drawer-content`}>{children}</div>
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
-export const DrawerSidebar = ({ props, children }) => {
-  const { highlighted } = props
-
+export const DrawerSidebar = ({ selected, children }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
@@ -25,13 +23,13 @@ export const DrawerSidebar = ({ props, children }) => {
         <div className="py-4">
           <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
             <Link to='/cs50/cs50-2026/assignments'>
-              <li className="flex">
+              <li className={`flex ${selected === 'assignments' && 'bg-[#323b49]'}`}>
                 <BookText />
                 <span>Assignments</span>
               </li>
             </Link>
             <Link to='/cs50/cs50-2026/students'>
-              <li className="flex bg-[#323b49]">
+              <li className={`flex ${selected === 'students' && 'bg-[#323b49]'}`}>
                 <UsersRound />
                 <span>Students</span>
               </li>

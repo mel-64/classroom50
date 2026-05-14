@@ -15,6 +15,7 @@ import { Route as AssignmentsRouteImport } from './routes/assignments'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgClassroomStudentsIndexRouteImport } from './routes/$org/$classroom/students/index'
 import { Route as OrgClassroomAssignmentsIndexRouteImport } from './routes/$org/$classroom/assignments/index'
+import { Route as OrgClassroomAssignmentsNewIndexRouteImport } from './routes/$org/$classroom/assignments/new/index'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -48,6 +49,12 @@ const OrgClassroomAssignmentsIndexRoute =
     path: '/$org/$classroom/assignments/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const OrgClassroomAssignmentsNewIndexRoute =
+  OrgClassroomAssignmentsNewIndexRouteImport.update({
+    id: '/$org/$classroom/assignments/new/',
+    path: '/$org/$classroom/assignments/new/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -56,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
+  '/$org/$classroom/assignments/new/': typeof OrgClassroomAssignmentsNewIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -64,6 +72,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/$org/$classroom/assignments': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students': typeof OrgClassroomStudentsIndexRoute
+  '/$org/$classroom/assignments/new': typeof OrgClassroomAssignmentsNewIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -73,6 +82,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
+  '/$org/$classroom/assignments/new/': typeof OrgClassroomAssignmentsNewIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -83,6 +93,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
+    | '/$org/$classroom/assignments/new/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -91,6 +102,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org/$classroom/assignments'
     | '/$org/$classroom/students'
+    | '/$org/$classroom/assignments/new'
   id:
     | '__root__'
     | '/'
@@ -99,6 +111,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
+    | '/$org/$classroom/assignments/new/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -108,6 +121,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   OrgClassroomAssignmentsIndexRoute: typeof OrgClassroomAssignmentsIndexRoute
   OrgClassroomStudentsIndexRoute: typeof OrgClassroomStudentsIndexRoute
+  OrgClassroomAssignmentsNewIndexRoute: typeof OrgClassroomAssignmentsNewIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -154,6 +168,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgClassroomAssignmentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$org/$classroom/assignments/new/': {
+      id: '/$org/$classroom/assignments/new/'
+      path: '/$org/$classroom/assignments/new'
+      fullPath: '/$org/$classroom/assignments/new/'
+      preLoaderRoute: typeof OrgClassroomAssignmentsNewIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -164,6 +185,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OrgClassroomAssignmentsIndexRoute: OrgClassroomAssignmentsIndexRoute,
   OrgClassroomStudentsIndexRoute: OrgClassroomStudentsIndexRoute,
+  OrgClassroomAssignmentsNewIndexRoute: OrgClassroomAssignmentsNewIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
