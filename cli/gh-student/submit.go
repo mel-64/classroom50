@@ -79,6 +79,12 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		opts.Message = fmt.Sprintf("Submit %s", config.Assignment)
 	}
 
+	// Stamp the commit so a fresh shell with no global git identity still submits.
+	identity, err := fetchGitIdentity(client)
+	if err != nil {
+		return fmt.Errorf("resolve git identity: %w", err)
+	}
+
 	remoteURL, err := gitOutput(root, "config", "--get", "remote."+opts.Remote+".url")
 	if err != nil {
 		return fmt.Errorf("read remote %q URL: %w", opts.Remote, err)
@@ -139,6 +145,7 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		remoteURL,
 		opts.Branch,
 		opts.Message,
+		identity,
 		out,
 		errOut,
 	); err != nil {
@@ -260,7 +267,7 @@ func fetchRepoPath(
 	}
 }
 
-func commitWorkTreeOnRemoteBranch(gitDir string, workTree string, remoteURL string, branch string, message string, out io.Writer, errOut io.Writer) error {
+func commitWorkTreeOnRemoteBranch(gitDir string, workTree string, remoteURL string, branch string, message string, identity gitIdentity, out io.Writer, errOut io.Writer) error {
 	if err := runCmd(out, errOut, "", "git", "clone", "--bare", remoteURL, gitDir); err != nil {
 		return fmt.Errorf("clone remote history: %w", err)
 	}
@@ -279,7 +286,12 @@ func commitWorkTreeOnRemoteBranch(gitDir string, workTree string, remoteURL stri
 		return fmt.Errorf("stage work tree: %w", err)
 	}
 
-	if err := git("commit", "--allow-empty", "-m", message); err != nil {
+	// `-c` scopes identity to this commit; env vars (GIT_AUTHOR_*, GIT_COMMITTER_*) still win.
+	if err := git(
+		"-c", "user.name="+identity.Name,
+		"-c", "user.email="+identity.Email,
+		"commit", "--allow-empty", "-m", message,
+	); err != nil {
 		return fmt.Errorf("commit submission: %w", err)
 	}
 
