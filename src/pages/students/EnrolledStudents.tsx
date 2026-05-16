@@ -1,4 +1,6 @@
 import { GraduationCap, BookText, Trash, UsersRound, UserRound, HardDriveUpload } from 'lucide-react'
+
+import Avatar from '@/components/avatar'
 import GitHub from '@/assets/github.svg?react'
 
 const students = [
@@ -27,28 +29,16 @@ const EnrolledStudents = () => (
     </div>
 
     <ul className="divide-y divide-base-300">
-      {students.map((student) => (
+      {students.map(({ name, github, initials }) => (
         <li
-          key={student.github}
+          key={github}
           className="flex items-center gap-4 px-6 py-4"
         >
-          <div className="avatar avatar-placeholder">
-            <div className="bg-base-200 text-primary rounded-full w-12">
-              <span>{student.initials}</span>
-            </div>
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-base-content">
-              {student.name}
-            </div>
-
-            <div className="flex items-center gap-1 text-sm text-base-content/60">
-              <GitHub className="size-4" />
-              <span>{student.github}</span>
-            </div>
-          </div>
-
+          <Avatar
+            name={name}
+            github={github}
+            initials={initials}
+          />
           <button className="btn btn-ghost btn-square text-error">
             <Trash />
           </button>
