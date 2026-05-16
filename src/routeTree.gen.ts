@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as AssignmentsRouteImport } from './routes/assignments'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as OrgClassesIndexRouteImport } from './routes/$org/classes/index'
 import { Route as OrgClassroomStudentsIndexRouteImport } from './routes/$org/$classroom/students/index'
 import { Route as OrgClassroomAssignmentsIndexRouteImport } from './routes/$org/$classroom/assignments/index'
@@ -38,6 +39,11 @@ const AssignmentsRoute = AssignmentsRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthIndexRoute = AuthIndexRouteImport.update({
+  id: '/auth/',
+  path: '/auth/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgClassesIndexRoute = OrgClassesIndexRouteImport.update({
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/auth/': typeof AuthIndexRoute
   '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/auth': typeof AuthIndexRoute
   '/$org/classes': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students': typeof OrgClassroomStudentsIndexRoute
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/auth/': typeof AuthIndexRoute
   '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/auth/'
     | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/auth'
     | '/$org/classes'
     | '/$org/$classroom/assignments'
     | '/$org/$classroom/students'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/auth/'
     | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
@@ -157,6 +169,7 @@ export interface RootRouteChildren {
   AssignmentsRoute: typeof AssignmentsRoute
   ClassesRoute: typeof ClassesRoute
   LoginRoute: typeof LoginRoute
+  AuthIndexRoute: typeof AuthIndexRoute
   OrgClassesIndexRoute: typeof OrgClassesIndexRoute
   OrgClassroomAssignmentsIndexRoute: typeof OrgClassroomAssignmentsIndexRoute
   OrgClassroomStudentsIndexRoute: typeof OrgClassroomStudentsIndexRoute
@@ -193,6 +206,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/': {
+      id: '/auth/'
+      path: '/auth'
+      fullPath: '/auth/'
+      preLoaderRoute: typeof AuthIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$org/classes/': {
@@ -245,6 +265,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssignmentsRoute: AssignmentsRoute,
   ClassesRoute: ClassesRoute,
   LoginRoute: LoginRoute,
+  AuthIndexRoute: AuthIndexRoute,
   OrgClassesIndexRoute: OrgClassesIndexRoute,
   OrgClassroomAssignmentsIndexRoute: OrgClassroomAssignmentsIndexRoute,
   OrgClassroomStudentsIndexRoute: OrgClassroomStudentsIndexRoute,
