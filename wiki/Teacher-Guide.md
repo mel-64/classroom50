@@ -68,7 +68,7 @@ gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --t
 
 The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
 
-The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (forthcoming) instead.
+The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
@@ -128,11 +128,48 @@ Accepts either the canonical 6-column header (`username,first_name,last_name,ema
 gh teacher roster remove <org> <classroom> <username>
 ```
 
-Drops the row from `students.csv`. **Does NOT remove org membership** — use `gh teacher remove <org> <username>` (next step) for that. Splitting roster removal from org removal is deliberate: an off-by-one roster edit shouldn't be able to revoke a student's access to every repo in the org.
+Drops the row from `students.csv`. **Does NOT remove org membership** — use `gh teacher remove <org> <username>` (step 8) for that. Splitting roster removal from org removal is deliberate: an off-by-one roster edit shouldn't be able to revoke a student's access to every repo in the org.
 
 All three subcommands write through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
 
-## 7. Remove students or TAs when needed
+## 7. Add assignments
+
+Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, and optional autograding tests. Register one with:
+
+```sh
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--tests <path-to-tests.json>]
+gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
+```
+
+**`--name` and `--template` are required.** The slug must match `^[a-z0-9][a-z0-9-]{1,38}$` (the same shape as classroom short-names). The template repo must be flagged `is_template: true` (Settings → "Template repository") and visible to your token — if it lives in another org and isn't public, students won't be able to read it either. When you omit `@branch`, the CLI reads the template's default branch from `GET /repos/{owner}/{repo}` and writes that into `assignments.json`.
+
+**Optional flags:**
+
+- `--description <text>` — short description written into the entry.
+- `--due <ISO-8601>` — RFC 3339 timestamp with a timezone offset, e.g. `2026-09-15T23:59:00-04:00`. Stored verbatim so the timezone round-trips.
+- `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
+- `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries. The array merges into the assignment's `tests` field, replacing any previous tests for that slug. The CLI validates every entry against the autograding-tests schema (`test-name`, `test-type` ∈ `{input_output, run_command}`, `command`, `timeout`, `max-score`, plus per-test-type field rules) before writing — a schema violation aborts the command without producing a partial-state commit.
+
+Re-running with the same slug replaces the entry in place (idempotent). New slugs append. The on-disk file always ends with `"tests": []` for assignments with no tests, so the autograde workflow can read it without nil guards.
+
+Remove an entry with:
+
+```sh
+gh teacher assignment remove <org> <classroom> <slug>
+```
+
+This does NOT touch existing student repos — the starter code and submission history stay intact; only new `gh student accept` invocations stop finding the slug. Idempotent: an already-absent slug exits 0 with a note.
+
+**List what's registered** at any time:
+
+```sh
+gh teacher assignment list <org> <classroom>            # one slug per line on stdout
+gh teacher assignment list <org> <classroom> --json     # full JSON array of entries
+```
+
+The default form is pipeable directly into `xargs gh teacher download` or any other command that takes a slug from stdin; the `--json` form preserves every field (template ref, due, tests) for scripting against the manifest. Pass `-q` to suppress the stderr summary when capturing stdout in a script.
+
+## 8. Remove students or TAs when needed
 
 ```sh
 gh teacher remove <org> <username>           # remove from organization
@@ -141,7 +178,7 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
-## 8. Download submissions
+## 9. Download submissions
 
 After students have run `gh student submit`, pull every student's latest submission for an assignment with:
 

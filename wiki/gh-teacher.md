@@ -22,6 +22,9 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--tests` (path to a JSON tests file validated before write). |
+| `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
+| `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
 
 ## `gh teacher init`
 
@@ -95,14 +98,14 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | Path | Schema sentinel | Contents |
 | --- | --- | --- |
 | `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
-| `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add` (forthcoming). |
+| `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yml` workflow. |
 
 **Errors:**
 
 - `<org>/classroom50` does not exist → prints `run gh teacher init <org> first` and exits non-zero.
-- `<short-name>` directory already exists in the config repo → refuses to overwrite. Use `gh teacher roster add` or `gh teacher assignment add` (assignment add forthcoming) to modify an existing classroom.
+- `<short-name>` directory already exists in the config repo → refuses to overwrite. Use `gh teacher roster add` or `gh teacher assignment add` to modify an existing classroom.
 - Short-name fails the slug regex → prints the exact rule with the offending input.
 
 ## `gh teacher roster`
@@ -156,6 +159,91 @@ Duplicate usernames within the input (case-insensitive) collapse with last-wins 
 - `students.csv` header doesn't match `username,first_name,last_name,email,section,github_id` → exits non-zero with the offending header.
 - GitHub user not found (404 from `GET /users/{username}`) → exits with the offending username.
 - Repeated rebase failures (the CLI retries a small fixed number of times with exponential backoff) → exits with a `lost the rebase race` message and a hint to retry or investigate concurrent writers.
+
+## `gh teacher assignment`
+
+Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (only `individual` is currently supported), and an optional `tests` array.
+
+Writes flow through the same optimistic-update-with-rebase loop the roster commands use (up to 5 attempts with exponential backoff), so concurrent edits from multiple teachers don't silently lose each other's work.
+
+### `gh teacher assignment add`
+
+```sh
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--tests <path>]
+gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
+gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main
+```
+
+Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends.
+
+**Slug rules** (same as classroom short-names): `^[a-z0-9][a-z0-9-]{1,38}$`, 2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit. The slug becomes part of the student repo name `<classroom>-<slug>-<username>`, so the constraint mirrors GitHub's repo-name rules.
+
+**Required flags:**
+
+- `--name <display name>` — written into `assignments.json`'s `name` field. Used in release titles and the published Pages site (forthcoming).
+- `--template <owner>/<repo>[@branch]` — the starter-code repo. The CLI calls `GET /repos/{owner}/{repo}` to verify it exists, is visible to your token, and has `is_template: true`. When you omit `@branch`, the template's `default_branch` from the response is used; pass `@main` (or `@master`, etc.) to pin explicitly.
+
+**Optional flags:**
+
+- `--description <text>` — short description written into the entry (omitted from the file when empty).
+- `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
+- `--mode individual` — `individual` is the only currently-supported value; `group` is planned for a future release and produces an explicit error today.
+- `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries (schema below). The array replaces any previous tests for that slug.
+
+**Tests schema (v0.2).** Each entry:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `test-name` | string | yes | Unique within the assignment |
+| `test-description` | string | no | Surfaced in the release body when the workflow runs |
+| `test-type` | enum | yes | `input_output` or `run_command` |
+| `setup-command` | string | no | Pre-test command (e.g. `make clean`) |
+| `command` | string | yes | The actual command run |
+| `input` | string | no | stdin sent to `command` — only valid on `input_output` tests (may be empty) |
+| `expected-output` | string | no | Expected stdout — only valid on `input_output` tests |
+| `comparison-method` | enum | no | `included`, `exact`, or `regex` — only valid on `input_output` tests (default behaves like `included` upstream) |
+| `timeout` | integer | yes | Minutes; must be > 0 |
+| `max-score` | integer | yes | Points awarded on pass; must be ≥ 0 |
+
+The three I/O fields above are all optional even for `input_output` — an `input_output` test with no `expected-output` is a "command runs without error" smoke check, equivalent to `run_command`. Setting any of them on a `run_command` test fails the validator — the upstream action would silently ignore them, so the CLI hard-fails at write time instead. Duplicate `test-name` values in the array are also rejected.
+
+A schema violation aborts the command before any commit lands. No partial-write state on the repo.
+
+**Errors:**
+
+- `<org>/classroom50` missing → `run gh teacher init <org> first`, non-zero.
+- `<classroom>/assignments.json` missing → `run gh teacher classroom add <org> <classroom> first, or restore the file if it was deleted`.
+- Template repo 404 (private, in another org, or doesn't exist) → `template <owner>/<repo> is not visible to your account — either make it public, or copy it into your org and reference the copy`.
+- Template repo exists but `is_template: false` → message naming the Settings toggle to flip.
+- Tests file violates the autograding-tests schema → cites the offending `tests[N]` entry by index (and test-name when present).
+- Repeated rebase failures (5 attempts with exponential backoff) → `lost the rebase race` with a retry hint.
+
+**Same-slug concurrent writes.** The rebase loop handles concurrent edits to *different* slugs cleanly — each teacher's retry sees the other's commit and re-applies their own upsert. For concurrent edits to the *same* slug (two teachers running `gh teacher assignment add hello ...` within the rebase window), the contract is last-writer-wins: the loser's retry observes the winner's entry and replaces it with theirs, without an on-CLI signal. Both commits remain in the config repo's git history, so a teacher who notices an unexpected overwrite can recover with `git revert` on the config repo.
+
+### `gh teacher assignment remove`
+
+```sh
+gh teacher assignment remove <org> <classroom> <slug>
+```
+
+Drops the matching entry. Idempotent: if the slug is already absent, exits 0 with a note. **Does NOT touch existing student repos** — the starter code and submission history stay intact; only new `gh student accept` invocations stop finding the slug.
+
+### `gh teacher assignment list`
+
+```sh
+gh teacher assignment list <org> <classroom>
+gh teacher assignment list <org> <classroom> --json
+gh teacher assignment list <org> <classroom> -q | xargs -I{} gh teacher download <org> <classroom> {}
+```
+
+Read-only enumeration of every slug registered in `<org>/classroom50/<classroom>/assignments.json`. Default output is one slug per line on stdout — pipeable directly into `xargs gh teacher download`, `grep`, an agent loop, or anything else expecting a newline-separated list.
+
+**Flags:**
+
+- `--json` — emit the full JSON array of assignment entries instead of one slug per line. Preserves every field (template ref, due, mode, tests) so an agent can introspect the manifest without a second API call. Output matches the on-disk indent so `jq` pipes work without reformatting.
+- `--quiet` / `-q` — suppress the one-line stderr summary (`<repo-path>: N assignments`). Use this when capturing stdout from a script that should not have to filter mixed streams.
+
+**Errors:** same shape as `add` and `remove` — missing config repo points at `gh teacher init`, missing `assignments.json` points at `gh teacher classroom add`. Exits 0 with empty stdout when the classroom has no assignments yet (the stderr summary, when not suppressed, hints at `gh teacher assignment add` for the next step).
 
 ## `gh teacher invite`
 
