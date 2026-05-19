@@ -150,7 +150,7 @@ gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --te
 - `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
 - `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries. The array merges into the assignment's `tests` field, replacing any previous tests for that slug. The CLI validates every entry against the autograding-tests schema (`test-name`, `test-type` ∈ `{input_output, run_command}`, `command`, `timeout`, `max-score`, plus per-test-type field rules) before writing — a schema violation aborts the command without producing a partial-state commit.
 
-Re-running with the same slug replaces the entry in place (idempotent). New slugs append. The on-disk file always ends with `"tests": []` for assignments with no tests, so the autograde workflow can read it without nil guards.
+Re-running with the same slug replaces the entry in place (idempotent). New slugs append. Every entry on disk carries a `tests` field, even an empty one: an assignment with no tests still serializes `"tests": []` (not absent, not null), so the autograde workflow can read it without nil guards.
 
 Remove an entry with:
 
