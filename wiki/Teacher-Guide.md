@@ -68,13 +68,13 @@ gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --t
 
 The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
 
-The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` and `gh teacher assignment add` (forthcoming) instead.
+The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (forthcoming) instead.
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
 ## 5. Invite students to the org
 
-For each student:
+The fastest way to add students is `gh teacher roster add` (next step) — it registers them in the classroom roster *and* sends an org invite in one shot. Use the bare `gh teacher invite` only for ad-hoc cases (e.g., inviting a TA who shouldn't be in the student roster, or bringing in someone before the roster is set up):
 
 ```sh
 gh teacher invite <org> <username>
@@ -101,7 +101,38 @@ gh teacher invite -p maintain <org>/<repo> <username>     # other permissions
 
 Permission options for `-p`: `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
 
-## 6. Remove students or TAs when needed
+## 6. Track students in the roster
+
+Each classroom keeps a `students.csv` file inside `<org>/classroom50/<classroom>/`. The CLI manages it for you with three subcommands; you should rarely hand-edit the file.
+
+**Add or update one student:**
+
+```sh
+gh teacher roster add <org> <classroom> <username> [--first-name <name>] [--last-name <name>] [--email <addr>] [--section <id>]
+gh teacher roster add cs50-fall-2026 cs-principles alice --first-name Alice --last-name Andersson --email alice@example.edu --section section-1
+```
+
+This resolves the student's immutable `github_id` (GitHub's numeric account ID), upserts the row in `students.csv` (case-insensitive match on username), and sends an org invitation if they aren't already a member. All four data flags are optional; values left unset become empty cells in the CSV. Re-running with the same arguments is safe — the row is replaced, the org invite is skipped if already pending or active.
+
+**Bulk import from a local CSV:**
+
+```sh
+gh teacher roster import <org> <classroom> <path-to-csv>
+```
+
+Accepts either the canonical 6-column header (`username,first_name,last_name,email,section,github_id` — the same shape `students.csv` uses on disk) or a 5-column header without `github_id` (recommended for hand-authored CSVs since `github_id` is CLI-managed). The `email` column values may be empty per row. All usernames are resolved up-front; a single typo aborts the whole import before any commit. The entire file is then written in one Tree commit, and every new student is invited to the org. Re-running is safe — already-imported rows just refresh.
+
+**Remove a student from the roster:**
+
+```sh
+gh teacher roster remove <org> <classroom> <username>
+```
+
+Drops the row from `students.csv`. **Does NOT remove org membership** — use `gh teacher remove <org> <username>` (next step) for that. Splitting roster removal from org removal is deliberate: an off-by-one roster edit shouldn't be able to revoke a student's access to every repo in the org.
+
+All three subcommands write through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
+
+## 7. Remove students or TAs when needed
 
 ```sh
 gh teacher remove <org> <username>           # remove from organization
@@ -110,7 +141,7 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
-## 7. Download submissions
+## 8. Download submissions
 
 After students have run `gh student submit`, pull every student's latest submission for an assignment with:
 

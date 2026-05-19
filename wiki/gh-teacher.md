@@ -19,6 +19,9 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
+| `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
+| `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
+| `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
 
 ## `gh teacher init`
 
@@ -93,14 +96,66 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | --- | --- | --- |
 | `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add` (forthcoming). |
-| `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,section,user_id`. The trailing `user_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
+| `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yml` workflow. |
 
 **Errors:**
 
 - `<org>/classroom50` does not exist → prints `run gh teacher init <org> first` and exits non-zero.
-- `<short-name>` directory already exists in the config repo → refuses to overwrite. Use `gh teacher roster add` or `gh teacher assignment add` (forthcoming) to modify an existing classroom.
+- `<short-name>` directory already exists in the config repo → refuses to overwrite. Use `gh teacher roster add` or `gh teacher assignment add` (assignment add forthcoming) to modify an existing classroom.
 - Short-name fails the slug regex → prints the exact rule with the offending input.
+
+## `gh teacher roster`
+
+Manage student rows in `<org>/classroom50/<classroom>/students.csv`. All three subcommands write through a shared optimistic-update-with-rebase loop: each attempt reads the current branch tip, re-applies the upsert/remove against the latest file, and PATCHes the ref with a fast-forward check. Up to 5 attempts with exponential backoff before giving up — concurrent edits from multiple teachers can't silently lose each other's work.
+
+Every row carries an immutable numeric `github_id` (resolved at write time via `GET /users/{username}`) so a mid-class username change doesn't desynchronize records. The `github_id` column is CLI-managed; teachers should not hand-edit it. The column is named `github_id` (not the API-side `id`) to keep the source unambiguous when classroom50 grows additional ID columns from non-GitHub sources.
+
+### `gh teacher roster add`
+
+```sh
+gh teacher roster add <org> <classroom> <username> [--first-name <n>] [--last-name <n>] [--email <addr>] [--section <s>]
+gh teacher roster add cs50-fall-2026 cs-principles alice --first-name Alice --last-name Andersson --email alice@example.edu --section section-1
+gh teacher roster add cs50-fall-2026 cs-principles bob
+```
+
+Appends or upserts one row by `username` (case-insensitive match). All four data flags are optional; an absent flag writes an empty value into its column. After the roster write lands, sends an org invitation if the student isn't already a member and doesn't have a pending invite — same path `gh teacher invite` uses, but quiet about already-member/already-pending cases.
+
+Safe to re-run: the row is replaced in place — every run produces a commit, but a no-change re-run yields a same-tree commit (never duplicates or removes data). The org-invite step is skipped when the student is already an active or pending member.
+
+### `gh teacher roster remove`
+
+```sh
+gh teacher roster remove <org> <classroom> <username>
+```
+
+Drops the row matching `<username>` (case-insensitive). Idempotent: a no-op + zero exit when the row is already absent. **Does NOT remove org membership** — that's a separate `gh teacher remove <org> <username>` so an off-by-one roster edit can't accidentally revoke a student's repo access. The `--also-remove-from-org` companion flag is deferred to v0.3.
+
+### `gh teacher roster import`
+
+```sh
+gh teacher roster import <org> <classroom> <path-to-csv>
+gh teacher roster import cs50-fall-2026 cs-principles ./section-1.csv
+```
+
+Bulk upsert from a local CSV. Accepts either header shape:
+
+- **5-column** (recommended for hand-authored CSVs): `username,first_name,last_name,email,section`
+- **6-column** (exported from a previous `students.csv`): same as above plus `github_id`, which is ignored — the CLI re-resolves `github_id` at import time so the on-disk roster always carries the GitHub-authoritative ID.
+
+The `email` column values may be empty per row.
+
+Resolves every username up-front (one `GET /users/{username}` per row); a non-existent username aborts the import with the row number, before any commit. Once all usernames resolve, the entire file is written in a single Tree commit — there's no partial-import state visible on the repo. After the commit, each non-member is invited; the command prints a summary `N invited, M already members, K already pending`.
+
+Duplicate usernames within the input (case-insensitive) collapse with last-wins semantics.
+
+### Errors common to all three subcommands
+
+- `<org>/classroom50` missing → `run gh teacher init <org> first`, non-zero exit.
+- `<classroom>/students.csv` missing → `run gh teacher classroom add <org> <classroom> first, or restore the file if it was deleted`.
+- `students.csv` header doesn't match `username,first_name,last_name,email,section,github_id` → exits non-zero with the offending header.
+- GitHub user not found (404 from `GET /users/{username}`) → exits with the offending username.
+- Repeated rebase failures (the CLI retries a small fixed number of times with exponential backoff) → exits with a `lost the rebase race` message and a hint to retry or investigate concurrent writers.
 
 ## `gh teacher invite`
 

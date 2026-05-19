@@ -5,7 +5,7 @@ Tools for running a GitHub-backed classroom: a teacher CLI, a student CLI, reusa
 ## Where to start
 
 - **New here?** Read [Installation](Installation) — install Go, `gh`, and the two CLI extensions in a few commands.
-- **Teaching a class?** Walk through the [Teacher Guide](Teacher-Guide): set up the org, run `gh teacher init`, add a classroom, invite students, download submissions.
+- **Teaching a class?** Walk through the [Teacher Guide](Teacher-Guide): set up the org, run `gh teacher init`, add a classroom, manage the roster, invite students, download submissions.
 - **Taking a class?** Walk through the [Student Guide](Student-Guide): accept an assignment, submit your work.
 - **Looking up a flag?** Skim the per-command references for [`gh teacher`](gh-teacher) and [`gh student`](gh-student).
 - **Building an assignment template?** See [Assignment Templates](Assignment-Templates).
