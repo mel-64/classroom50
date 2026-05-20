@@ -16,7 +16,7 @@ See GitHub's [Reusing workflows](https://docs.github.com/en/actions/using-workfl
 
 | Workflow | Purpose |
 | --- | --- |
-| [`.github/workflows/autograde-library.yml`](https://github.com/foundation50/classroom50/blob/main/.github/workflows/autograde-library.yml) | The classroom50 autograde library. Consumed by per-classroom autograder workflows (e.g. `<classroom>/autograders/default.yml` in each teaching org's `classroom50` config repo) via `uses:`. Runs the `load → run matrix → report` pipeline: parses `.classroom50.yml` from the student repo, fetches `assignments.json` from Pages, dispatches each test through GitHub's `classroom-resources/autograding-*-grader@v1` actions, aggregates results, posts a `classroom50/autograde` commit status, and publishes a submit-tag GitHub Release carrying `autograde.json` per the [v0.2 plan §4.4](https://github.com/foundation50/classroom50/blob/main/plans/v0.2-plan.md). |
+| [`.github/workflows/autograde-library.yml`](https://github.com/foundation50/classroom50/blob/main/.github/workflows/autograde-library.yml) | The classroom50 autograde library. Consumed by per-classroom autograder workflows (e.g. `<classroom>/autograders/default.yml` in each teaching org's `classroom50` config repo) via `uses:`. Runs the `load → run matrix → report` pipeline: parses `.classroom50.yml` from the student repo, fetches `assignments.json` from Pages, dispatches each test through GitHub's `classroom-resources/autograding-*-grader@v1` actions, aggregates results, posts a `classroom50/autograde` commit status, and publishes a submit-tag GitHub Release carrying `result.json`. |
 
 ### Autograder contract
 

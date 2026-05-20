@@ -187,7 +187,61 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
-## 9. Download submissions
+## 9. Collect scores
+
+Every student submission publishes a GitHub Release on their own repo carrying a `result.json` asset. The `collect-scores` workflow in `<org>/classroom50` walks every `(student, assignment)` pair in `<classroom>/students.csv` × `<classroom>/assignments.json`, asks GitHub for each expected repo's latest release, and aggregates the results into `<classroom>/scores.json` — the authoritative score record for the class.
+
+Run it from the Actions tab on `<org>/classroom50`, or trigger it from your shell:
+
+```sh
+gh workflow run collect-scores.yml --repo <org>/classroom50
+gh workflow run collect-scores.yml --repo <org>/classroom50 -f classroom=cs-principles    # one classroom only
+```
+
+The skeleton committed by `gh teacher init` ships the workflow with a nightly cron (`17 4 * * *` UTC), so even if you never trigger it manually, scores land in `scores.json` once a day. If you want manual-only triggering, comment out the `schedule:` block in `.github/workflows/collect-scores.yml`.
+
+What it does on each run:
+
+1. Iterates every classroom under `<org>/classroom50/<classroom>/` (or just the one you passed via `-f classroom=`).
+2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and asks GitHub for that repo's latest release. A `404` from `/releases/latest` means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
+3. For each release found, downloads `result.json`, schema-validates it, and checks that the payload's `classroom` / `assignment` / `usernames[0]` match the expected `(classroom, assignment, student)` tuple (defense against a hostile autograder payload trying to land in the wrong scores.json).
+4. Upserts the validated payload into `<classroom>/scores.json`. **Existing entries with `"override": true` are preserved verbatim** — if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
+5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
+6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
+
+**Token requirements.** The workflow reads the `CLASSROOM50_COLLECT_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on `<classroom>-*` repos). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-collect-token <org>`.
+
+**Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
+
+**`scores.json` shape:**
+
+```json
+{
+  "schema": "classroom50/scores/v1",
+  "submissions": [
+    {
+      "schema": "classroom50/result/v1",
+      "classroom": "cs-principles",
+      "assignment": "hello",
+      "usernames": ["alice"],
+      "submission": "submit/2026-06-01T14-32-05Z",
+      "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+      "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z",
+      "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+      "datetime": "2026-06-01T14:33:11Z",
+      "score": 18,
+      "max-score": 30,
+      "tests": [
+        { "test-name": "compiles", "passed": true, "score": 10, "max-score": 10 }
+      ]
+    }
+  ]
+}
+```
+
+One row per (assignment, student) tuple. Re-running collect refreshes each row with the latest release's data unless `override: true` is set.
+
+## 10. Download submissions
 
 After students have run `gh student submit`, pull every student's latest submission for an assignment with:
 

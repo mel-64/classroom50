@@ -63,7 +63,7 @@ Invites a classmate or TA to a repo with `push` permission. Calls `PUT /repos/{o
 gh student submit
 ```
 
-Run from inside a cloned assignment repo. Snapshots the current working tree, pushes it as a new commit on top of `main`, and pushes a lightweight `submit/<UTC-timestamp>` tag at the same SHA. The autograde workflow listens for that tag and publishes a GitHub Release with `autograde.json` attached and a scored body shortly after.
+Run from inside a cloned assignment repo. Snapshots the current working tree, pushes it as a new commit on top of `main`, and pushes a lightweight `submit/<UTC-timestamp>` tag at the same SHA. The autograde workflow listens for that tag and publishes a GitHub Release with `result.json` attached and a scored body shortly after.
 
 Under the hood:
 
