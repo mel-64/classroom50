@@ -15,7 +15,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher invite <org>/<repo> <user>` | Invite user to a specific repo. Default permission `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running updates the collaborator in place. |
 | `gh teacher remove <org> <user>` | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent. |
 | `gh teacher remove <org>/<repo> <user>` | Remove user from a single repo. Idempotent. |
-| `gh teacher download <org> <classroom> <assignment>` | Clone every repo in `<org>` whose name starts with `<classroom>-<assignment>-`. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
+| `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` for the v0.1 prefix-match behavior. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
@@ -284,20 +284,38 @@ gh teacher remove <org>/<repo> <username>    # remove from one repository
 ## `gh teacher download`
 
 ```sh
-gh teacher download <org> <classroom> <assignment>              # clones into <classroom>-<assignment>_submissions_<timestamp>/
+gh teacher download <org> <classroom> <assignment>              # roster-driven (default)
+gh teacher download --by-pattern <org> <classroom> <assignment> # v0.1 prefix-match fallback
 gh teacher download -d <dir> <org> <classroom> <assignment>     # literal dir, no timestamp
 gh teacher download -v <org> <classroom> <assignment>           # stream raw git output per repo
 gh teacher download -q <org> <classroom> <assignment>           # suppress per-repo summary, forward --quiet to git
 ```
 
-Under the hood:
+### Roster-driven mode (default)
 
-1. Page through `GET /orgs/{org}/repos` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories)), collecting every repo whose name starts with `<classroom>-<assignment>-` (matching the `gh student accept` convention `<classroom>-<assignment>-<username>`). The `<classroom>` and `<assignment>` arguments are lowercased before matching so any case works on the input side.
-2. For each match, shell out to `gh repo clone <org>/<name> <dir>/<name>` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos.
+The command reads `<org>/classroom50/<classroom>/students.csv` and `<classroom>/assignments.json`, then for each roster row:
 
-Default destination is `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup. Pass `-d` to override (the value is taken literally, no timestamp appended).
+1. Computes the canonical `<classroom>-<assignment>-<username>` repo name (lowercased — matches `gh student accept`'s naming).
+2. Probes `GET /repos/<org>/<name>` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#get-a-repository)). A 404 prints `Missing: <username> (not accepted yet?)` and contributes to the per-run summary; a non-404 error surfaces as a per-repo failure.
+3. For repos that exist, shells out to `gh repo clone <org>/<name> <dir>/<name>` so authentication flows through the current `gh` session.
+4. For each cloned repo (and for repos already on disk), refreshes `<repo>/result.json` from the latest submit-tag release. The asset is fetched via `GET /repos/<org>/<repo>/releases/latest` → the asset's API URL with `Accept: application/octet-stream`, and `Authorization` is stripped on the redirect to the signed storage URL so the GitHub token never reaches the storage origin. A repo with no releases, a non-submit tag, or no `result.json` asset is a silent no-op.
+5. After all clones, writes a `scores.csv` summary at the destination root with one row per roster entry. Submitters carry their score columns (`score`, `max_score`, `datetime`, `submission_tag`, `review_url`, `override`); non-submitters get blank score columns so a teacher can sort by score and immediately see who hasn't submitted yet. Submissions in `scores.json` whose `usernames[0]` isn't on the current roster are dropped from the CSV (the roster is the source of truth for which students are in this class right now).
 
-Existing target dirs are skipped, so re-runs with the same `-d` pick up new submissions without aborting on the ones already cloned. Failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code, and a non-zero exit code surfaces if any clone failed after the rest still run.
+The command refuses to run when:
+
+- `<org>/classroom50` doesn't exist → `run gh teacher init <org> first`.
+- `<classroom>/students.csv` is missing → `run gh teacher classroom add` first.
+- `<assignment>` isn't registered in `assignments.json` → `run gh teacher assignment add <org> <classroom> <assignment>` first, or pass `--by-pattern` to skip the roster lookup.
+
+### `--by-pattern` (v0.1 fallback)
+
+Pages through `GET /orgs/{org}/repos` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories)) and clones every repo whose name starts with `<classroom>-<assignment>-`. Skips the roster lookup, the `result.json` refresh, and the `scores.csv` summary — useful when the config repo isn't bootstrapped yet, or when you want every matching repo regardless of who's currently on the roster.
+
+### Destination
+
+Default is `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup. Pass `-d` to override (the value is taken literally, no timestamp appended).
+
+Existing target dirs are skipped on the clone step, so re-runs with the same `-d` pick up new submissions without aborting on the ones already cloned. `result.json` is still refreshed on the existing clones — so a re-run after the latest collect-scores cycle picks up the newest score without re-cloning. Clone failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code; a non-zero exit code surfaces after the rest of the run still completes.
 
 ## `gh teacher whoami` / `login` / `logout`
 

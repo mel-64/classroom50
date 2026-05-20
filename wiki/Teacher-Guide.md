@@ -243,7 +243,7 @@ One row per (assignment, student) tuple. Re-running collect refreshes each row w
 
 ## 10. Download submissions
 
-After students have run `gh student submit`, pull every student's latest submission for an assignment with:
+After students have run `gh student submit` and the autograde workflow has published its release, pull every student's latest submission for an assignment with:
 
 ```sh
 gh teacher download <org> <classroom> <assignment>
@@ -251,7 +251,13 @@ gh teacher download <org> <classroom> <assignment>
 
 ![Demo: gh teacher download](images/gh_teacher_download.gif)
 
-This pages through the org's repos, finds every one whose name starts with `<classroom>-<assignment>-` (the convention `gh student accept` uses: `<classroom>-<assignment>-<username>`), and shells out to `gh repo clone` for each. Authentication flows through the current `gh` session — no separate git credential setup is needed for private classroom repos.
+By default the command is **roster-driven**: it reads `<classroom>/students.csv` and `<classroom>/assignments.json` from your config repo, then for each roster entry:
+
+1. Probes whether the expected `<classroom>-<assignment>-<username>` repo exists in the org.
+2. Clones it if it does, or reports `Missing: <username> (not accepted yet?)` if it doesn't.
+3. After each clone, refreshes `<repo>/result.json` from the latest submit-tag release on that repo — so the autograded payload lands alongside the code.
+
+After all clones, the command writes a `scores.csv` summary at the destination root: one row per roster entry (`username,score,max_score,datetime,submission_tag,review_url,override`). Submitters carry their scores; non-submitters get blank score columns so you can sort the spreadsheet by score and immediately see who hasn't submitted yet.
 
 Each run produces a fresh timestamped folder named `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time), so re-running picks up newer submissions without overwriting earlier downloads. Override the destination with `-d`:
 
@@ -259,7 +265,15 @@ Each run produces a fresh timestamped folder named `<classroom>-<assignment>_sub
 gh teacher download -d <dir> <org> <classroom> <assignment>     # literal, no timestamp
 ```
 
-Existing target dirs are skipped, so re-runs with the same `-d` pick up new submissions without aborting on the ones already cloned. Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+Existing target dirs are skipped on the clone step, but `result.json` is still refreshed on the existing clones — so re-running after the latest `collect-scores.yml` cycle picks up the newest score without re-cloning. Pass `--quiet` / `-q` to suppress the per-repo summary; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+
+**Fallback for unconfigured classrooms.** If the config repo isn't bootstrapped yet (no `students.csv`, no `assignments.json`), or you want to clone every matching repo regardless of who's currently rostered, pass `--by-pattern`:
+
+```sh
+gh teacher download --by-pattern <org> <classroom> <assignment>
+```
+
+That falls back to the v0.1 behavior: page through the org's repos, clone every one whose name starts with `<classroom>-<assignment>-`. Skips the roster lookup, the `result.json` refresh, and the `scores.csv` summary.
 
 ## See also
 
