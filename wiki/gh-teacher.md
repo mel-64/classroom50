@@ -41,7 +41,7 @@ Performs these steps in order:
 1. **Org plan check** — `GET /orgs/{org}`; warns when the org is not on Team or Enterprise Cloud (Pages from a private repo). Advisory only.
 2. **Create or fetch repo** — `POST /orgs/{org}/repos` with `auto_init: true` for `classroom50`. On 422 (name taken), falls back to `GET /repos/{org}/classroom50`. The default branch from the response flows through to later steps (org policy can rename `main`).
 3. **Skeleton drop** — single Tree commit of embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`). Re-runs detect `.github/workflows/publish-pages.yml` and skip without overwriting teacher edits. `publish-pages.yml` is templated with the org's actual default branch at commit time.
-4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled.
+4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled. Followed by `PUT .../pages` with `{"public": true}` so the published `assignments.json` and per-classroom autograder YAMLs are reachable unauthenticated by the autograde library and the student CLIs. The visibility step is warn-and-continue if the API rejects it (rare org policy), with a manual `Settings → Pages → Visibility` toggle as the recovery path.
 5. **Branch protection** — no force pushes or branch deletion on the default branch.
 6. **Workflow permissions** — raises default `GITHUB_TOKEN` to `write`. HTTP 409 (org-enforced policy) is tolerated; skeleton workflows declare workflow-level `permissions:` blocks.
 7. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
