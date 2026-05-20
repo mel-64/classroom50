@@ -12,9 +12,8 @@ The React Compiler is enabled on this template. See [this documentation](https:/
 
 Note: This will impact Vite dev & build performances.
 
-## Setup
+## Setup (requires Node/npm)
 
-1) Install [bun](https://bun.com/docs/installation).
-2) `cd classroom-alpha`
-3) `bun install`
-4) `bun dev`
+1. `cd classroom-alpha`
+2. `npm i`
+3. `npm run dev`
