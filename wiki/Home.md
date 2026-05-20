@@ -1,25 +1,27 @@
-# classroom50
+# Classroom 50
 
-Tools for running a GitHub-backed classroom: a teacher CLI, a student CLI, reusable GitHub Actions workflows, and starter assignment templates. Everything is installable from a single repo clone.
+Classroom 50 is an open-source [GitHub Classroom](https://classroom.github.com/) alternative developed by the [Fifty Foundation](https://fifty.foundation/), GitHub's official open-source partner for educational software tools. Classroom 50 includes both a command-line interface and a web interface that enable teachers to distribute programming assignments in repositories, configure auto-grading via GitHub Actions, and review student submissions. Classroom 50 will be available starting on July 1. Until then, you can [sign up for email updates](https://fifty.foundation/) or [try the pre-release version](#try-the-pre-release) of the tool.
 
-## Where to start
+**Starting July 1, this page will host the full setup guide for a new GitHub classroom.** Each classroom will live inside your GitHub organization: the tooling handles repo creation, roster management, and score collection, and GitHub holds the state. Students accept an assignment, get a private repo from a template, push commits to submit, and get scored automatically.
 
-- **New here?** Read [Installation](Installation) — install Go, `gh`, and the two CLI extensions in a few commands.
-- **Teaching a class?** Walk through the [Teacher Guide](Teacher-Guide): set up the org, run `gh teacher init`, add a classroom, manage the roster, invite students, download submissions.
-- **Taking a class?** Walk through the [Student Guide](Student-Guide): accept an assignment, submit your work.
-- **Looking up a flag?** Skim the per-command references for [`gh teacher`](gh-teacher) and [`gh student`](gh-student).
-- **Building an assignment template?** See [Assignment Templates](Assignment-Templates).
-- **Something broken?** See [Troubleshooting](Troubleshooting).
+## Try the pre-release
 
-## What the CLIs do
+The command-line interface is feature-complete enough to run a class with today; the web interface is still in development. To kick the tires:
 
-`gh teacher` and `gh student` are [`gh` CLI extensions](https://docs.github.com/en/github-cli/github-cli/creating-github-cli-extensions) that wrap the GitHub REST API and `git` to automate the classroom lifecycle:
+1. Follow the [Installation](Installation) guide. Go and the [GitHub CLI (`gh`)](https://cli.github.com/) are the only prerequisites.
+2. Walk through the [Teacher Guide](Teacher-Guide) to set up your org, scaffold a classroom, add a roster, register assignments, and collect scores.
+3. Point students at the [Student Guide](Student-Guide) for accept-and-submit instructions.
 
-- A teacher bootstraps a per-org `classroom50` config repo (`gh teacher init`), scaffolds one or more classrooms inside it (`gh teacher classroom add`), invites students to a GitHub org, and downloads their submissions in bulk.
-- A student accepts an assignment (which provisions a private repo from a template) and submits work as commits.
+Reference docs:
 
-There is no separate server. All state lives in GitHub: org membership, per-student private repos, and a small `.classroom50.yml` metadata file inside each student repo.
+- [`gh teacher`](gh-teacher) — every teacher command and flag.
+- [`gh student`](gh-student) — every student command and flag.
+- [Assignment Templates](Assignment-Templates) — what an assignment template repo should look like.
+- [Reusable Workflows](Reusable-Workflows) — the autograde library that classroom workflows hook into.
+- [Troubleshooting](Troubleshooting) — common errors and debug flags.
 
-## Editing this wiki
+## Get help
 
-This wiki is auto-synced from the [`wiki/`](https://github.com/foundation50/classroom50-dev/tree/v1/wiki) folder of the development repo on every merge to `v1`. **Edit pages there**, not here — direct edits will be overwritten on the next sync. Add a page by dropping a new `.md` file into `wiki/`; the filename (without extension, dashes shown as spaces) becomes the page name.
+- **Questions, ideas, feature requests:** open a thread in [GitHub Discussions](https://github.com/foundation50/classroom50/discussions) on the `classroom50` repo.
+- **Bug reports:** file an [issue](https://github.com/foundation50/classroom50/issues).
+- **Email updates:** subscribe at [fifty.foundation](https://fifty.foundation).

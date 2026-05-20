@@ -1,13 +1,13 @@
 # Reusable Workflows
 
-The [`workflows/`](https://github.com/foundation50/classroom50/tree/main/workflows) directory holds reusable GitHub Actions workflows that other repos (student copies, the template, or any classroom-adjacent project) can consume via `uses:`.
+Reusable GitHub Actions workflows that other repos (student copies, templates, or any classroom-adjacent project) can consume via `uses:` live under [`.github/workflows/`](https://github.com/foundation50/classroom50/tree/main/.github/workflows). GitHub requires that location for `uses:` references to resolve.
 
 ## Consuming a workflow
 
 ```yaml
 jobs:
   example:
-    uses: foundation50/classroom50/.github/workflows/<workflow>.yaml@main
+    uses: foundation50/classroom50/.github/workflows/<workflow>.yml@main
 ```
 
 See GitHub's [Reusing workflows](https://docs.github.com/en/actions/using-workflows/reusing-workflows) docs for the full mechanics: how `inputs:` and `secrets:` map across boundaries, how versions are pinned, and what reusable vs. composite workflows can and can't do.
