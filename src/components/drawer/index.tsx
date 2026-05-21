@@ -6,9 +6,10 @@ import {
   UserRound,
   HardDriveUpload,
 } from "lucide-react"
-import { Link } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
+import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 
 const Drawer = ({ children }) => (
   <div className="drawer lg:drawer-open">{children}</div>
@@ -99,6 +100,8 @@ export const SidebarFooter = () => {
   const { user } = useGithubAuth()
   const avatar_img = user?.avatar_url || duck
   const name = truncateName(user?.name || "") || "User"
+  const { org } = useParams({ strict: false })
+  const { isTeacher } = useCourseTeacherAccess(org)
 
   return (
     <div className="mt-auto border-t border-[#444] py-4">
@@ -110,7 +113,9 @@ export const SidebarFooter = () => {
           <div className="font-medium text-white">{name}</div>
 
           <div>
-            <span className="text-[#aaa]">Teacher</span>
+            <span className="text-[#aaa]">
+              {isTeacher ? "Teacher" : "Student"}
+            </span>
           </div>
         </div>
       </div>
