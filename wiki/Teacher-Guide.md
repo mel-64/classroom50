@@ -22,14 +22,14 @@ gh teacher login
 
 This shells out to `gh auth login -s admin:org` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants `admin:org` in one shot; if you have, it re-authenticates with the new scope appended.
 
-If you skip this step and run another command first (e.g. `gh teacher invite`), it will detect the missing scope and run `gh teacher login` for you before continuing.
+If you skip this step and have no token at all, the CLI detects the missing token and runs `gh teacher login` automatically. If a token exists but lacks `admin:org`, commands like `gh teacher invite` will fail with an error instructing you to run `gh teacher login` to grant the scope.
 
 ## 3. Bootstrap the classroom50 config repo
 
 Run once per teaching org to create `<org>/classroom50` — the private config repo that will hold classroom metadata, published assignment manifests, and collected scores:
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher init <org>
+CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>
 ```
 
 Or omit the env var and the command prompts for the token interactively:
@@ -40,13 +40,13 @@ gh teacher init <org>
 
 `init` is idempotent: re-running picks up where a prior run left off (it does not overwrite teacher edits to the skeleton).
 
-**Collect token.** Supply a fine-grained PAT with **Contents: read** on org repos whose names match `<classroom>-*`. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (PATs are typically 90 days) with:
+**Collect token.** Supply a fine-grained PAT with **Contents: read** on org repos whose names match `<classroom>-*`. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
 
 ```sh
 gh teacher rotate-collect-token <org>
 ```
 
-**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, placeholder `collect-scores.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` and autograder YAMLs unauthenticated), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
+**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, `collect-scores.yaml`, reusable `autograde-runner.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` and autograder YAMLs unauthenticated), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), reusable-workflow access for other repos in the org (so student shims can `uses:` the runner), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
 
 **Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
 
@@ -77,7 +77,7 @@ gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --t
 
 The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
 
-The command commits all five paths in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
+The command commits all six paths in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
@@ -178,7 +178,7 @@ gh teacher assignment list <org> <classroom>            # one slug per line on s
 gh teacher assignment list <org> <classroom> --json     # full JSON array of entries
 ```
 
-The default form is pipeable directly into `xargs gh teacher download` or any other command that takes a slug from stdin; the `--json` form preserves every field (template ref, due, tests) for scripting against the manifest. Pass `-q` to suppress the stderr summary when capturing stdout in a script.
+The default form is pipeable directly into `xargs gh teacher download` or any other command that takes a slug from stdin; the `--json` form preserves every field (template ref, due, autograder) for scripting against the manifest. Pass `-q` to suppress the stderr summary when capturing stdout in a script.
 
 ## 8. Remove students or TAs when needed
 
@@ -275,7 +275,7 @@ Existing target dirs are skipped on the clone step, but `result.json` is still r
 gh teacher download --by-pattern <org> <classroom> <assignment>
 ```
 
-That falls back to the v0.1 behavior: page through the org's repos, clone every one whose name starts with `<classroom>-<assignment>-`. Skips the roster lookup, the `result.json` refresh, and the `scores.csv` summary.
+That skips the roster lookup and instead pages through the org's repos, cloning every one whose name starts with `<classroom>-<assignment>-`. The `result.json` refresh and the `scores.csv` summary are also skipped in this mode.
 
 ## See also
 

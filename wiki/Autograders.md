@@ -4,7 +4,7 @@ How Classroom 50 grades student submissions, and how teachers write tests.
 
 ## Architecture in one paragraph
 
-When a student pushes a `submit/*` tag (typically via `gh student submit`), GitHub Actions runs the **shim workflow** at `.github/workflows/autograde.yaml` in their assignment repo. The shim is ~20 lines and does exactly one thing: it `uses:` the **autograde-runner** reusable workflow in your config repo (`<org>/classroom50/.github/workflows/autograde-runner.yaml@main`). The runner contains all the substantive logic — it fetches the **orchestrator** (`autograde.py`) and the **per-assignment tests** (a `<slug>.tar.gz` bundle) from your config repo via GitHub Pages, runs pytest, emits a `result.json` matching the `classroom50/result/v1` schema, posts a commit status, and publishes a GitHub Release at the submit tag with `result.json` attached. `gh teacher collect-scores` (a separate workflow on the config repo) downloads each release's `result.json` and aggregates them into `<classroom>/scores.json`.
+When a student pushes a `submit/*` tag (typically via `gh student submit`), GitHub Actions runs the **shim workflow** at `.github/workflows/autograde.yaml` in their assignment repo. The shim is ~20 lines and does exactly one thing: it `uses:` the **autograde-runner** reusable workflow in your config repo (`<org>/classroom50/.github/workflows/autograde-runner.yaml@main`). The runner contains all the substantive logic — it fetches the **orchestrator** (`autograde.py`) and the **per-assignment tests** (a `<slug>.tar.gz` bundle) from your config repo via GitHub Pages, runs pytest, emits a `result.json` matching the `classroom50/result/v1` schema, posts a commit status, and publishes a GitHub Release at the submit tag with `result.json` attached. The **`collect-scores.yaml`** workflow on the config repo downloads each release's `result.json` and aggregates them into `<classroom>/scores.json`.
 
 The student repo carries only the shim + `.classroom50.yaml` metadata. The runner, the orchestrator, the tests, and any per-classroom configuration all live in the config repo and are evaluated live on every workflow run — `@main` in the shim's `uses:` resolves at workflow-call time — so teacher edits propagate to every existing student repo on the next submission with zero per-student-repo maintenance.
 
@@ -105,7 +105,7 @@ This is the **only** contract custom autograders must satisfy. A teacher writing
 | `schema` | string | Must be `classroom50/result/v1` exactly |
 | `classroom` | string | Must match `<classroom>` in the repo name |
 | `assignment` | string | Must match `<assignment>` in the repo name |
-| `usernames` | `[string]` | Exactly one element (v0.2 individual mode) |
+| `usernames` | `[string]` | Exactly one element (individual assignments) |
 | `submission` | string | The submit-tag name (e.g. `submit/2026-06-01T14-32-05Z`) |
 | `commit` | string | URL to the submission commit |
 | `release` | string | URL to the release (URL-encoded submit tag) |
@@ -220,7 +220,7 @@ Broken-bootstrap cases (the early rows above) do **not** show up in `scores.json
 Students never configure any tokens, secrets, or env vars. The full grading flow runs entirely on:
 
 1. **The workflow's auto-provisioned `GITHUB_TOKEN`** — scoped to `contents: write` (publish release) and `statuses: write` (post commit status), confined to the student's own repo. The reusable runner inherits the caller's token, so the same scoping applies inside the runner.
-2. **Unauthenticated GitHub Pages fetches** — the publish-pages allow-list keeps `assignments.json`, `autograders/*.py`, and the test tarballs public even when the config repo is private.
+2. **Unauthenticated GitHub Pages fetches** — the publish-pages allow-list keeps `assignments.json`, `autograders/*.yaml`, `autograders/*.py`, and the test tarballs public even when the config repo is private.
 3. **Reusable-workflow access** between the student repo and the `classroom50` config repo — both live in the teacher's org. `gh teacher init` configures this access automatically; teachers in orgs with restrictive Actions policies may need to enable it manually at Settings → Actions → General → Access on the `classroom50` repo.
 
 The only personal access token in the entire system is `CLASSROOM50_COLLECT_TOKEN`, which is teacher-side, stored as an Actions secret on the config repo, used only by `collect-scores.yaml`. Students never see it.

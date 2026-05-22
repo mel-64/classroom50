@@ -9,4 +9,5 @@
 - **Reference**
   - [Assignment Templates](Assignment-Templates)
   - [Autograders](Autograders)
+  - [GitHub Integration](GitHub-Integration)
   - [Troubleshooting](Troubleshooting)

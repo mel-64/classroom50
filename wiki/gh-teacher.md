@@ -15,7 +15,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher invite <org>/<repo> <user>` | Invite user to a specific repo. Default permission `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running updates the collaborator in place. |
 | `gh teacher remove <org> <user>` | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent. |
 | `gh teacher remove <org>/<repo> <user>` | Remove user from a single repo. Idempotent. |
-| `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` for the v0.1 prefix-match behavior. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
+| `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` to skip the roster lookup and clone by name prefix instead. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
@@ -31,7 +31,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 One-shot bootstrap for the per-org `classroom50` config repo. See the [Teacher Guide](Teacher-Guide) for when to run it in your workflow.
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher init <org>
+CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>
 gh teacher init <org>                              # interactive token prompt
 gh teacher init <org> --service-account-confirm    # silence service-account reminder
 ```
@@ -41,10 +41,11 @@ Performs these steps in order:
 1. **Org plan check** — `GET /orgs/{org}`; warns when the org is not on Team or Enterprise Cloud (Pages from a private repo). Advisory only.
 2. **Create or fetch repo** — `POST /orgs/{org}/repos` with `auto_init: true` for `classroom50`. On 422 (name taken), falls back to `GET /repos/{org}/classroom50`. The default branch from the response flows through to later steps (org policy can rename `main`).
 3. **Skeleton drop** — single Tree commit of embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`). Re-runs detect `.github/workflows/publish-pages.yaml` and skip without overwriting teacher edits. `publish-pages.yaml` is templated with the org's actual default branch at commit time.
-4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled. Followed by `PUT .../pages` with `{"public": true}` so the published `assignments.json` and per-classroom autograder YAMLs are reachable unauthenticated by the autograde library and the student CLIs. The visibility step is warn-and-continue if the API rejects it (rare org policy), with a manual `Settings → Pages → Visibility` toggle as the recovery path.
+4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled. Followed by `PUT .../pages` with `{"public": true}` so the published content is reachable unauthenticated: the student CLIs fetch `assignments.json` and autograder YAML shims; the runner workflow fetches `assignments.json`, `autograde.py`, and test tarballs. The visibility step is warn-and-continue if the API rejects it (rare org policy), with a manual `Settings → Pages → Visibility` toggle as the recovery path.
 5. **Branch protection** — no force pushes or branch deletion on the default branch.
 6. **Workflow permissions** — raises default `GITHUB_TOKEN` to `write`. HTTP 409 (org-enforced policy) is tolerated; skeleton workflows declare workflow-level `permissions:` blocks.
-7. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
+7. **Reusable-workflow access** — `PUT .../actions/permissions/access` with `access_level: organization` so student-repo shims can `uses:` the autograde-runner workflow. 403/409 is warn-and-continue with manual recovery instructions.
+8. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
 
 **Collect token requirements:** fine-grained PAT with `Contents: read` on org repos matching `<classroom>-*`. No CLI flag for the value. Prefer an org-owned service account.
 
@@ -54,6 +55,7 @@ Performs these steps in order:
 | --- | --- |
 | `.github/workflows/publish-pages.yaml` | Working allow-list Pages publisher |
 | `.github/workflows/collect-scores.yaml` | Working `workflow_dispatch` + nightly cron |
+| `.github/workflows/autograde-runner.yaml` | Reusable workflow called by every student-repo autograde shim |
 | `.github/scripts/collect_scores.py` | Working roster-driven score collector. Walks `(student, assignment)` pairs from `<classroom>/students.csv` × `assignments.json`, hits each `<classroom>-<assignment>-<username>` repo's `releases/latest` endpoint, downloads + schema-validates `result.json`, upserts into `<classroom>/scores.json` (`override:true` respected, atomic per-classroom write). Per-assignment "X of Y submitted" summary on stdout. |
 | `README.md` | Describes the config repo layout |
 
@@ -61,10 +63,10 @@ Score collection is **pull-based** and **roster-driven**: the collect workflow r
 
 ## `gh teacher rotate-collect-token`
 
-Re-runs only step 7 of `init` — replaces the `CLASSROOM50_COLLECT_TOKEN` secret in place. Use when the PAT nears expiry, staff change, or after a suspected compromise.
+Re-runs only the collect-token step of `init` — replaces the `CLASSROOM50_COLLECT_TOKEN` secret in place. Use when the PAT nears expiry, staff change, or after a suspected compromise.
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher rotate-collect-token <org>
+CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher rotate-collect-token <org>
 gh teacher rotate-collect-token <org>
 ```
 
@@ -72,7 +74,7 @@ Fails with a clear message if `<org>/classroom50` does not exist (`run gh teache
 
 ## `gh teacher classroom add`
 
-Create a new classroom directory at the root of `<org>/classroom50` and scaffold its four canonical files in a single commit:
+Create a new classroom directory at the root of `<org>/classroom50` and scaffold its six canonical files in a single commit:
 
 ```sh
 gh teacher classroom add <org> <short-name> --name "<full name>" --term <term>
@@ -101,7 +103,8 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yaml` workflow. |
-| `<short-name>/autograders/default.yaml` | n/a | Thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yaml`. Carries the `# classroom50-autograde-version:` sentinel and the submit-tag trigger. Hand-editable — replace the `uses:` block to write your own pipeline, or drop sibling `<name>.yaml` files for per-assignment graders and reference them by name from `assignments.json`'s `autograder` field. |
+| `<short-name>/autograders/default.yaml` | n/a | Thin wrapper that `uses:` the reusable `<org>/classroom50/.github/workflows/autograde-runner.yaml@main` workflow. Triggers on `submit/*` tags. Hand-editable — replace the `uses:` block to pin a different ref or call a different runner, or drop sibling `<name>.yaml` files for per-assignment shims and reference them by name from `assignments.json`'s `autograder` field. |
+| `<short-name>/autograders/autograde.py` | n/a | Runtime orchestrator fetched by the autograde-runner reusable workflow on every submission. Installs pytest, downloads per-assignment test tarballs from Pages, runs tests, emits `result.json`. Hand-editable for custom grading logic or extra dependencies. |
 
 **Errors:**
 
@@ -133,7 +136,7 @@ Safe to re-run: the row is replaced in place — every run produces a commit, bu
 gh teacher roster remove <org> <classroom> <username>
 ```
 
-Drops the row matching `<username>` (case-insensitive). Idempotent: a no-op + zero exit when the row is already absent. **Does NOT remove org membership** — that's a separate `gh teacher remove <org> <username>` so an off-by-one roster edit can't accidentally revoke a student's repo access. The `--also-remove-from-org` companion flag is deferred to v0.3.
+Drops the row matching `<username>` (case-insensitive). Idempotent: a no-op + zero exit when the row is already absent. **Does NOT remove org membership** — that's a separate `gh teacher remove <org> <username>` so an off-by-one roster edit can't accidentally revoke a student's repo access.
 
 ### `gh teacher roster import`
 
@@ -224,7 +227,7 @@ Read-only enumeration of every slug registered in `<org>/classroom50/<classroom>
 
 **Flags:**
 
-- `--json` — emit the full JSON array of assignment entries instead of one slug per line. Preserves every field (template ref, due, mode, tests) so an agent can introspect the manifest without a second API call. Output matches the on-disk indent so `jq` pipes work without reformatting.
+- `--json` — emit the full JSON array of assignment entries instead of one slug per line. Preserves every field (template ref, due, mode, autograder) so an agent can introspect the manifest without a second API call. Output matches the on-disk indent so `jq` pipes work without reformatting.
 - `--quiet` / `-q` — suppress the one-line stderr summary (`<repo-path>: N assignments`). Use this when capturing stdout from a script that should not have to filter mixed streams.
 
 **Errors:** same shape as `add` and `remove` — missing config repo points at `gh teacher init`, missing `assignments.json` points at `gh teacher classroom add`. Exits 0 with empty stdout when the classroom has no assignments yet (the stderr summary, when not suppressed, hints at `gh teacher assignment add` for the next step).
@@ -266,7 +269,7 @@ gh teacher remove <org>/<repo> <username>    # remove from one repository
 
 ```sh
 gh teacher download <org> <classroom> <assignment>              # roster-driven (default)
-gh teacher download --by-pattern <org> <classroom> <assignment> # v0.1 prefix-match fallback
+gh teacher download --by-pattern <org> <classroom> <assignment> # skip roster, clone by name prefix
 gh teacher download -d <dir> <org> <classroom> <assignment>     # literal dir, no timestamp
 gh teacher download -v <org> <classroom> <assignment>           # stream raw git output per repo
 gh teacher download -q <org> <classroom> <assignment>           # suppress per-repo summary, forward --quiet to git
@@ -288,7 +291,7 @@ The command refuses to run when:
 - `<classroom>/students.csv` is missing → `run gh teacher classroom add` first.
 - `<assignment>` isn't registered in `assignments.json` → `run gh teacher assignment add <org> <classroom> <assignment>` first, or pass `--by-pattern` to skip the roster lookup.
 
-### `--by-pattern` (v0.1 fallback)
+### `--by-pattern`
 
 Pages through `GET /orgs/{org}/repos` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories)) and clones every repo whose name starts with `<classroom>-<assignment>-`. Skips the roster lookup, the `result.json` refresh, and the `scores.csv` summary — useful when the config repo isn't bootstrapped yet, or when you want every matching repo regardless of who's currently on the roster.
 

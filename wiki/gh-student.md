@@ -30,8 +30,8 @@ Under the hood:
    - **Pages 404** → "the classroom may not exist yet, or `publish-pages.yaml` may not have run; ask your instructor to confirm the Pages site has deployed".
    - **Schema mismatch** (e.g. `assignments.json` advertises a v2 shape but this `gh-student` only handles v1) → tells the student to update `gh-student`.
    - **Missing slug** → "ask your instructor to run `gh teacher assignment add <org> <classroom> <assignment>`".
-   - **`mode: group`** → "group assignments are not yet supported (deferred to v0.3)". Group mode is reserved for a future release; the teacher CLI rejects `--mode group` symmetrically.
-3. **Fetch the autograder workflow from Pages** (`https://<org>.github.io/classroom50/<classroom>/autograders/<entry.autograder>.yaml`). The autograder identifier comes from the `assignments.json` entry's `autograder` field (defaults to `default` when absent); the publish-pages allow-list (Teacher Guide §1) makes the YAML readable without auth. Errors surfaced loudly:
+   - **`mode: group`** → "group assignments are not yet supported". Group mode is reserved for a future release; the teacher CLI rejects `--mode group` symmetrically.
+3. **Fetch the autograder workflow from Pages** (`https://<org>.github.io/classroom50/<classroom>/autograders/<entry.autograder>.yaml`). The autograder identifier comes from the `assignments.json` entry's `autograder` field (defaults to `default` when absent); the `publish-pages.yaml` workflow publishes these YAMLs publicly so no token is required. Errors surfaced loudly:
    - **404** → "autograder `<name>` not published yet — ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the config repo and that `publish-pages.yaml` has run".
    - **Malformed YAML** → "autograder `<name>` is malformed YAML — ask your instructor to check the file in the config repo".
    - **Empty body** → "Pages deployment may still be in flight; retry in a minute" (the Pages cache occasionally serves a stub right after a fresh deploy).
@@ -67,7 +67,7 @@ Run from inside a cloned assignment repo. Snapshots the current working tree, pu
 
 Under the hood:
 
-1. **Read `.classroom50.yaml`** from the local clone for `source.owner`, `source.repo`, `source.branch`, `config.owner`, `classroom`, and `assignment`. The remote URL is the fallback for `config.owner` if `.classroom50.yaml` predates v0.2 accept.
+1. **Read `.classroom50.yaml`** from the local clone for `source.owner`, `source.repo`, `source.branch`, `config.owner`, `classroom`, and `assignment`. If `config.owner` is absent, the org is inferred from the git remote URL. If neither resolves, submit exits with an error pointing to `gh student accept` to refresh the metadata.
 2. **Copy submittable files** (tracked + untracked-not-ignored) into a temp worktree so the submission isn't polluted by build artifacts or unrelated state.
 3. **Fetch instructor `.gitignore` and `.github/`** (both optional) from `source.owner/source.repo@source.branch` via `GET /repos/{owner}/{repo}/contents/{path}` ([docs](https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content)) so any teacher-side updates flow through on the next submit.
 4. **Re-read the assignment's autograder reference from Pages** (`https://<org>.github.io/classroom50/<classroom>/assignments.json`). A teacher's autograder-reference change in `assignments.json` propagates here — submit always uses the autograder the teacher means *right now*, not the one accept locked in.
@@ -81,7 +81,7 @@ Under the hood:
 
 The commit is authored with the user's GitHub login and noreply email (`<id>+<login>@users.noreply.github.com`) via `git -c user.name=... -c user.email=...`, so a fresh shell with no global git identity still submits cleanly. `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables override these defaults.
 
-The hardcoded `main` push target means templates whose default branch is `master`/`develop` end up with a separate `main` after the first submit. That hardcoded value is unchanged from v0.1.
+The hardcoded `main` push target means templates whose default branch is `master`/`develop` end up with a separate `main` after the first submit.
 
 ## `gh student whoami` / `login` / `logout`
 

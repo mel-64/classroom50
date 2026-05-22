@@ -45,7 +45,7 @@ Three things to check, in order:
 
 1. **The template repo must be public** under most plans, because GitHub's "No permission" org base setting blocks org members from reading private repos they aren't explicit collaborators on. (GitHub Enterprise Cloud has an "internal" visibility that all enterprise members can read; on that plan, internal templates work.)
 2. **The repo must be flagged as a template** in `Settings → General → Template repository`.
-3. **The `<assignment>` argument must match the template repo's slug** — case is normalized, but spelling has to be exact.
+3. **The `<assignment>` argument must match the slug your instructor registered** with `gh teacher assignment add` in `assignments.json` — case is normalized, but spelling has to be exact. It does not have to match the template repo's name.
 
 ## "Could not find `.classroom50.yaml`" on `gh student submit`
 
@@ -68,11 +68,14 @@ The instructor's autograder workflow has a YAML syntax error. `gh student` valid
 
 ## `gh teacher download` clones nothing
 
-The command pages through `GET /orgs/{org}/repos` and matches repos whose names start with `<classroom>-<assignment>-`. If you get zero clones:
+By default, `gh teacher download` is **roster-driven**: it reads `<classroom>/students.csv` and `<classroom>/assignments.json` from your config repo, then probes `GET /repos/<org>/<classroom>-<assignment>-<username>` for each roster row. If you get zero clones:
 
+- Confirm `<org>/classroom50` exists and `<classroom>/students.csv` is populated (`gh teacher roster add` or `gh teacher roster import`).
+- Confirm `<assignment>` is registered in `<classroom>/assignments.json` (`gh teacher assignment list <org> <classroom>`).
 - Verify a few student repos exist under `https://github.com/orgs/<org>/repositories?q=<classroom>-<assignment>`.
-- Re-run with `-v` to see how many repos the API returned per page and which ones matched.
-- The `<classroom>` and `<assignment>` arguments are lowercased before matching, but the repos themselves are named in lowercase by `gh student accept` — case shouldn't matter on either side, but other classroom layouts might.
+- Re-run with `-v` to see which roster rows were probed and which repos were missing.
+
+If the config repo isn't bootstrapped yet, or you want every matching repo regardless of the roster, pass `--by-pattern` — that mode pages through `GET /orgs/{org}/repos` and clones every repo whose name starts with `<classroom>-<assignment>-`.
 
 ## Build fails after a `git pull`
 

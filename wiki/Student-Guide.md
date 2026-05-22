@@ -55,7 +55,7 @@ If you've already accepted this assignment, the command short-circuits with `Ass
 - _"autograder `<name>` not published yet"_ — the assignment references an autograder workflow whose YAML isn't on the Pages site. Ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the config repo and that `publish-pages.yaml` has run.
 - _"autograder `<name>` is malformed YAML"_ — the teacher's autograder workflow has a YAML syntax error. Ask them to fix the file in the config repo before retrying.
 - _"template `<owner>/<repo>` is not accessible to you"_ — the template repo is private and not shared with you; ask your instructor to make it public or grant your account access.
-- _"group assignments are not yet supported (deferred to v0.3)"_ — your instructor registered the assignment with `--mode group`. Group mode lands in a later release.
+- _"group assignments are not yet supported"_ — your instructor registered the assignment with `--mode group`. Group mode is not yet available.
 
 ## 3. Clone and work
 

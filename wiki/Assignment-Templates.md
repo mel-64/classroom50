@@ -19,19 +19,12 @@ Notes on each piece:
 
 - **`README.md`** — what the student sees when they land on their copy of the repo. Describe the assignment, expected output, evaluation criteria, etc.
 - **`.gitignore`** (optional) — if present, `gh student submit` re-fetches this from the template at submit time. Update it once on the template and every student's next submission picks it up.
-- **`.github/`** (optional) — same re-fetch behavior. **One caveat from v0.2**: the autograde workflow no longer lives in templates. `gh student accept` fetches the assignment's autograder workflow YAML from your `classroom50` config repo's Pages site (`<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`); `gh student submit` re-fetches and **overwrites any same-named `.github/workflows/autograde.yaml` from the template** on every submit, so the workflow always tracks whatever your config repo publishes. Put non-autograde workflows here (linters, formatters, dependabot, etc.); leave autograding to your config repo's `<classroom>/autograders/` directory + the teacher's `gh teacher assignment add --tests <path>` payload.
+- **`.github/`** (optional) — same re-fetch behavior. **The autograde workflow does not live in the template.** `gh student accept` fetches the assignment's autograder workflow YAML from your `classroom50` config repo's Pages site (`<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`) and writes it to `.github/workflows/autograde.yaml`; `gh student submit` re-fetches and **overwrites `.github/workflows/autograde.yaml`** on every submit, so the workflow always tracks whatever your config repo publishes. Put non-autograde workflows here (linters, formatters, dependabot, etc.); leave autograding to your config repo's `<classroom>/autograders/` directory (workflow shims, `autograde.py`, and pytest files under `<classroom>/autograders/tests/<slug>/`).
 - **Starter code** — any files the student should start from. The template can be a single file or a full project skeleton.
-
-### Upgrading a v0.1 template
-
-If your template still ships a v0.1-style autograde workflow at `.github/workflows/classroom50.yaml` (or any other autograde-flavored YAML), **remove it before students accept against the v0.2 CLI**. Two reasons:
-
-- The v0.2 autograder fetched from your config repo lives at `.github/workflows/autograde.yaml` and runs alongside any template-shipped workflow, so leaving an old autograde-flavored workflow in place produces two autograde runs per push. The old one will trigger on every `main`-branch push (not just `submit/*` tags), grading every typo fix as a submission.
-- Autograding tests now live in `assignments.json` (managed by `gh teacher assignment add --tests`), and the autograder runtime lives in your config repo's `<classroom>/autograders/` directory (managed by `gh teacher classroom add` and hand-editable). Keep the source of truth in one place.
 
 ## Setting it up
 
-1. Create a normal repo in your classroom org with the structure above. The slug you give the repo (e.g. `example-assignment`, `hello`, `dna`) is what students pass as `<assignment>` to `gh student accept`.
+1. Create a normal repo in your classroom org with the structure above. Register it with `gh teacher assignment add ... --template <owner>/<repo>` — the **assignment slug** you choose there (e.g. `hello`, `dna`) is what students pass as `<assignment>` to `gh student accept`, and it does not have to match the template repo's name.
 2. **Make the repo public** so students can read it under the "No permission" org base setting (private templates would 404 on `gh student accept`). The GitHub Enterprise Cloud "internal" visibility works too, on plans that have it.
 3. **Mark it as a template** in `Settings → General → Template repository`.
 
