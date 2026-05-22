@@ -46,7 +46,7 @@ gh teacher init <org>
 gh teacher rotate-collect-token <org>
 ```
 
-**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yml`, placeholder `collect-scores.yml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` and autograder YAMLs unauthenticated), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
+**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, placeholder `collect-scores.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` and autograder YAMLs unauthenticated), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
 
 **Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
 
@@ -54,13 +54,14 @@ After `init` completes, the CLI prints the future Pages URL (`https://<org>.gith
 
 ## 4. Add a classroom
 
-Each classroom is a directory at the root of `<org>/classroom50` holding five paths:
+Each classroom is a directory at the root of `<org>/classroom50` holding these paths:
 
 - `classroom.json` — public name / term / org metadata.
 - `assignments.json` — assignment manifest (published via Pages, fetched by `gh student accept`).
 - `students.csv` — private roster.
 - `scores.json` — private collected scores.
-- `autograders/default.yml` — the default per-classroom autograder workflow, scaffolded as a thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yml`. Students fetch it from Pages on accept and refresh it on every submit. Hand-edit it (or drop sibling `<name>.yml` files for bespoke graders) — `gh student accept`/`submit` always read the current Pages version, so teacher edits propagate without per-student-repo maintenance.
+- `autograders/default.yaml` — the per-classroom autograder workflow **shim**. Stable, hand-editable; students fetch it from Pages on accept and refresh on every submit. Its only job is to `uses:` the reusable autograde-runner workflow in your config repo (`.github/workflows/autograde-runner.yaml`); the runner is what fetches the orchestrator + tests and runs them.
+- `autograders/autograde.py` — the runtime **orchestrator**. Foundation50-maintained; fetched by the autograde-runner reusable workflow on every workflow run, so teacher edits take effect on the next submission after Pages publishes — no per-student-repo maintenance needed. Installs pytest, downloads the per-assignment test bundle, runs tests, emits `result.json`. Hand-editable for custom grading logic, additional dependencies, or different runtimes (see the [Autograders](Autograders) wiki page for the full contract).
 
 Scaffold one with:
 
@@ -142,24 +143,25 @@ All three subcommands write through an optimistic-update-with-rebase loop (a sma
 
 ## 7. Add assignments
 
-Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, and optional autograding tests. Register one with:
+Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, and the autograder shim that runs on submission. Register one with:
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--autograder <name>] [--tests <path-to-tests.json>]
-gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--autograder <name>]
+gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
 ```
 
 **`--name` and `--template` are required.** The slug must match `^[a-z0-9][a-z0-9-]{1,38}$` (the same shape as classroom short-names). The template repo must be flagged `is_template: true` (Settings → "Template repository") and visible to your token — if it lives in another org and isn't public, students won't be able to read it either. When you omit `@branch`, the CLI reads the template's default branch from `GET /repos/{owner}/{repo}` and writes that into `assignments.json`.
+
+**Per-assignment tests are NOT registered here.** Tests live as ordinary pytest files in the config repo at `<classroom>/autograders/tests/<slug>/` — see the [Autograders](Autograders) wiki page for the test-authoring workflow and the `@pytest.mark.score(N)` weighting convention.
 
 **Optional flags:**
 
 - `--description <text>` — short description written into the entry.
 - `--due <ISO-8601>` — RFC 3339 timestamp with a timezone offset, e.g. `2026-09-15T23:59:00-04:00`. Stored verbatim so the timezone round-trips.
 - `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
-- `--autograder <name>` — which autograder workflow this assignment opts into. Defaults to `default` (the workflow `gh teacher classroom add` scaffolded under `<classroom>/autograders/default.yml`). To opt in to a per-language or bespoke grader, drop a sibling `<classroom>/autograders/<name>.yml` in the config repo first, then pass `--autograder <name>` — the CLI verifies the file exists at write time and rejects a typo before the assignment lands. Students fetch the named workflow from Pages on accept and refresh it on every submit; the source-of-truth is the config repo, so editing `<classroom>/autograders/<name>.yml` updates every student's next submission with no per-repo maintenance.
-- `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries. The array merges into the assignment's `tests` field, replacing any previous tests for that slug. The CLI validates every entry against the autograding-tests schema (`test-name`, `test-type` ∈ `{input_output, run_command}`, `command`, `timeout`, `max-score`, plus per-test-type field rules) before writing — a schema violation aborts the command without producing a partial-state commit.
+- `--autograder <name>` — which autograder workflow shim this assignment opts into. Defaults to `default` (the shim `gh teacher classroom add` scaffolded under `<classroom>/autograders/default.yaml`). To opt in to a per-language or bespoke shim, drop a sibling `<classroom>/autograders/<name>.yaml` in the config repo first, then pass `--autograder <name>` — the CLI verifies the file exists at write time and rejects a typo before the assignment lands. Students fetch the named shim from Pages on accept and refresh it on every submit.
 
-Re-running with the same slug replaces the entry in place (idempotent). New slugs append. Every entry on disk carries a `tests` field, even an empty one: an assignment with no tests still serializes `"tests": []` (not absent, not null), so the autograde workflow can read it without nil guards.
+Re-running with the same slug replaces the entry in place (idempotent). New slugs append.
 
 Remove an entry with:
 
@@ -194,11 +196,11 @@ Every student submission publishes a GitHub Release on their own repo carrying a
 Run it from the Actions tab on `<org>/classroom50`, or trigger it from your shell:
 
 ```sh
-gh workflow run collect-scores.yml --repo <org>/classroom50
-gh workflow run collect-scores.yml --repo <org>/classroom50 -f classroom=cs-principles    # one classroom only
+gh workflow run collect-scores.yaml --repo <org>/classroom50
+gh workflow run collect-scores.yaml --repo <org>/classroom50 -f classroom=cs-principles    # one classroom only
 ```
 
-The skeleton committed by `gh teacher init` ships the workflow with a nightly cron (`17 4 * * *` UTC), so even if you never trigger it manually, scores land in `scores.json` once a day. If you want manual-only triggering, comment out the `schedule:` block in `.github/workflows/collect-scores.yml`.
+The skeleton committed by `gh teacher init` ships the workflow with a nightly cron (`17 4 * * *` UTC), so even if you never trigger it manually, scores land in `scores.json` once a day. If you want manual-only triggering, comment out the `schedule:` block in `.github/workflows/collect-scores.yaml`.
 
 What it does on each run:
 
@@ -265,7 +267,7 @@ Each run produces a fresh timestamped folder named `<classroom>-<assignment>_sub
 gh teacher download -d <dir> <org> <classroom> <assignment>     # literal, no timestamp
 ```
 
-Existing target dirs are skipped on the clone step, but `result.json` is still refreshed on the existing clones — so re-running after the latest `collect-scores.yml` cycle picks up the newest score without re-cloning. Pass `--quiet` / `-q` to suppress the per-repo summary; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+Existing target dirs are skipped on the clone step, but `result.json` is still refreshed on the existing clones — so re-running after the latest `collect-scores.yaml` cycle picks up the newest score without re-cloning. Pass `--quiet` / `-q` to suppress the per-repo summary; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
 
 **Fallback for unconfigured classrooms.** If the config repo isn't bootstrapped yet (no `students.csv`, no `assignments.json`), or you want to clone every matching repo regardless of who's currently rostered, pass `--by-pattern`:
 

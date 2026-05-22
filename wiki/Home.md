@@ -17,7 +17,7 @@ Reference docs:
 - [`gh teacher`](gh-teacher) — every teacher command and flag.
 - [`gh student`](gh-student) — every student command and flag.
 - [Assignment Templates](Assignment-Templates) — what an assignment template repo should look like.
-- [Reusable Workflows](Reusable-Workflows) — the autograde library that classroom workflows hook into.
+- [Autograders](Autograders) — the shim/runner/orchestrator autograding stack.
 - [Troubleshooting](Troubleshooting) — common errors and debug flags.
 
 ## Get help

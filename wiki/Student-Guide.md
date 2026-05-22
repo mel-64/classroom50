@@ -40,19 +40,19 @@ What this command does:
 
 1. Auto-accepts any pending org invitation for your account.
 2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`) to find the template repo and which autograder workflow this assignment opts into. The template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it.
-3. Fetches the referenced autograder workflow from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yml`). The fetch runs *before* the repo gets created — if the autograder isn't published yet, no half-baked repo is left behind.
+3. Fetches the referenced autograder workflow from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`). The fetch runs *before* the repo gets created — if the autograder isn't published yet, no half-baked repo is left behind.
 4. Creates a **private** copy of the template at `<org>/<classroom>-<assignment>-<username>` (lowercased), with issues, projects, and wiki disabled.
 5. Adds you as a `maintain` collaborator on the new repo.
-6. Writes `.classroom50.yml` and `.github/workflows/autograde.yml` (the fetched workflow body) in a single commit. The metadata records the template, config-repo, and autograder coordinates so subsequent submissions know which autograder to refresh.
+6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the fetched workflow body) in a single commit. The metadata records the template, config-repo, and autograder coordinates so subsequent submissions know which autograder to refresh.
 7. Prints the `git clone` command for your new repo.
 
 If you've already accepted this assignment, the command short-circuits with `Assignment already accepted: <org>/<repo>` and leaves your existing repo (and any work in it) alone — re-running is safe.
 
 **Errors you might see:**
 
-- _"the classroom may not exist yet, or `publish-pages.yml` may not have run"_ — your instructor hasn't completed the classroom setup yet, or the Pages site hasn't deployed. Wait a few minutes and try again, or ask your instructor to confirm.
+- _"the classroom may not exist yet, or `publish-pages.yaml` may not have run"_ — your instructor hasn't completed the classroom setup yet, or the Pages site hasn't deployed. Wait a few minutes and try again, or ask your instructor to confirm.
 - _"assignment X is not registered in ..."_ — typo, or your instructor hasn't run `gh teacher assignment add` yet for this assignment.
-- _"autograder `<name>` not published yet"_ — the assignment references an autograder workflow whose YAML isn't on the Pages site. Ask your instructor to confirm `<classroom>/autograders/<name>.yml` exists in the config repo and that `publish-pages.yml` has run.
+- _"autograder `<name>` not published yet"_ — the assignment references an autograder workflow whose YAML isn't on the Pages site. Ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the config repo and that `publish-pages.yaml` has run.
 - _"autograder `<name>` is malformed YAML"_ — the teacher's autograder workflow has a YAML syntax error. Ask them to fix the file in the config repo before retrying.
 - _"template `<owner>/<repo>` is not accessible to you"_ — the template repo is private and not shared with you; ask your instructor to make it public or grant your account access.
 - _"group assignments are not yet supported (deferred to v0.3)"_ — your instructor registered the assignment with `--mode group`. Group mode lands in a later release.
@@ -91,7 +91,7 @@ When submit finishes, three URLs are printed:
 
 A few useful properties:
 
-- **The autograde workflow refreshes on every submit.** `.github/workflows/autograde.yml` is re-fetched from your instructor's Pages site on every submit — any teacher-side edit to the workflow (or to which autograder this assignment opts into in `assignments.json`) propagates the next time you submit, without you having to do anything.
+- **The autograde workflow refreshes on every submit.** `.github/workflows/autograde.yaml` is re-fetched from your instructor's Pages site on every submit — any teacher-side edit to the workflow (or to which autograder this assignment opts into in `assignments.json`) propagates the next time you submit, without you having to do anything.
 - **History is preserved.** Submissions overlay as commits on top of the existing `main`; prior commits stay reachable for review.
 - **No git config required.** The commit is authored with your GitHub login and noreply email, passed via `git -c user.name=... -c user.email=...`, so a fresh shell with no global git identity still submits cleanly. `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables override these defaults if you want a custom identity.
 - **Build artifacts are excluded.** Only tracked files plus untracked-not-ignored files are submitted, so build outputs and unrelated local files don't end up in the snapshot.

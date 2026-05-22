@@ -22,7 +22,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
-| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--autograder <name>` (default `default`; the referenced `<classroom>/autograders/<name>.yml` must exist), `--tests` (path to a JSON tests file validated before write). |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--autograder <name>` (default `default`; the referenced `<classroom>/autograders/<name>.yaml` must exist). Per-assignment tests are NOT registered here — they live as pytest files in the config repo at `<classroom>/autograders/tests/<slug>/`. |
 | `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
 | `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
 
@@ -40,7 +40,7 @@ Performs these steps in order:
 
 1. **Org plan check** — `GET /orgs/{org}`; warns when the org is not on Team or Enterprise Cloud (Pages from a private repo). Advisory only.
 2. **Create or fetch repo** — `POST /orgs/{org}/repos` with `auto_init: true` for `classroom50`. On 422 (name taken), falls back to `GET /repos/{org}/classroom50`. The default branch from the response flows through to later steps (org policy can rename `main`).
-3. **Skeleton drop** — single Tree commit of embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`). Re-runs detect `.github/workflows/publish-pages.yml` and skip without overwriting teacher edits. `publish-pages.yml` is templated with the org's actual default branch at commit time.
+3. **Skeleton drop** — single Tree commit of embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`). Re-runs detect `.github/workflows/publish-pages.yaml` and skip without overwriting teacher edits. `publish-pages.yaml` is templated with the org's actual default branch at commit time.
 4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled. Followed by `PUT .../pages` with `{"public": true}` so the published `assignments.json` and per-classroom autograder YAMLs are reachable unauthenticated by the autograde library and the student CLIs. The visibility step is warn-and-continue if the API rejects it (rare org policy), with a manual `Settings → Pages → Visibility` toggle as the recovery path.
 5. **Branch protection** — no force pushes or branch deletion on the default branch.
 6. **Workflow permissions** — raises default `GITHUB_TOKEN` to `write`. HTTP 409 (org-enforced policy) is tolerated; skeleton workflows declare workflow-level `permissions:` blocks.
@@ -52,8 +52,8 @@ Performs these steps in order:
 
 | Path | Status |
 | --- | --- |
-| `.github/workflows/publish-pages.yml` | Working allow-list Pages publisher |
-| `.github/workflows/collect-scores.yml` | Working `workflow_dispatch` + nightly cron |
+| `.github/workflows/publish-pages.yaml` | Working allow-list Pages publisher |
+| `.github/workflows/collect-scores.yaml` | Working `workflow_dispatch` + nightly cron |
 | `.github/scripts/collect_scores.py` | Working roster-driven score collector. Walks `(student, assignment)` pairs from `<classroom>/students.csv` × `assignments.json`, hits each `<classroom>-<assignment>-<username>` repo's `releases/latest` endpoint, downloads + schema-validates `result.json`, upserts into `<classroom>/scores.json` (`override:true` respected, atomic per-classroom write). Per-assignment "X of Y submitted" summary on stdout. |
 | `README.md` | Describes the config repo layout |
 
@@ -100,8 +100,8 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
-| `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yml` workflow. |
-| `<short-name>/autograders/default.yml` | n/a | Thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yml`. Carries the `# classroom50-autograde-version:` sentinel and the submit-tag trigger. Hand-editable — replace the `uses:` block to write your own pipeline, or drop sibling `<name>.yml` files for per-assignment graders and reference them by name from `assignments.json`'s `autograder` field. |
+| `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yaml` workflow. |
+| `<short-name>/autograders/default.yaml` | n/a | Thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yaml`. Carries the `# classroom50-autograde-version:` sentinel and the submit-tag trigger. Hand-editable — replace the `uses:` block to write your own pipeline, or drop sibling `<name>.yaml` files for per-assignment graders and reference them by name from `assignments.json`'s `autograder` field. |
 
 **Errors:**
 
@@ -163,15 +163,15 @@ Duplicate usernames within the input (case-insensitive) collapse with last-wins 
 
 ## `gh teacher assignment`
 
-Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (only `individual` is currently supported), and an optional `tests` array.
+Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (only `individual` is currently supported), and an optional `autograder` name (defaults to `default`).
 
 Writes flow through the same optimistic-update-with-rebase loop the roster commands use (up to 5 attempts with exponential backoff), so concurrent edits from multiple teachers don't silently lose each other's work.
 
 ### `gh teacher assignment add`
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--autograder <name>] [--tests <path>]
-gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--autograder <name>]
+gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
 gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main --autograder io-suite
 ```
 
@@ -189,27 +189,9 @@ Register or upsert one assignment. Idempotent on re-run: the same `slug` replace
 - `--description <text>` — short description written into the entry (omitted from the file when empty).
 - `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
 - `--mode individual` — `individual` is the only currently-supported value; `group` is planned for a future release and produces an explicit error today.
-- `--autograder <name>` — which autograder workflow this assignment opts into. Default is `default` (scaffolded by `gh teacher classroom add`); pass a different name to reference `<classroom>/autograders/<name>.yml` instead. The referenced file must exist in the config repo at write time — a typo'd name is rejected before the assignment lands. Students fetch the named workflow from Pages on accept and refresh it on every submit, so teacher edits to the source workflow propagate without any per-student-repo maintenance.
-- `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries (schema below). The array replaces any previous tests for that slug.
+- `--autograder <name>` — which autograder workflow shim this assignment opts into. Default is `default` (scaffolded by `gh teacher classroom add`); pass a different name to reference `<classroom>/autograders/<name>.yaml` instead. The referenced file must exist in the config repo at write time — a typo'd name is rejected before the assignment lands. Students fetch the named shim from Pages on accept and refresh it on every submit, so teacher edits propagate without any per-student-repo maintenance.
 
-**Tests schema (v0.2).** Each entry:
-
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `test-name` | string | yes | Unique within the assignment |
-| `test-description` | string | no | Surfaced in the release body when the workflow runs |
-| `test-type` | enum | yes | `input_output` or `run_command` |
-| `setup-command` | string | no | Pre-test command (e.g. `make clean`) |
-| `command` | string | yes | The actual command run |
-| `input` | string | no | stdin sent to `command` — only valid on `input_output` tests (may be empty) |
-| `expected-output` | string | no | Expected stdout — only valid on `input_output` tests |
-| `comparison-method` | enum | no | `included`, `exact`, or `regex` — only valid on `input_output` tests (default behaves like `included` upstream) |
-| `timeout` | integer | yes | Minutes; must be > 0 |
-| `max-score` | integer | yes | Points awarded on pass; must be ≥ 0 |
-
-The three I/O fields above are all optional even for `input_output` — an `input_output` test with no `expected-output` is a "command runs without error" smoke check, equivalent to `run_command`. Setting any of them on a `run_command` test fails the validator — the upstream action would silently ignore them, so the CLI hard-fails at write time instead. Duplicate `test-name` values in the array are also rejected.
-
-A schema violation aborts the command before any commit lands. No partial-write state on the repo.
+**Where tests live.** Per-assignment tests are NOT registered through this command. They live as ordinary pytest files in the config repo at `<classroom>/autograders/tests/<slug>/test_*.py` (with optional `conftest.py` for fixtures) and are downloaded at workflow runtime by the orchestrator. See the [Autograders](Autograders) wiki page for the test-authoring workflow and the `@pytest.mark.score(N)` weighting convention.
 
 **Errors:**
 
@@ -217,8 +199,7 @@ A schema violation aborts the command before any commit lands. No partial-write 
 - `<classroom>/assignments.json` missing → `run gh teacher classroom add <org> <classroom> first, or restore the file if it was deleted`.
 - Template repo 404 (private, in another org, or doesn't exist) → `template <owner>/<repo> is not visible to your account — either make it public, or copy it into your org and reference the copy`.
 - Template repo exists but `is_template: false` → message naming the Settings toggle to flip.
-- `--autograder <name>` references a file that doesn't exist in the config repo at write time → `autograder "<name>" does not exist at <org>/classroom50/<classroom>/autograders/<name>.yml — create it (or pass --autograder <existing-name>) before registering this assignment`.
-- Tests file violates the autograding-tests schema → cites the offending `tests[N]` entry by index (and test-name when present).
+- `--autograder <name>` references a file that doesn't exist in the config repo at write time → `autograder "<name>" does not exist at <org>/classroom50/<classroom>/autograders/<name>.yaml — create it (or pass --autograder <existing-name>) before registering this assignment`.
 - Repeated rebase failures (5 attempts with exponential backoff) → `lost the rebase race` with a retry hint.
 
 **Same-slug concurrent writes.** The rebase loop handles concurrent edits to *different* slugs cleanly — each teacher's retry sees the other's commit and re-applies their own upsert. For concurrent edits to the *same* slug (two teachers running `gh teacher assignment add hello ...` within the rebase window), the contract is last-writer-wins: the loser's retry observes the winner's entry and replaces it with theirs, without an on-CLI signal. Both commits remain in the config repo's git history, so a teacher who notices an unexpected overwrite can recover with `git revert` on the config repo.

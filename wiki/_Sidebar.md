@@ -8,5 +8,5 @@
   - [gh student](gh-student)
 - **Reference**
   - [Assignment Templates](Assignment-Templates)
-  - [Reusable Workflows](Reusable-Workflows)
+  - [Autograders](Autograders)
   - [Troubleshooting](Troubleshooting)
