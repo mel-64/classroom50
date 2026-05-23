@@ -1,11 +1,4 @@
-import {
-  GraduationCap,
-  BookText,
-  Trash,
-  UsersRound,
-  UserRound,
-  HardDriveUpload,
-} from "lucide-react"
+import { GraduationCap, BookText, UsersRound } from "lucide-react"
 import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
@@ -20,7 +13,7 @@ export const DrawerContent = ({ children, className }) => (
 )
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
-export const DrawerSidebar = ({ children, selected, page }) => {
+export const DrawerSidebar = ({ selected, page }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">

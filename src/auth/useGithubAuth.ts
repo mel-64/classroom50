@@ -19,7 +19,7 @@ import {
   persistGithubToken,
   saveOAuthSession,
 } from "./storage"
-import type { DeviceAuthState, GithubAuthScreen } from ".types"
+import type { DeviceAuthState, GithubAuthScreen } from "./types"
 
 function formatError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
