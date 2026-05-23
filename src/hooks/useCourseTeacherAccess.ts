@@ -1,4 +1,4 @@
-import { useGitHubJsonFile, useGitHubRepo } from "./github/hooks"
+import { useGitHubRepo } from "./github/hooks"
 import { GitHubAPIError } from "./github/errors"
 
 export type CourseManifest = {

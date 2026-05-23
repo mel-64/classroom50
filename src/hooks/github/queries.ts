@@ -83,7 +83,7 @@ export function rawFileQuery(
           .join("/")}${suffix}`,
         { signal },
       ),
-    enabled: Boolean(owner && repo && path),
+    enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
   })
 }
@@ -110,7 +110,7 @@ export function jsonFileQuery<T>(
 
       return JSON.parse(raw) as T
     },
-    enabled: Boolean(owner && repo && path),
+    enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
   })
 }
