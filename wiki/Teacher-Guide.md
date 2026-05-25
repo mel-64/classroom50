@@ -48,7 +48,7 @@ gh teacher init <org>
 gh teacher rotate-collect-token <org>
 ```
 
-**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, `collect-scores.yaml`, reusable `autograde-runner.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` and autograder YAMLs unauthenticated), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), reusable-workflow access for other repos in the org (so student shims can `uses:` the runner), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
+**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, `collect-scores.yaml`, reusable `autograde-runner.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` unauthenticated; non-default `--autograder` YAML shims, when registered, are also fetched from Pages), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), reusable-workflow access for other repos in the org (so student shims can `uses:` the runner), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
 
 **Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
 
@@ -56,14 +56,19 @@ After `init` completes, the CLI prints the future Pages URL (`https://<org>.gith
 
 ## 4. Add a classroom
 
-Each classroom is a directory at the root of `<org>/classroom50` holding these paths:
+Each classroom is a directory at the root of `<org>/classroom50` holding four files:
 
 - `classroom.json` — public name / term / org metadata.
-- `assignments.json` — assignment manifest (published via Pages, fetched by `gh student accept`).
+- `assignments.json` — assignment manifest (published via Pages, fetched by `gh student accept` and by the autograde-runner workflow on every submission).
 - `students.csv` — private roster.
 - `scores.json` — private collected scores.
-- `autograders/default.yaml` — the per-classroom autograder workflow **shim**. Stable, hand-editable; students fetch it from Pages on accept and refresh on every submit. Its only job is to `uses:` the reusable autograde-runner workflow in your config repo (`.github/workflows/autograde-runner.yaml`); the runner is what fetches the orchestrator + tests and runs them.
-- `autograders/autograde.py` — the runtime **orchestrator**. Foundation50-maintained; fetched by the autograde-runner reusable workflow on every workflow run, so teacher edits take effect on the next submission after Pages publishes — no per-student-repo maintenance needed. Installs pytest, downloads the per-assignment test bundle, runs tests, emits `result.json`. Hand-editable for custom grading logic, additional dependencies, or different runtimes (see the [Autograders](Autograders) wiki page for the full contract).
+
+Plus, optionally:
+
+- `autograder.py` at the classroom root — the **classroom default autograder**, used by every assignment that doesn't have its own override. Drop it via `gh teacher autograder set-default` (no scaffold by default — classrooms work without one, the runner just publishes a vacuous-pass result).
+- `autograders/<slug>/` subdirectories — **per-assignment overrides**. One folder per assignment slug containing `autograder.py` (the entrypoint) and any sibling fixtures or helpers.
+
+Foundation50-managed pieces (the runner-side bootstrap `.github/scripts/runner.py`, the runner workflow, the publish-pages allow-list) live at the org level, not per-classroom; the autograder shim that lands in each student repo is embedded in `gh-student` and never has to be edited by a teacher.
 
 Scaffold one with:
 
@@ -79,7 +84,7 @@ gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --t
 
 The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
 
-The command commits all six paths in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
+The command commits all four paths in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
@@ -145,23 +150,25 @@ All three subcommands write through an optimistic-update-with-rebase loop (a sma
 
 ## 7. Add assignments
 
-Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, and the autograder shim that runs on submission. Register one with:
+Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, an optional runtime block, and the workflow-shim name (the `autograder` field; defaults to `default` = the universal shim embedded in `gh-student`). Register one with:
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--autograder <name>]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--runtime <path>] [--autograder <name>]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
+gh teacher assignment add cs50-fall-2026 cs-principles greet --name "Greet" --template cs50/greet-template --runtime ./runtime-c.json
 ```
 
 **`--name` and `--template` are required.** The slug must match `^[a-z0-9][a-z0-9-]{1,38}$` (the same shape as classroom short-names). The template repo must be flagged `is_template: true` (Settings → "Template repository") and visible to your token — if it lives in another org and isn't public, students won't be able to read it either. When you omit `@branch`, the CLI reads the template's default branch from `GET /repos/{owner}/{repo}` and writes that into `assignments.json`.
 
-**Per-assignment tests are NOT registered here.** Tests live as ordinary pytest files in the config repo at `<classroom>/autograders/tests/<slug>/` — see the [Autograders](Autograders) wiki page for the test-authoring workflow and the `@pytest.mark.score(N)` weighting convention.
+**Per-assignment grading is NOT registered here.** Drop an `autograder.py` at `<classroom>/autograders/<slug>/autograder.py` in the config repo — that single file is the entrypoint the runner invokes per submission. Or run `gh teacher autograder set-default <org> <classroom> --from <path>` to install a classroom default at `<classroom>/autograder.py` that grades every assignment in the classroom. See the [Autograders](Autograders) wiki page for the entrypoint contract and templates (pytest, check50, custom).
 
 **Optional flags:**
 
 - `--description <text>` — short description written into the entry.
 - `--due <ISO-8601>` — RFC 3339 timestamp with a timezone offset, e.g. `2026-09-15T23:59:00-04:00`. Stored verbatim so the timezone round-trips.
 - `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
-- `--autograder <name>` — which autograder workflow shim this assignment opts into. Defaults to `default` (the shim `gh teacher classroom add` scaffolded under `<classroom>/autograders/default.yaml`). To opt in to a per-language or bespoke shim, drop a sibling `<classroom>/autograders/<name>.yaml` in the config repo first, then pass `--autograder <name>` — the CLI verifies the file exists at write time and rejects a typo before the assignment lands. Students fetch the named shim from Pages on accept and refresh it on every submit.
+- `--runtime <path>` — JSON file describing the runtime environment for this assignment's autograde job (`runs-on`, `python` / `node` / `java` / `go`, `apt`, or a custom `container` image). Omit for the defaults (ubuntu-latest + Python 3.12). The runner reads this on every submission, so changes propagate without any student-repo edit. See the [Autograders](Autograders) wiki page for the schema and worked examples.
+- `--autograder <name>` — reserved for swapping the entire reusable workflow (rare). For different language toolchains or apt packages, use `--runtime` instead. Default `default` resolves to the universal shim embedded in `gh-student`; non-default values reference a sibling `<classroom>/autograders/<name>.yaml` you've authored, and the CLI verifies that file exists before the assignment lands.
 
 Re-running with the same slug replaces the entry in place (idempotent). New slugs append.
 
@@ -228,9 +235,9 @@ What it does on each run:
       "classroom": "cs-principles",
       "assignment": "hello",
       "usernames": ["alice"],
-      "submission": "submit/2026-06-01T14-32-05Z",
+      "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
       "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
-      "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z",
+      "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
       "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
       "datetime": "2026-06-01T14:33:11Z",
       "score": 18,

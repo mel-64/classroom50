@@ -39,11 +39,11 @@ gh student accept <org> <classroom> <assignment>
 What this command does:
 
 1. Auto-accepts any pending org invitation for your account.
-2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`) to find the template repo and which autograder workflow this assignment opts into. The template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it.
-3. Fetches the referenced autograder workflow from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`). The fetch runs *before* the repo gets created — if the autograder isn't published yet, no half-baked repo is left behind.
+2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`) to find the template repo. The template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it.
+3. Resolves the autograder workflow shim. For the default autograder (the common case), the universal shim embedded in `gh-student` is used directly. For a non-default `--autograder <name>` your instructor registered, the shim is fetched from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`) — if that fetch fails, no half-baked repo is left behind.
 4. Creates a **private** copy of the template at `<org>/<classroom>-<assignment>-<username>` (lowercased), with issues, projects, and wiki disabled.
 5. Adds you as a `maintain` collaborator on the new repo.
-6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the fetched workflow body) in a single commit. The metadata records the template, config-repo, and autograder coordinates so subsequent submissions know which autograder to refresh.
+6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the resolved shim) in a single commit. The metadata records the classroom, assignment, and template-repo identity; the runner derives everything else at workflow time.
 7. Prints the `git clone` command for your new repo.
 
 If you've already accepted this assignment, the command short-circuits with `Assignment already accepted: <org>/<repo>` and leaves your existing repo (and any work in it) alone — re-running is safe.
@@ -79,24 +79,23 @@ gh student submit
 
 ![Demo: gh student submit](images/gh_student_submit.gif)
 
-`gh student submit` snapshots your current branch, pushes it as a new commit on top of `main`, and pushes a lightweight `submit/<UTC-timestamp>` tag at the same SHA. The autograde workflow listens for that tag and publishes a GitHub Release with your score shortly after.
+`gh student submit` snapshots your current branch and pushes it as a new commit on top of `main`. The autograde workflow runs automatically on the push: it tags the commit with `submit/<UTC-timestamp>-<short-sha>`, runs the autograder, and publishes a GitHub Release with your score a minute or two later.
 
-Run this after each meaningful change — every submit gets its own tag + release, so you can iterate freely and the teacher can grade any individual submission.
+You can also `git push` directly — the result is identical. `gh student submit` exists mainly to refresh the instructor's `.gitignore` and `.github/` from the assignment template before pushing, so any teacher-side updates flow through.
 
-When submit finishes, three URLs are printed:
+When submit finishes, two URLs are printed:
 
-- **Submit tag** — links to the snapshot at the tag.
-- **Autograde** — the repo's Actions tab. The autograde run for this submission shows up there within a few seconds.
-- **Release** — the eventual scored release. 404s until the workflow finishes; once it does, the release body shows per-test results.
+- **Autograde** — the repo's Actions tab. The autograde run for this submission shows up there within a few seconds and creates the submit tag.
+- **Releases** — the releases page. The scored release lands once the workflow finishes; per-test results appear in the release body.
 
 A few useful properties:
 
-- **The autograde workflow refreshes on every submit.** `.github/workflows/autograde.yaml` is re-fetched from your instructor's Pages site on every submit — any teacher-side edit to the workflow (or to which autograder this assignment opts into in `assignments.json`) propagates the next time you submit, without you having to do anything.
+- **Every push grades.** Whether through `gh student submit` or `git push`, every commit on `main` triggers a graded run with its own tag and release. The latest release on the page is always the most recent submission.
 - **History is preserved.** Submissions overlay as commits on top of the existing `main`; prior commits stay reachable for review.
 - **No git config required.** The commit is authored with your GitHub login and noreply email, passed via `git -c user.name=... -c user.email=...`, so a fresh shell with no global git identity still submits cleanly. `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables override these defaults if you want a custom identity.
 - **Build artifacts are excluded.** Only tracked files plus untracked-not-ignored files are submitted, so build outputs and unrelated local files don't end up in the snapshot.
 
-The submit tag follows the shape `submit/2026-06-01T14-32-05Z` (UTC, hyphens between time components). Tags are immutable, so each submission's snapshot stays linkable forever.
+Submit tags follow the shape `submit/2026-06-01T14-32-05Z-a1b2c3d` (UTC timestamp, hyphens between time components, then a short SHA suffix). Tags are immutable, so each submission's snapshot stays linkable forever.
 
 ## See also
 

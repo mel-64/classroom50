@@ -179,15 +179,16 @@ These calls happen inside the autograde workflow on every student submission. `G
 |--------|-----|---------|
 | POST | [`https://api.github.com/repos/{owner}/{repo}/statuses/{sha}`](https://docs.github.com/en/rest/commits/statuses#create-a-commit-status) | Post a `classroom50/autograde` commit status (pending → success/failure) |
 
-The workflow also uses `gh release` subcommands (`view`, `edit`, `upload`, `create`) against the student's repo to publish the `result.json` asset on the submission tag release.
+The workflow also uses `git tag` + `git push` against the student's repo to create the `submit/<UTC-timestamp>-<short-sha>` tag for branch-triggered runs, and `gh release` subcommands (`view`, `edit`, `upload`, `create`) to publish the `result.json` asset on the submission tag release. The latest-pointer flip lives in a separate `set-latest` job with a per-repo concurrency group so concurrent submissions can't race on the read-modify-write.
 
-The runner bootstrap also fetches from GitHub Pages without authentication (public by design):
+The runner setup also fetches from GitHub Pages without authentication (public by design):
 
 | Method | URL | Purpose |
 |--------|-----|---------|
-| GET | `https://{org}.github.io/classroom50/{classroom}/assignments.json` | Load the classroom's assignment manifest (to look up the autograder name for this assignment) |
-| GET | `https://{org}.github.io/classroom50/{classroom}/autograders/autograde.py` | Fetch the orchestrator script (fixed path; one per classroom) |
-| GET | `https://{org}.github.io/classroom50/{classroom}/autograders/tests/{slug}.tar.gz` | Download the per-assignment test bundle (fetched by `autograde.py` at runtime) |
+| GET | `https://{org}.github.io/classroom50/{classroom}/assignments.json` | Load the classroom's assignment manifest (and the per-assignment runtime block for the grade job) |
+| GET | `https://{org}.github.io/classroom50/runner.py` | Fetch the runner-side bootstrap (org-level; one per config repo, shared across all classrooms) |
+| GET | `https://{org}.github.io/classroom50/{classroom}/autograder.py` | Fetch the classroom default autograder (only when set via `gh teacher autograder set-default` and the assignment has no per-assignment override). 404 → runner publishes a vacuous-pass result. |
+| GET | `https://{org}.github.io/classroom50/{classroom}/autograders/{slug}.tar.gz` | Download the per-assignment bundle (entrypoint `autograder.py` plus any sibling fixtures; fetched by `runner.py` at runtime) |
 
 ---
 
@@ -197,9 +198,9 @@ The runner bootstrap also fetches from GitHub Pages without authentication (publ
 
 | File | Triggers | Purpose |
 |------|----------|---------|
-| `publish-pages.yaml` | Push to default branch, `workflow_dispatch` | Deploy `assignments.json`, autograder YAMLs, and test tarballs to GitHub Pages |
+| `publish-pages.yaml` | Push to default branch, `workflow_dispatch` | Deploy `assignments.json`, classroom-default `autograder.py` files, autograder workflow shims, the runner-side bootstrap, and per-assignment bundles to GitHub Pages |
 | `collect-scores.yaml` | `workflow_dispatch`, cron `17 4 * * *` UTC | Run `collect_scores.py`, aggregate `result.json` assets into `*/scores.json` |
-| `autograde-runner.yaml` (reusable) | Called from each student's `autograde.yaml` | Bootstrap from Pages, run `autograde.py`, publish commit status and release |
+| `autograde-runner.yaml` (reusable) | Called from each student's `autograde.yaml` | Set up runtime (toolchains, container) per `assignments.json`, fetch `runner.py` from Pages, run it, publish commit status and submit-tag release |
 
 ---
 

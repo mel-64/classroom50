@@ -51,14 +51,14 @@ Three things to check, in order:
 
 `gh student submit` reads template metadata from `.classroom50.yaml` at the repo root. If it's missing, you're likely running submit from outside the cloned assignment repo, or from a clone that wasn't created by `gh student accept` (which is what writes that file). `cd` into the directory the `git clone` command created and try again.
 
-## "autograder `<name>` not published yet" on `gh student accept` or `gh student submit`
+## "autograder `<name>` not published yet" on `gh student accept`
 
 The assignment's `assignments.json` references an autograder workflow whose YAML isn't on the Pages site. Two common causes:
 
-1. **The file doesn't exist.** Ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the `classroom50` config repo. By default, `gh teacher classroom add` scaffolds `default.yaml`; if the assignment was registered with `--autograder <other>`, the corresponding file has to be created by hand.
+1. **The file doesn't exist.** This error only fires for non-default `--autograder <name>` values. The `default` autograder is embedded in `gh-student` itself and never needs a config-repo file. For other names (e.g. `--autograder c-makefile`), the corresponding `<classroom>/autograders/<name>.yaml` must be hand-created in the config repo before the assignment is registered. Ask your instructor to confirm the file is there.
 2. **`publish-pages.yaml` hasn't run yet.** Even when the file exists in the config repo, the Pages site needs the publish workflow to deploy. A fresh classroom dir requires one Pages deployment to surface the autograders; ask your instructor to wait a minute and try again.
 
-## "autograder `<name>` is malformed YAML" on `gh student accept` or `gh student submit`
+## "autograder `<name>` is malformed YAML" on `gh student accept`
 
 The instructor's autograder workflow has a YAML syntax error. `gh student` validates the fetched YAML before writing it into your repo, so a broken file never lands. Ask the instructor to check `<classroom>/autograders/<name>.yaml` in the config repo and re-run after they fix it.
 

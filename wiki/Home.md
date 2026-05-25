@@ -17,9 +17,10 @@ Reference docs:
 - [`gh teacher`](gh-teacher) — every teacher command and flag.
 - [`gh student`](gh-student) — every student command and flag.
 - [Assignment Templates](Assignment-Templates) — what an assignment template repo should look like.
-- [Autograders](Autograders) — the shim/runner/orchestrator autograding stack.
+- [Autograders](Autograders) — the shim/runner/autograder autograding stack.
 - [GitHub Integration](GitHub-Integration) — manual GitHub setup, REST API reference, Actions workflows.
 - [Troubleshooting](Troubleshooting) — common errors and debug flags.
+- [examples/autograders/](https://github.com/foundation50/classroom50/tree/main/examples/autograders) — drop-in autograder configurations.
 
 ## Get help
 
