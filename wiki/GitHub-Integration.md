@@ -6,13 +6,13 @@ This page documents every place where Classroom 50 touches GitHub's API or authe
 
 ### 1. Org setup (one-time, github.com web UI)
 
-The CLI never creates or modifies orgs. Do the following once before running any CLI commands:
+The CLI never creates the org for you. Do the following once before running any CLI commands:
 
 1. **Create the organization** at <https://github.com/account/organizations/new>. Free orgs work for public template repos; Team or Enterprise Cloud is required for GitHub Pages from a private repo (the `classroom50` config repo is private).
 
-2. **Set the base permission to "No permission"** at `https://github.com/organizations/<org>/settings/member_privileges`. This ensures students only see repos they've been explicitly invited to — without it, students can read every repo in the org.
+2. **Flag your template repos as templates** under each repo's `Settings → General → Template repository`. Templates must also be **public** on Free and Team plans so students can read them (the "No permission" baseline prevents org members from reading private repos they aren't direct collaborators on). GitHub Enterprise Cloud's "internal" visibility is the exception — see [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).
 
-3. **Flag your template repos as templates** under each repo's `Settings → General → Template repository`. Templates must also be **public** on Free and Team plans so students can read them (the "No permission" baseline prevents org members from reading private repos they aren't direct collaborators on). GitHub Enterprise Cloud's "internal" visibility is the exception — see [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).
+Org-level member defaults (base permission = "No permission", public-repo creation disabled) are no longer a manual step — `gh teacher init` applies them via `PATCH /orgs/{org}` (see the REST table below). 403/422 from an enterprise-locked policy is the one case where you'd still flip them yourself at `https://github.com/organizations/<org>/settings/member_privileges`; init warns with that link when it can't apply them.
 
 ### 2. Teacher authentication (`gh teacher login`)
 
@@ -114,6 +114,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 |--------|-----|---------|
 | GET | [`https://api.github.com/user`](https://docs.github.com/en/rest/users/users#get-the-authenticated-user) | Verify authenticated identity (whoami) |
 | GET | [`https://api.github.com/orgs/{org}`](https://docs.github.com/en/rest/orgs/orgs#get-an-organization) | Check org plan (warn if Pages from a private repo requires Team or Enterprise Cloud) |
+| PATCH | [`https://api.github.com/orgs/{org}`](https://docs.github.com/en/rest/orgs/orgs#update-an-organization) | Tighten org member defaults at `init` time: `default_repository_permission: "none"` + `members_can_create_public_repositories: false` |
 | POST | [`https://api.github.com/orgs/{org}/repos`](https://docs.github.com/en/rest/repos/repos#create-an-organization-repository) | Create the `classroom50` config repo |
 | GET | [`https://api.github.com/repos/{owner}/{repo}`](https://docs.github.com/en/rest/repos/repos#get-a-repository) | Check whether the config repo already exists |
 | POST | [`https://api.github.com/repos/{owner}/{repo}/pages`](https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site) | Enable GitHub Pages (workflow build source) |
