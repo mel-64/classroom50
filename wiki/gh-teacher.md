@@ -16,6 +16,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher remove <org> <user>` | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent. |
 | `gh teacher remove <org>/<repo> <user>` | Remove user from a single repo. Idempotent. |
 | `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` to skip the roster lookup and clone by name prefix instead. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
+| `gh teacher teardown <org>` | Delete every repo in a Classroom 50 org (development reset). Requires `<org>/classroom50` to exist (the marker repo guards against accidental teardown of non-Classroom orgs); prompts for typed org-name confirmation unless `--yes`; deletes `classroom50` last so an interrupted run stays safe to re-run. Requires the `delete_repo` OAuth scope (opt in once via `gh teacher login -s delete_repo`). |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
@@ -396,6 +397,32 @@ Pages through `GET /orgs/{org}/repos` ([docs](https://docs.github.com/en/rest/re
 Default is `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup. Pass `-d` to override (the value is taken literally, no timestamp appended).
 
 Existing target dirs are skipped on the clone step, so re-runs with the same `-d` pick up new submissions without aborting on the ones already cloned. `result.json` is still refreshed on the existing clones — so a re-run after the latest collect-scores cycle picks up the newest score without re-cloning. Clone failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code; a non-zero exit code surfaces after the rest of the run still completes.
+
+## `gh teacher teardown`
+
+```sh
+gh teacher teardown <org>              # interactive (typed org-name prompt)
+gh teacher teardown --yes <org>        # skip the prompt (scripted runs)
+```
+
+Delete every repository in `<org>` after confirming the org is a Classroom 50 setup. Intended for **development scenarios** — resetting a test org between runs of `gh teacher init` / `migrate` / etc. Production teachers should use the GitHub web UI for selective deletion; this is a sledgehammer.
+
+**What it does:**
+
+1. Confirms the marker repo exists: `GET /repos/<org>/classroom50`. A 404 refuses teardown with `not found — refusing teardown on an org without the Classroom 50 marker repo`. This is the safety net that prevents accidental nukes of orgs that aren't dedicated to a single classroom.
+2. Lists every repo in the org via `GET /orgs/<org>/repos` (paginated). Prints the full set on stdout — teachers see exactly what's about to disappear.
+3. Prompts for **typed org-name confirmation** (e.g. `Type the org name (cs50-fall-2026) to confirm:`). Anything other than the org name aborts with `confirmation did not match org name — aborted without deleting anything`. Pass `--yes` to skip the prompt; CI / scripts only.
+4. Issues `DELETE /repos/<org>/<repo>` for each repo. `<org>/classroom50` is deleted **last** so a mid-run failure leaves the marker repo behind — re-running teardown still passes the precondition check and tries again on the survivors.
+5. Per-repo failures are tolerated: each prints to stderr with the failure reason and the run continues. Exits non-zero when any repo failed so scripts see the partial-completion signal.
+
+**Required scope (opt-in).** `delete_repo` is NOT part of the default `gh teacher login` scope set. Opt in once with `gh teacher login -s delete_repo` before running teardown. This is intentional: teachers who haven't explicitly opted in can't accidentally wipe their org. If your token lacks the scope, the first `DELETE` returns 403 and teardown surfaces an actionable hint pointing back at `gh teacher login -s delete_repo`.
+
+**Errors:**
+
+- `<org>/classroom50` not found → refuses with the "Classroom 50 marker repo" message. Re-create with `gh teacher init <org>` if this is intended, or delete repos manually via the web UI.
+- Confirmation mismatch → aborts cleanly, no `DELETE` calls are made.
+- 403 on a `DELETE` → token lacks `delete_repo`. Run `gh teacher login -s delete_repo` and retry.
+- Other per-repo failures → continue the run, print to stderr, exit non-zero at the end.
 
 ## `gh teacher whoami` / `login` / `logout`
 
