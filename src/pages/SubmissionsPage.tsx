@@ -27,7 +27,7 @@ const SubmissionsPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa]">
-          <Breadcrumb submissions />
+          <Breadcrumb endpoint="Submissions" />
           <div className="flex justify-between">
             <div>
               <h1 className="text-lg pt-8 pb-2 font-bold">
@@ -52,7 +52,7 @@ const SubmissionsPage = () => {
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">
                 <label className="uppercase">Submitted</label>
-                <div className="flex items-end gap-1">
+                <div className="flex items-end content-end gap-1">
                   <h2 className="text-xl font-bold">{scoresInfo.length}</h2>/
                   <h4>{students.length}</h4>
                 </div>

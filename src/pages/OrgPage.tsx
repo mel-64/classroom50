@@ -10,17 +10,17 @@ const OrgPage = () => {
     useCourseTeacherAccess(params.org)
   const { data: classesData } = useGetClasses(params.org)
 
-  useEffect(() => {
-    console.log("teacher repo", teacherRepo)
-    console.log("isTeacher", isTeacher)
-    console.log("isStudent", isStudent)
-    console.log("isBlocked", isBlocked)
-  }, [teacherRepo, isTeacher, isStudent, isBlocked])
-
-  useEffect(() => {
-    console.log("classes data", classesData)
-    console.log("typeof classesData", typeof classesData)
-  }, [classesData])
+  // useEffect(() => {
+  //   console.log("teacher repo", teacherRepo)
+  //   console.log("isTeacher", isTeacher)
+  //   console.log("isStudent", isStudent)
+  //   console.log("isBlocked", isBlocked)
+  // }, [teacherRepo, isTeacher, isStudent, isBlocked])
+  //
+  // useEffect(() => {
+  //   console.log("classes data", classesData)
+  //   console.log("typeof classesData", typeof classesData)
+  // }, [classesData])
 
   return (
     <div>

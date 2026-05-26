@@ -3,6 +3,7 @@ import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
+import useGetClassroom from "@/hooks/useGetClassroom"
 
 const Drawer = ({ children }) => (
   <div className="drawer lg:drawer-open">{children}</div>
@@ -35,30 +36,34 @@ export const TeacherLogo = () => {
   )
 }
 
-export const AllClasses = () => {
+export const AllClasses = ({ org }) => {
   return (
     <div className="py-4 text-sm">
-      <Link to="/cs50/classes" className="text-center">
+      <Link to={`/${org}/classes`} className="text-center">
         ‹ All Classes
       </Link>
     </div>
   )
 }
 
-export const SidebarClassInfo = () => {
+export const SidebarClassInfo = ({ classInfo }) => {
   return (
     <div className="py-2">
-      <h3 className="font-bold">AP CS Principles</h3>
-      <p className="text-gray-500 text-sm">Spring 2026</p>
+      <h3 className="font-bold">
+        {classInfo?.name || classInfo?.short_name || "Untitled Course"}
+      </h3>
+      <p className="text-gray-500 text-sm">
+        {classInfo?.term || "Unspecified Term"}
+      </p>
     </div>
   )
 }
 
-export const TeacherSidebarMenu = ({ selected }) => {
+export const TeacherSidebarMenu = ({ org, classroom, selected }) => {
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to="/cs50/cs50-2026/assignments">
+        <Link to={`/${org}/${classroom}/assignments`}>
           <li
             className={`flex ${selected === "assignments" && "bg-[#323b49]"}`}
           >
@@ -66,7 +71,7 @@ export const TeacherSidebarMenu = ({ selected }) => {
             <span>Assignments</span>
           </li>
         </Link>
-        <Link to="/cs50/cs50-2026/students">
+        <Link to={`/${org}/${classroom}/students`}>
           <li className={`flex ${selected === "students" && "bg-[#323b49]"}`}>
             <UsersRound />
             <span>Students</span>
@@ -117,12 +122,15 @@ export const SidebarFooter = () => {
 }
 
 export const SidebarContent = ({ selected }: { selected: boolean }) => {
+  const { org, classroom } = useParams({ strict: false })
+  const { data: classData } = useGetClassroom(org, classroom)
+
   return (
     <>
       <TeacherLogo />
-      <AllClasses />
-      <SidebarClassInfo />
-      <TeacherSidebarMenu selected={selected} />
+      <AllClasses org={org} />
+      <SidebarClassInfo classInfo={classData} />
+      <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
       <SidebarFooter />
     </>
   )

@@ -17,18 +17,6 @@ const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
   const { data: classData } = useGetClassroomAssignments(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
 
-  useEffect(() => {
-    console.log("students", students)
-  }, [students])
-
-  useEffect(() => {
-    console.log("class", cl)
-  }, [cl])
-
-  useEffect(() => {
-    console.log("classData", classData)
-  }, [classData])
-
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
       <div className="card-body gap-4">
@@ -37,14 +25,16 @@ const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
         >
           {cl.term || "No Term Specified"}
         </label>
-        <h1 className="text-xl">{cl.title || "Unknown Class Name"}</h1>
+        <h1 className="text-xl">
+          {cl.name || cl.short_name || "Unknown Class Name"}
+        </h1>
         <div className="flex gap-2">
           <UsersRound />
           {students ? `${students.length} Students` : "No Students"}
         </div>
         <div className="flex gap-2">
           <GitHub className="size-4 opacity-25" />
-          <pre>{cl.org || "No Org Specified"}</pre>
+          <pre>{org}</pre>
         </div>
         {classData?.assignments.length ? (
           <Link
@@ -66,8 +56,12 @@ const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
 }
 
 const ClassesPage = () => {
-  const params = useParams({ from: "/$org/" })
-  const { data: classesData } = useGetClasses(params.org)
+  const { org } = useParams({ strict: false })
+  const { data: classesData } = useGetClasses(org)
+
+  useEffect(() => {
+    console.log("classes data", classesData)
+  }, [classesData])
 
   return (
     <div className="min-h-screen">
@@ -89,7 +83,7 @@ const ClassesPage = () => {
             {classesData
               ?.filter((cl) => cl.type === "dir" && cl.name !== ".github")
               .map((cl) => (
-                <ClassCard cl={cl} org={params.org} />
+                <ClassCard cl={cl} org={org} />
               ))}
           </div>
         </DrawerContent>
