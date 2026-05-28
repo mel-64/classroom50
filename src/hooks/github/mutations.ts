@@ -18,7 +18,7 @@ const createClassroomMetadata = (
 ) => ({
   schema: "classroom50/classroom/v1",
   name,
-  classroom,
+  short_name: classroom,
   term: "",
   org,
 })
@@ -41,7 +41,7 @@ const createClassroomBody = (
         path: `${classroom}/assignments.json`,
         mode,
         type,
-        content: JSON.stringify(ASSIGNMENTS_TEMPLATE),
+        content: JSON.stringify(ASSIGNMENTS_TEMPLATE, null, 2),
       },
       {
         path: `${classroom}/students.csv`,
@@ -53,22 +53,33 @@ const createClassroomBody = (
         path: `${classroom}/scores.json`,
         mode,
         type,
-        content: JSON.stringify({
-          schema: "classroom50/scores/v1",
-          submissions: "{}",
-        }),
+        content: JSON.stringify(
+          {
+            schema: "classroom50/scores/v1",
+            submissions: "{}",
+          },
+          null,
+          2,
+        ),
       },
       {
         path: `${classroom}/classroom.json`,
         mode,
         type,
-        content: JSON.stringify(createClassroomMetadata(org, classroom, name)),
+        content: JSON.stringify(
+          createClassroomMetadata(org, classroom, name),
+          null,
+          2,
+        ),
       },
     ],
   }
 }
 
-export function createTree(client: GitHubClient, input: CreateClassroomInput) {
+export function createTree(
+  client: GitHubClient,
+  input: CreateClassroomInput & { base_tree: string },
+) {
   const { base_tree, org, classroom, name } = input
   return client.request<GitHubCreateTree>(
     `/repos/${org}/classroom50/git/trees`,
@@ -81,9 +92,9 @@ export function createTree(client: GitHubClient, input: CreateClassroomInput) {
 
 export function createCommit(
   client: GitHubClient,
-  input: CreateClassroomInput,
+  input: CreateClassroomInput & { parents: [string]; tree_sha: string },
 ) {
-  const { classroom, current_commit, tree_sha, org } = input
+  const { classroom, tree_sha, org, parents } = input
   return client.request<GitHubCreateCommit>(
     `/repos/${org}/classroom50/git/commits`,
     {
@@ -91,7 +102,7 @@ export function createCommit(
       body: {
         message: `Create init files for new classroom: ${classroom}`,
         tree: tree_sha,
-        parents: [current_commit],
+        parents,
       },
     },
   )
@@ -129,16 +140,16 @@ export async function createClassroomFiles(
   })
   const newCommit = await createCommit(client, {
     ...input,
-    tree_sha: tree.tree.sha,
+    tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
-  const updatedRef = await updateRef(client, input.org, newCommit.commit.sha)
+  const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
   return {
     previousCommitSha: ref.object.sha,
     baseTreeSha: commit.tree.sha,
-    newTreeSha: tree.tree.sha,
-    newCommitSha: newCommit.commit.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
     updatedRef,
   }
 }
@@ -147,10 +158,6 @@ export type CreateClassroomInput = {
   org: string
   name: string
   classroom: string
-  base_tree: string
-  current_commit: string
-  tree_sha: string
-  parents: string[]
 }
 export async function createClassroomFilesWithConflictRetry(
   client: GitHubClient,

@@ -1,3 +1,4 @@
+import { useParams } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
 
 import {
@@ -17,6 +18,7 @@ import CreateClassroomForm from "./classes/CreateClassroomForm"
 
 const CreateClassroomPage = () => {
   const client = useGitHubClient()
+  const { org } = useParams({ strict: false })
   const createClassroomMutation = useMutation<
     CreateClassroomResult,
     GitHubAPIError,
@@ -58,7 +60,15 @@ const CreateClassroomPage = () => {
           </div>
           <div className="flex flex-col">
             <div className="mb-8">
-              <CreateClassroomForm />
+              <CreateClassroomForm
+                onSubmit={(values) =>
+                  createClassroomMutation.mutateAsync({
+                    name: values.name,
+                    classroom: values.slug,
+                    org,
+                  })
+                }
+              />
             </div>
             <div className="divider" />
             <div className="flex justify-end gap-2">

@@ -50,9 +50,10 @@ export function createGitHubClient(args: {
       signal: options.signal,
     })
 
-    if (!res.ok) {
-      const rateLimit = readGitHubRateLimitHeaders(res)
+    const rateLimit = readGitHubRateLimitHeaders(res)
+    console.warn("rate limit headers", rateLimit)
 
+    if (!res.ok) {
       let body: unknown = null
       const text = await res.text()
 

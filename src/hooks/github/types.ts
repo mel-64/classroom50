@@ -28,15 +28,11 @@ export type GitHubCommitRef = {
 }
 
 export type GitHubCreateTree = {
-  tree: {
-    sha: string
-  }
+  sha: string
 }
 
 export type GitHubCreateCommit = {
-  commit: {
-    sha: string
-  }
+  sha: string
 }
 
 export type GitHubMoveBranch = {
