@@ -67,7 +67,7 @@ const ClassesPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa]">
+        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <div className="flex justify-between">
             <div>
               <h1 className="text-lg pt-8 pb-2 font-bold">My Classes</h1>

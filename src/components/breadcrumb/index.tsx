@@ -6,7 +6,7 @@ const Breadcrumb = ({
   className,
   endpoint,
 }: {
-  className: string
+  className?: string
   endpoint: string
 }) => {
   const { org, classroom, assignment } = useParams({ strict: false })

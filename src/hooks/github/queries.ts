@@ -2,7 +2,13 @@ import { queryOptions } from "@tanstack/react-query"
 import Papa from "papaparse"
 
 import type { GitHubClient } from "./client"
-import type { GitHubOrgMembership, GitHubRepo, GitHubUser } from "./types"
+import type {
+  GitHubBranchRef,
+  GitHubCommitRef,
+  GitHubOrgMembership,
+  GitHubRepo,
+  GitHubUser,
+} from "./types"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -14,6 +20,10 @@ export const githubKeys = {
 
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
+
+  branchRef: (org: string) => [...githubKeys.all, "branchRef", org] as const,
+  commitTree: (org: string, branchSha: string) =>
+    [...githubKeys.all, "commitRef", org, branchSha] as const,
 
   rawFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "raw-file", owner, repo, path, ref ?? null] as const,
@@ -43,6 +53,52 @@ export function orgMembershipQuery(client: GitHubClient, org: string) {
       ),
     enabled: Boolean(org),
     staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+export function getBranchRef(client: GitHubClient, org: string) {
+  return client.request<GitHubBranchRef>(
+    `/repos/${org}/classroom50/git/ref/heads/main`,
+  )
+}
+
+export function branchRefQuery(client: GitHubClient, org: string) {
+  return queryOptions({
+    queryKey: githubKeys.branchRef(org),
+    queryFn: ({ signal }) =>
+      client.request<GitHubBranchRef>(
+        `/repos/${org}/classroom50/git/ref/heads/main`,
+        { signal },
+      ),
+    enabled: Boolean(org),
+    staleTime: 60 * 1000,
+    retry: false,
+  })
+}
+
+export function getCommit(
+  client: GitHubClient,
+  org: string,
+  branchSha: string,
+) {
+  return client.request<GitHubCommitRef>(
+    `/repos/${org}/classroom50/git/commits/${branchSha}`,
+  )
+}
+export function commitQuery(
+  client: GitHubClient,
+  org: string,
+  branchSha: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.commitTree(org, branchSha),
+    queryFn: ({ signal }) =>
+      client.request<GitHubCommitRef>(
+        `/repos/${org}/classroom50/git/commits/${branchSha}`,
+        { signal },
+      ),
+    enabled: Boolean(org && branchSha),
+    staleTime: 60 * 1000,
     retry: false,
   })
 }

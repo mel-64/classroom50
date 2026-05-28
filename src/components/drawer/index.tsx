@@ -14,7 +14,7 @@ export const DrawerContent = ({ children, className }) => (
 )
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
-export const DrawerSidebar = ({ selected, page }) => {
+export const DrawerSidebar = ({ selected, page = "" }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
@@ -65,14 +65,16 @@ export const TeacherSidebarMenu = ({ org, classroom, selected }) => {
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
         <Link to={`/${org}/${classroom}/assignments`}>
           <li
-            className={`flex ${selected === "assignments" && "bg-[#323b49]"}`}
+            className={`flex px-2 ${selected === "assignments" && "bg-[#323b49] rounded-box"}`}
           >
             <BookText />
             <span>Assignments</span>
           </li>
         </Link>
         <Link to={`/${org}/${classroom}/students`}>
-          <li className={`flex ${selected === "students" && "bg-[#323b49]"}`}>
+          <li
+            className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
+          >
             <UsersRound />
             <span>Students</span>
           </li>
@@ -141,7 +143,7 @@ export const MyClasses = () => {
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
         <Link to="/cs50/cs50-2026/students">
-          <li className="flex bg-[#323b49]">
+          <li className="flex bg-[#323b49] px-2 rounded-box">
             <BookText />
             <span>My Classes</span>
           </li>

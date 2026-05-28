@@ -1,6 +1,6 @@
-import GitHub from '@/assets/github.svg?react'
+import GitHub from "@/assets/github.svg?react"
 
-const Avatar = ({ children, initials, name, github }) => {
+const Avatar = ({ initials, name, github }) => {
   return (
     <div className="flex gap-3">
       <div className="avatar avatar-placeholder">
@@ -10,9 +10,7 @@ const Avatar = ({ children, initials, name, github }) => {
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-base-content">
-          {name}
-        </div>
+        <div className="font-medium text-base-content">{name}</div>
 
         <div className="flex items-center gap-1 text-sm text-base-content/60">
           <GitHub className="size-4" />

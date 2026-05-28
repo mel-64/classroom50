@@ -1,6 +1,6 @@
 import { Trash } from "lucide-react"
 
-import { capitalize, getName, getInitials } from "@/util/students"
+import { getName, getInitials } from "@/util/students"
 import Avatar from "@/components/avatar"
 
 const EnrolledStudents = ({ students }) => (

@@ -4,21 +4,21 @@ import {
   SquareArrowOutUpRight,
 } from "lucide-react"
 
-import { capitalize, getName, getInitials } from "@/util/students"
+import { getName, getInitials } from "@/util/students"
 import Avatar from "@/components/avatar"
 
 // <= 50% = red
 // >= 60% = yellow
 // >= 70% = green
 const scoreToBadgeType = (score: number, max: number) => {
-  let percent = (score / max) * 100
+  const percent = (score / max) * 100
 
   if (percent <= 50) return "badge-error"
   if (percent < 70) return "badge-warning"
   return "badge-success"
 }
 
-const SubmissionsTable = ({ org, classroom, assignment, scores, students }) => {
+const SubmissionsTable = ({ scores, students }) => {
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <table className="table">

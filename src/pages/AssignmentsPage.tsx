@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { Link, useParams } from "@tanstack/react-router"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
@@ -17,11 +18,15 @@ const AssignmentsPage = () => {
   const { students } = useGetStudents(org, classroom)
   const { data: classroomData } = useGetClassroom(org, classroom)
 
+  useEffect(() => {
+    console.log("assignment data", classData)
+  }, [classData])
+
   return (
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa]">
+        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb />
           <div className="flex justify-between">
             <div>
@@ -34,7 +39,7 @@ const AssignmentsPage = () => {
               </h3>
             </div>
             <div className="pt-10">
-              <Link to="/cs50/cs50-2026/assignments/new">
+              <Link to={`/${org}/${classroom}/assignments/new`}>
                 <button className="btn btn-primary">+ Assignment</button>
               </Link>
             </div>
@@ -43,6 +48,7 @@ const AssignmentsPage = () => {
             org={org}
             classroom={classroom}
             assignments={classData?.assignments}
+            students={students}
           />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />

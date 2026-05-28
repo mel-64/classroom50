@@ -25,7 +25,7 @@ export function createGitHubClient(args: {
 
   async function requestInternal(
     path: string,
-    options: GitHubRequestOptions = {},
+    options: GitHubRequestOptions = { method: "GET" },
   ): Promise<Response> {
     const url = path.startsWith("http")
       ? path

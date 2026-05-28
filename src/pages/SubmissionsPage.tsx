@@ -26,7 +26,7 @@ const SubmissionsPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa]">
+        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Submissions" />
           <div className="flex justify-between">
             <div>
@@ -73,13 +73,7 @@ const SubmissionsPage = () => {
               </div>
             </div>
           </div>
-          <SubmissionsTable
-            org={org}
-            classroom={classroom}
-            assignment={assignment}
-            scores={scoresInfo}
-            students={students}
-          />
+          <SubmissionsTable scores={scoresInfo} students={students} />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
       </Drawer>

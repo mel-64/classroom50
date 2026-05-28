@@ -20,7 +20,7 @@ const StudentListPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa]">
+        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Students" />
           <h1 className="text-lg pt-8 pb-2 font-bold">Students</h1>
           <h3 className="pb-10">

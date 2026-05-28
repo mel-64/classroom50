@@ -1,7 +1,15 @@
 import { Link } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
+import useGetScores from "@/hooks/useGetScores"
+import { useEffect } from "react"
+
 const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
+  const { data: scoresData } = useGetScores(org, classroom)
+
+  useEffect(() => {
+    console.log("scores data", scoresData)
+  }, [scoresData])
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <div className="table">
@@ -38,13 +46,15 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               </td>
               <td>
                 {/* TODO: need to grab # of submissions and # of total students here */}
-                {assignment.submissions || 0} / {students.length}{" "}
+                {scoresData?.submissions?.[assignment.slug]?.length || 0} /{" "}
+                {students.length}{" "}
                 <progress
                   className="progress progress-info w-56"
                   value={
                     students.length === 0
                       ? 0
-                      : (assignment.submissions / students.length) * 100
+                      : (scoresData?.submissions?.[assignment.slug]?.length ||
+                          0 / students.length) * 100
                   }
                   max="100"
                 ></progress>

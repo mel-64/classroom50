@@ -9,6 +9,43 @@ export type GitHubOrgMembership = {
   }
 }
 
+export type GitHubBranchRef = {
+  ref: string
+  node_id: string
+  url: string
+  object: {
+    type: string
+    sha: string
+    url: string
+  }
+}
+
+export type GitHubCommitRef = {
+  sha: string
+  tree: {
+    sha: string
+  }
+}
+
+export type GitHubCreateTree = {
+  tree: {
+    sha: string
+  }
+}
+
+export type GitHubCreateCommit = {
+  commit: {
+    sha: string
+  }
+}
+
+export type GitHubMoveBranch = {
+  ref: string
+  object: {
+    sha: string
+  }
+}
+
 export type GitHubRepo = {
   id: number
   name: string
