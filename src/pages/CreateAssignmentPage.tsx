@@ -76,6 +76,7 @@ const CreateAssignmentPage = () => {
                     due_date: values.due_date,
                     max_group_size: values.max_group_size,
                     classroom,
+                    tests: values.tests,
                   })
                 }
               />

@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
+import type { AssignmentTest } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
   name: string
@@ -9,12 +10,26 @@ export type CreateAssignmentFormValues = {
   template_repo: string
   due_date: string
   max_group_size: number
+  tests: AssignmentTest[]
 }
 
 type CreateAssignmentFormProps = {
   defaultValues?: Partial<CreateAssignmentFormValues>
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>
 }
+const FormErrors = ({ form }) => (
+  <form.Subscribe selector={(state) => [state.errors, state.errorMap]}>
+    {([errors]) => (
+      <div>
+        {errors.map((err) => (
+          <p className="text-error" key={err}>
+            {err}
+          </p>
+        ))}
+      </div>
+    )}
+  </form.Subscribe>
+)
 
 const CreateAssignmentForm = ({
   defaultValues,
@@ -28,6 +43,7 @@ const CreateAssignmentForm = ({
       template_repo: defaultValues?.template_repo ?? "",
       due_date: defaultValues?.due_date ?? new Date().toString(),
       max_group_size: defaultValues?.max_group_size ?? 2,
+      tests: defaultValues?.tests ?? [],
     } satisfies CreateAssignmentFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -41,6 +57,12 @@ const CreateAssignmentForm = ({
           errors.max_group_size = "Max group size must be a valid number."
         }
 
+        value.tests.forEach((test, index) => {
+          if (!Number.isFinite(test.points)) {
+            errors[`tests[${index}].points`] = "Points must be a valid number"
+          }
+        })
+
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
       },
     },
@@ -52,6 +74,7 @@ const CreateAssignmentForm = ({
         template_repo: value.template_repo.trim(),
         due_date: value.due_date.trim(),
         max_group_size: value.max_group_size,
+        tests: value.tests,
       })
     },
   })
@@ -233,20 +256,9 @@ const CreateAssignmentForm = ({
             }
           </form.Subscribe>
         </div>
-
-        <form.Subscribe selector={(state) => [state.errors, state.errorMap]}>
-          {([errors, errorMap]) => (
-            <div>
-              {errors.map((err) => (
-                <p className="text-error" key={err}>
-                  {err}
-                </p>
-              ))}
-            </div>
-          )}
-        </form.Subscribe>
+        <FormErrors form={form} />
       </div>
-      <AutogradingTestsPane />
+      <AutogradingTestsPane form={form} />
       <div className="divider" />
       <div className="card-actions justify-end p-2">
         <form.Subscribe

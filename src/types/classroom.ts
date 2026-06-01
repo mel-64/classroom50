@@ -25,3 +25,10 @@ export type Assignment = {
     }
   }
 }
+
+export type AssignmentTest = {
+  name: string
+  input: string
+  output: string
+  points: number
+}

@@ -66,6 +66,7 @@ const CreateClassroomPage = () => {
                     name: values.name,
                     classroom: values.slug,
                     org,
+                    term: values.term,
                   })
                 }
               />

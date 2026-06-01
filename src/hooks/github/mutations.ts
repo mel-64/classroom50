@@ -11,6 +11,7 @@ import {
   getCommit,
   type AssignmentsFile,
 } from "./queries"
+import type { AssignmentTest } from "@/types/classroom"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -20,11 +21,12 @@ const createClassroomMetadata = (
   org: string,
   classroom: string,
   name: string,
+  term: string,
 ) => ({
   schema: "classroom50/classroom/v1",
   name,
   short_name: classroom,
-  term: "",
+  term,
   org,
 })
 
@@ -35,6 +37,7 @@ const createClassroomBody = (
   org: string,
   classroom: string,
   name: string,
+  term: string,
 ) => {
   const mode = "100644"
   const type = "blob"
@@ -72,7 +75,7 @@ const createClassroomBody = (
         mode,
         type,
         content: JSON.stringify(
-          createClassroomMetadata(org, classroom, name),
+          createClassroomMetadata(org, classroom, name, term),
           null,
           2,
         ),
@@ -83,14 +86,14 @@ const createClassroomBody = (
 
 export function createTree(
   client: GitHubClient,
-  input: CreateClassroomInput & { base_tree: string },
+  input: CreateClassroomInput & { base_tree: string; term: string },
 ) {
-  const { base_tree, org, classroom, name } = input
+  const { base_tree, org, classroom, name, term } = input
   return client.request<GitHubCreateTree>(
     `/repos/${org}/classroom50/git/trees`,
     {
       method: "POST",
-      body: createClassroomBody(base_tree, org, classroom, name),
+      body: createClassroomBody(base_tree, org, classroom, name, term),
     },
   )
 }
@@ -142,6 +145,7 @@ export async function createClassroomFiles(
   const tree = await createTree(client, {
     ...input,
     base_tree: commit.tree.sha,
+    term: input.term,
   })
   const newCommit = await createCommit(client, {
     ...input,
@@ -177,6 +181,7 @@ export type CreateClassroomInput = {
   org: string
   name: string
   classroom: string
+  term: string
 }
 export async function createClassroomFilesWithConflictRetry(
   client: GitHubClient,
@@ -261,6 +266,7 @@ export async function createAssignment(
       branch: "main",
     },
     mode: input.mode,
+    tests: input.tests,
     max_group_size: input.max_group_size,
     autograder: "",
     runtime: {
@@ -323,6 +329,7 @@ export type CreateAssignmentInput = {
   classroom: string
   org: string
   max_group_size: number
+  tests: AssignmentTest[]
 }
 export async function createAssignmentWithConflictRetry(
   client: GitHubClient,

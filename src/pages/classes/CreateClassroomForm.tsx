@@ -3,6 +3,7 @@ import { useForm } from "@tanstack/react-form"
 export type CreateClassroomFormValues = {
   name: string
   slug: string
+  term: string
 }
 
 type CreateClassroomFormProps = {
@@ -27,6 +28,7 @@ const CreateClassroomForm = ({
     defaultValues: {
       name: defaultValues?.name ?? "",
       slug: defaultValues?.slug ?? "",
+      term: defaultValues?.slug ?? "",
     } satisfies CreateClassroomFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -51,6 +53,7 @@ const CreateClassroomForm = ({
       await onSubmit({
         name: value.name.trim(),
         slug: slugify(value.slug),
+        term: value.term.trim(),
       })
     },
   })
@@ -106,6 +109,33 @@ const CreateClassroomForm = ({
                 type="text"
                 className="input w-full mb-4"
                 placeholder="e.g., ap-cs-principles"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(e) => field.handleChange(e.target.value)}
+              />
+
+              {field.state.meta.errors.length > 0 && (
+                <p className="text-error text-sm mb-4">
+                  {field.state.meta.errors[0]}
+                </p>
+              )}
+            </>
+          )}
+        </form.Field>
+
+        <form.Field name="term">
+          {(field) => (
+            <>
+              <label htmlFor={field.name} className="label font-bold">
+                Classroom Term
+              </label>
+
+              <input
+                id={field.name}
+                name={field.name}
+                type="text"
+                className="input w-full mb-4"
+                placeholder="e.g., Fall 2026"
                 value={field.state.value}
                 onBlur={field.handleBlur}
                 onChange={(e) => field.handleChange(e.target.value)}
