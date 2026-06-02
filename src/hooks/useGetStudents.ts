@@ -11,7 +11,7 @@ type Student = {
   section: string
   github_id: string
 }
-const useGetStudents = (org, classroom) => {
+const useGetStudents = (org: string, classroom: string) => {
   const client = useGitHubClient()
   const { data: students } = useQuery(
     csvFileQuery<Student>(

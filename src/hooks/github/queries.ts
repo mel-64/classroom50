@@ -249,3 +249,30 @@ export async function getAssignmentsFile(
 
   return JSON.parse(json) as AssignmentsFile
 }
+
+export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
+  return client.request<GitHubUser[]>(
+    `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+export async function getOrgMembers(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubUser[]> {
+  const members: GitHubUser[] = []
+  let page = 1
+
+  while (true) {
+    const batch = await client.request<GitHubUser[]>(
+      `/orgs/${org}/members?per_page=100&page=${page}`,
+    )
+
+    members.push(...batch)
+
+    if (batch.length < 100) break
+
+    page++
+  }
+
+  return members
+}

@@ -1,4 +1,7 @@
+import { useGitHubClient } from "@/context/github/GitHubProvider"
+import useGetClasses from "@/hooks/useGetClasses"
 import { useForm } from "@tanstack/react-form"
+import { useParams } from "@tanstack/react-router"
 
 export type CreateClassroomFormValues = {
   name: string
@@ -24,6 +27,8 @@ const CreateClassroomForm = ({
   defaultValues,
   onSubmit,
 }: CreateClassroomFormProps) => {
+  const { org } = useParams({ strict: false })
+  const { classes } = useGetClasses(org)
   const form = useForm({
     defaultValues: {
       name: defaultValues?.name ?? "",
@@ -40,6 +45,10 @@ const CreateClassroomForm = ({
 
         if (!value.slug.trim()) {
           errors.slug = "Classroom slug is required."
+        }
+
+        if (classes.find((cl) => cl.path === value.slug.trim())) {
+          errors.slug = "Classroom slug is already taken."
         }
 
         return Object.keys(errors).length > 0

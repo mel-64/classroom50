@@ -18,7 +18,7 @@ type CreateAssignmentFormProps = {
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>
 }
 const FormErrors = ({ form }) => (
-  <form.Subscribe selector={(state) => [state.errors, state.errorMap]}>
+  <form.Subscribe selector={(state) => [state.errors]}>
     {([errors]) => (
       <div>
         {errors.map((err) => (

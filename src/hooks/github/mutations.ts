@@ -1,8 +1,9 @@
 import type { GitHubClient } from "./client"
-import type {
-  GitHubCreateTree,
-  GitHubCreateCommit,
-  GitHubMoveBranch,
+import {
+  type GitHubCreateTree,
+  type GitHubCreateCommit,
+  type GitHubMoveBranch,
+  GitHubTeam,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import {
@@ -338,8 +339,84 @@ export async function createAssignmentWithConflictRetry(
   return withGitConflictRetry(() => createAssignment(client, input))
 }
 
-export type CreateOrgInput = {
+export type CreateTeamInput = {
+  org: string
   name: string
-  slug: string
+  description?: string
+  privacy?: "secret" | "closed"
+  maintainers?: string[]
+  repo_names?: string[]
 }
-export async function createOrg(client: GitHubClient, input: CreateOrgInput) {}
+export function createTeam(client: GitHubClient, input: CreateTeamInput) {
+  const { org, ...body } = input
+
+  return client.request<GitHubTeam>(`/orgs/${org}/teams`, {
+    method: "POST",
+    body: {
+      privacy: "closed",
+      notification_setting: "notifications_disabled",
+      ...body,
+    },
+  })
+}
+
+export function addRepositoryToTeam(
+  client: GitHubClient,
+  input: {
+    org: string
+    teamSlug: string
+    owner: string
+    repo: string
+    permission: "pull" | "triage" | "push" | "maintain" | "admin"
+  },
+) {
+  const { org, teamSlug, owner, repo, permission } = input
+
+  return client.request(
+    `/orgs/${org}/teams/${teamSlug}/repos/${owner}/${repo}`,
+    {
+      method: "PUT",
+      body: { permission },
+    },
+  )
+}
+
+export function addUserToTeam(
+  client: GitHubClient,
+  input: {
+    org: string
+    teamSlug: string
+    username: string
+    role?: "member" | "maintainer"
+  },
+) {
+  const { org, teamSlug, username, role } = input
+
+  return client.request(
+    `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+    {
+      method: "PUT",
+      body: { role },
+    },
+  )
+}
+
+export function inviteUserToOrgTeam(
+  client: GitHubClient,
+  input: {
+    org: string
+    invitee_id?: number
+    email?: string
+    team_ids: number[]
+  },
+) {
+  const { org, ...body } = input
+
+  return client.request(`/orgs/${org}/invitations`, {
+    method: "POST",
+    body: {
+      role: "direct_member",
+      ...body,
+    },
+  })
+}

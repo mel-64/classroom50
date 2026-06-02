@@ -71,3 +71,11 @@ export type GitHubFileListing = {
   name: string
   path: string
 }
+
+export type GitHubTeam = {
+  id: number
+  name: string
+  slug: string
+  privacy: "secret" | "closed"
+  description: string | null
+}

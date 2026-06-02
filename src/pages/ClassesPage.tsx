@@ -2,7 +2,6 @@ import { useParams, Link } from "@tanstack/react-router"
 import { BookText, UsersRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
-import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetStudents from "@/hooks/useGetStudents"
 
@@ -54,7 +53,7 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
 
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
-  const { data: classesData } = useGetClasses(org)
+  const { classes } = useGetClasses(org)
 
   return (
     <div className="min-h-screen">
@@ -79,11 +78,9 @@ const ClassesPage = () => {
             </div>
           </div>
           <div className="grid grid-cols-12 gap-4 mb-6">
-            {classesData
-              ?.filter((cl) => cl.type === "dir" && cl.name !== ".github")
-              .map((cl) => (
-                <ClassCard cl={cl} org={org} />
-              ))}
+            {classes.map((cl) => (
+              <ClassCard cl={cl} org={org} />
+            ))}
           </div>
         </DrawerContent>
         <DrawerSidebar page="classes" selected="assignments" />
