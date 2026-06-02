@@ -298,7 +298,7 @@ export async function getTeam(
   org: string,
   classroom: string,
 ) {
-  const teamSlug = `classroom-${classroom}`
+  const teamSlug = `classroom50-${classroom}`
 
   try {
     return await client.request<GitHubTeam>(`/orgs/${org}/teams/${teamSlug}`)
