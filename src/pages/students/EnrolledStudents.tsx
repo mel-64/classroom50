@@ -2,13 +2,16 @@ import { Trash } from "lucide-react"
 
 import { getName, getInitials } from "@/util/students"
 import Avatar from "@/components/avatar"
+import type { Student } from "@/types/classroom"
 
-const EnrolledStudents = ({ students }) => (
+const EnrolledStudents = ({ students = [] }: { students: Student[] }) => (
   <div className="card card-border w-full bg-base-100 overflow-hidden shadow-sm">
     <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
       <h2 className="text-lg font-semibold">Enrolled Students</h2>
 
-      <div className="badge badge-primary badge-soft text-base">12</div>
+      <div className="badge badge-primary badge-soft text-base">
+        {students.length}
+      </div>
     </div>
 
     <ul className="divide-y divide-base-300">

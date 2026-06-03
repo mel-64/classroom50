@@ -10,11 +10,13 @@ import UploadRoster from "@/pages/students/UploadRoster"
 import { useParams } from "@tanstack/react-router"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const StudentListPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const { students } = useGetStudents(org, classroom)
   const { data: classData } = useGetClassroom(org, classroom)
+  const client = useGitHubClient()
 
   return (
     <div className="min-h-screen">
@@ -24,7 +26,8 @@ const StudentListPage = () => {
           <Breadcrumb endpoint="Students" />
           <h1 className="text-lg pt-8 pb-2 font-bold">Students</h1>
           <h3 className="pb-10">
-            {students.length} students enrolled in {classData?.name}
+            {students.length} students enrolled in{" "}
+            {classData?.name || classData?.short_name || "Untitled class"}
           </h3>
           <div className="grid grid-cols-12 gap-2">
             <div className="col-span-5 px-4">
@@ -33,7 +36,7 @@ const StudentListPage = () => {
                 classroom={classroom}
                 className="mb-8"
               />
-              <UploadRoster />
+              <UploadRoster org={org} classroom={classroom} client={client} />
             </div>
             <div className="col-span-7 px-4">
               <EnrolledStudents students={students} />

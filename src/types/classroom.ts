@@ -32,3 +32,12 @@ export type AssignmentTest = {
   output: string
   points: number
 }
+
+export type Student = {
+  username: string
+  first_name: string
+  last_name: string
+  email: string
+  section: string
+  github_id: string
+}
