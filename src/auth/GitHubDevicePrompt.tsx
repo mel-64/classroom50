@@ -1,18 +1,14 @@
-import type { DeviceAuthState } from './types'
+import type { DeviceAuthState } from "./types"
 
-function StepNumber({
-  value,
-  done
-}: {
-  value: number
-  done: boolean
-}) {
+function StepNumber({ value, done }: { value: number; done: boolean }) {
   return (
-    <div className={[
-      'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-      done ? 'bg-success text-success-content' : 'bg-base-300 opacity-70'
-    ].join(' ')}>
-      {done ? '✓' : value}
+    <div
+      className={[
+        "flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+        done ? "bg-success text-success-content" : "bg-base-300 opacity-70",
+      ].join(" ")}
+    >
+      {done ? "✓" : value}
     </div>
   )
 }
@@ -22,7 +18,7 @@ export function GitHubDevicePrompt({
   status,
   onCancel,
   onCodeCopied,
-  onVerificationOpened
+  onVerificationOpened,
 }: {
   device: DeviceAuthState
   status: {
@@ -71,7 +67,7 @@ export function GitHubDevicePrompt({
 
           <a
             className="btn btn-outline btn-sm mt-3 w-full"
-            href={device.verificationUrl}
+            href={device.verificationUri}
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => {
@@ -101,9 +97,9 @@ export function GitHubDevicePrompt({
           </p>
 
           <p className="mt-3 font-mono text-xs text-base-content/50">
-            attempt {status?.attempts ?? device.attempts} · next in{' '}
-            {status?.nextPollSeconds ?? device.intervalSeconds}s · expires in{' '}
-            {status?.expiresDisplay ?? '-'}
+            attempt {status?.attempts ?? device.attempts} · next in{" "}
+            {status?.nextPollSeconds ?? device.intervalSeconds}s · expires in{" "}
+            {status?.expiresDisplay ?? "-"}
           </p>
         </div>
       </div>

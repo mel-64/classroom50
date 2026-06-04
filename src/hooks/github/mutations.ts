@@ -1154,13 +1154,31 @@ jobs:
   autograde:
     uses: cs50/classroom50/.github/workflows/autograde.yml@main
 `
+
+function defaultAutograderWorkflow(org: string) {
+  return `name: Autograde
+
+on:
+  push:
+    branches: [main]
+    tags: ["submit/*"]
+
+jobs:
+  grade:
+    uses: "${org}/classroom50/.github/workflows/autograde-runner.yaml@main"
+    permissions:
+      contents: write
+      statuses: write
+`
+}
+
 export async function resolveAutograderWorkflow(
   org: string,
   classroom: string,
   autograder?: string,
 ): Promise<string> {
   if (!autograder || autograder === "default") {
-    return DEFAULT_AUTOGRADER_WORKFLOW
+    return defaultAutograderWorkflow(org)
   }
 
   const workflow = await fetchTextWithFriendlyErrors(
