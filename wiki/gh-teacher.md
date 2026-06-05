@@ -61,7 +61,7 @@ Performs these steps in order:
 | `.github/workflows/collect-scores.yaml` | Working `workflow_dispatch` + nightly cron |
 | `.github/workflows/autograde-runner.yaml` | Reusable workflow called by every student-repo autograde shim |
 | `.github/scripts/runner.py` | Runner-side bootstrap fetched from Pages on every submission. Downloads the per-assignment bundle, resolves the entrypoint (per-assignment `autograder.py` if present, otherwise the classroom default at `<classroom>/autograder.py`, otherwise a vacuous-pass synthesis), execs it, and validates the v1 `result.json` it produces. Teachers don't normally edit this file — grading logic lives in `autograder.py`. |
-| `.github/scripts/collect_scores.py` | Working roster-driven score collector. Walks `(student, assignment)` pairs from `<classroom>/students.csv` × `assignments.json`, hits each `<classroom>-<assignment>-<username>` repo's `releases/latest` endpoint, downloads + schema-validates `result.json`, upserts into `<classroom>/scores.json` (`override:true` respected, atomic per-classroom write). Per-assignment "X of Y submitted" summary on stdout. |
+| `.github/scripts/collect_scores.py` | Working roster-driven score collector. Walks `(student, assignment)` pairs from `<classroom>/students.csv` x `assignments.json`, hits each `<classroom>-<assignment>-<username>` repo's `releases/latest` endpoint, downloads + schema-validates `result.json`, and upserts it into `<classroom>/scores.json` under that assignment's bucket -- `submissions` is keyed by assignment slug, and the redundant `assignment` field is dropped from each stored row (`override:true` respected, atomic per-classroom write). Per-assignment "X of Y submitted" summary on stdout. |
 | `README.md` | Describes the config repo layout |
 
 Score collection is **pull-based** and **roster-driven**: the collect workflow reads `<classroom>/students.csv` × `assignments.json`, computes the canonical repo name for each pair, and asks GitHub for that repo's latest release. A 404 means the student hasn't accepted or submitted yet (no error — just a gap in the "X of Y submitted" report). No org-repo enumeration, no longest-slug-wins disambiguation, no cross-repo write PAT or `repository_dispatch` from student repos.
@@ -107,7 +107,7 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
-| `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yaml` workflow. |
+| `<short-name>/scores.json` | `classroom50/scores/v1` | Scaffolds with an empty `submissions: {}` object -- rows are written by the `collect-scores.yaml` workflow, keyed by assignment slug. |
 
 Three things this scaffold does **not** include:
 

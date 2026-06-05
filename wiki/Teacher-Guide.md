@@ -219,7 +219,7 @@ What it does on each run:
 1. Iterates every classroom under `<org>/classroom50/<classroom>/` (or just the one you passed via `-f classroom=`).
 2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and asks GitHub for that repo's latest release. A `404` from `/releases/latest` means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
 3. For each release found, downloads `result.json`, schema-validates it, and checks that the payload's `classroom` / `assignment` / `usernames[0]` match the expected `(classroom, assignment, student)` tuple (defense against a hostile autograder payload trying to land in the wrong scores.json).
-4. Upserts the validated payload into `<classroom>/scores.json`. **Existing entries with `"override": true` are preserved verbatim** — if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
+4. Upserts the validated payload into `<classroom>/scores.json` under that assignment's bucket, dropping the now-redundant `assignment` field from the stored row (it's the bucket key). **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
@@ -227,33 +227,34 @@ What it does on each run:
 
 **Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 
-**`scores.json` shape:**
+**`scores.json` shape:** `submissions` is an object keyed by assignment slug; each value is that assignment's rows, one per student. A row is the validated `result.json` payload with the redundant `assignment` field dropped (it's the bucket key); everything else, including `schema` and `tests`, is kept.
 
 ```json
 {
   "schema": "classroom50/scores/v1",
-  "submissions": [
-    {
-      "schema": "classroom50/result/v1",
-      "classroom": "cs-principles",
-      "assignment": "hello",
-      "usernames": ["alice"],
-      "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
-      "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
-      "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
-      "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
-      "datetime": "2026-06-01T14:33:11Z",
-      "score": 18,
-      "max-score": 30,
-      "tests": [
-        { "test-name": "compiles", "passed": true, "score": 10, "max-score": 10 }
-      ]
-    }
-  ]
+  "submissions": {
+    "hello": [
+      {
+        "schema": "classroom50/result/v1",
+        "classroom": "cs-principles",
+        "usernames": ["alice"],
+        "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
+        "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+        "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
+        "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+        "datetime": "2026-06-01T14:33:11Z",
+        "score": 18,
+        "max-score": 30,
+        "tests": [
+          { "test-name": "compiles", "passed": true, "score": 10, "max-score": 10 }
+        ]
+      }
+    ]
+  }
 }
 ```
 
-One row per (assignment, student) tuple. Re-running collect refreshes each row with the latest release's data unless `override: true` is set.
+One row per student within each assignment bucket. Re-running collect refreshes each row with the latest release's data unless `override: true` is set. (A scores.json still in the older flat-array layout is migrated to this map on the next collect run.)
 
 ## 10. Download submissions
 
