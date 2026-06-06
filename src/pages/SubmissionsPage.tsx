@@ -1,4 +1,10 @@
-import { ArrowDownWideNarrow, HardDriveDownload } from "lucide-react"
+import {
+  ArrowDownWideNarrow,
+  Check,
+  Copy,
+  HardDriveDownload,
+  LinkIcon,
+} from "lucide-react"
 import { useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
@@ -11,13 +17,25 @@ import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
+import { useState } from "react"
 
 const SubmissionsPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const { data: scoresData } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
+  const [copiedSubmitLink, setCopiedSubmitLink] = useState(false)
 
+  const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+
+  const copySubmitLink = async () => {
+    await navigator.clipboard.writeText(assignmentSubmitUrl)
+    setCopiedSubmitLink(true)
+
+    window.setTimeout(() => {
+      setCopiedSubmitLink(false)
+    }, 1500)
+  }
   const assignmentInfo =
     assignmentData?.assignments.find((a) => a.slug === assignment) || {}
   const scoresInfo = scoresData?.submissions?.[assignment] || []
@@ -48,6 +66,46 @@ const SubmissionsPage = () => {
               </button>
             </div>
           </div>
+          <div className="card bg-base-100 rounded-xl border border-[#eee] mb-4">
+            <div className="card-body gap-4">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-primary/10 p-3 text-primary">
+                    <LinkIcon className="size-5" />
+                  </div>
+
+                  <div>
+                    <h2 className="font-bold">Assignment accept link</h2>
+                    <p className="text-sm text-base-content/60">
+                      Share this link with students so they can accept this
+                      assignment.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
+                <pre className="overflow-x-auto px-4 py-3 text-sm">
+                  <code>{assignmentSubmitUrl}</code>
+                </pre>
+                <button
+                  type="button"
+                  className={`btn ${copiedSubmitLink ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+                  onClick={copySubmitLink}
+                >
+                  {copiedSubmitLink ? (
+                    <>
+                      <Check className="size-4" />
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>{" "}
           <div className="grid grid-cols-12 gap-4 mb-6">
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">

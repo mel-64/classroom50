@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { AssignmentTest } from "@/types/classroom"
 import { Pencil, Trash } from "lucide-react"
 
@@ -24,7 +24,7 @@ const AutogradingTestModal = ({
   if (index === null) return null
 
   return (
-    <dialog ref={dialogRef} className="modal">
+    <dialog ref={dialogRef} className="modal" onClose={onClose}>
       <div className="modal-box max-w-3xl">
         <div className="mb-6">
           <h3 className="text-lg font-bold">Edit Test {index + 1}</h3>
@@ -122,13 +122,22 @@ const AutogradingTestsPane = ({ form }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
 
+  useEffect(() => {
+    if (editingIndex === null) return
+
+    const dialog = dialogRef.current
+    if (!dialog || dialog.open) return
+
+    dialog.showModal()
+  }, [editingIndex])
+
   const openEditor = (index: number) => {
     setEditingIndex(index)
-    dialogRef.current?.showModal()
   }
 
   const closeEditor = () => {
-    dialogRef.current?.close()
+    const dialog = dialogRef.current
+    if (dialog?.open) dialog.close()
     setEditingIndex(null)
   }
 
@@ -161,8 +170,9 @@ const AutogradingTestsPane = ({ form }) => {
                   type="button"
                   className="btn btn-primary btn-outline"
                   onClick={() => {
+                    const newIndex = field.state.value.length
                     field.pushValue(emptyTest())
-                    openEditor(field.state.value.length)
+                    openEditor(newIndex)
                   }}
                 >
                   + Add Test
