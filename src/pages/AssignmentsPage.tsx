@@ -34,8 +34,8 @@ const AssignmentsPage = () => {
                 {classroomData?.name}
               </h1>
               <h3 className="pb-10">
-                {classroomData?.term || "Unknown Term"} • {students.length}{" "}
-                Students
+                {classroomData?.term ? `${classroomData?.term} • ` : ""}
+                {students.length} Students
               </h3>
             </div>
             <div className="pt-10">

@@ -34,10 +34,6 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
           <UsersRound />
           {students ? `${students.length} Students` : "No Students"}
         </div>
-        <div className="flex gap-2">
-          <GitHub className="size-4 opacity-25" />
-          <pre>{org}</pre>
-        </div>
         <Link
           type="button"
           to={`/${org}/${cl.path}/assignments`}
@@ -60,26 +56,47 @@ const ClassesPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <div className="flex justify-between">
-            <div>
-              <h1 className="text-lg pt-8 pb-2 font-bold">My Classes</h1>
-              <div className="flex pb-10">
-                <label>Manage your courses and assignments</label>
+          <div className="mb-8">
+            <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <GitHub className="size-5 opacity-70" />
+
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-base-content/50">
+                      GitHub Organization
+                    </div>
+                    <div className="font-mono text-sm font-semibold text-base-content">
+                      {org}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">
+                    My Classes
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-base-content/60">
+                    Manage your courses and assignments.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex sm:self-end">
+                <Link
+                  type="button"
+                  to={`/${org}/classes/new`}
+                  className="btn btn-primary"
+                >
+                  + New Class
+                </Link>
               </div>
             </div>
-            <div className="pt-10">
-              <Link
-                type="button"
-                to={`/${org}/classes/new`}
-                className="btn btn-primary"
-              >
-                + New Class
-              </Link>
-            </div>
           </div>
+
           <div className="grid grid-cols-12 gap-4 mb-6">
             {classes.map((cl) => (
-              <ClassCard cl={cl} org={org} />
+              <ClassCard key={cl.path} cl={cl} org={org} />
             ))}
           </div>
         </DrawerContent>
