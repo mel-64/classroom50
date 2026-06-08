@@ -23,6 +23,7 @@ import {
 } from "./queries"
 import type { Assignment, AssignmentTest } from "@/types/classroom"
 import Papa from "papaparse"
+import sodium from "libsodium-wrappers"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -1395,7 +1396,7 @@ async function tryStep<T>(
 
     return {
       status: "error" as const,
-      message: (err as any).message ?? "Unknown error",
+      message: err?.message ?? "Unknown error",
     }
   }
 }
@@ -1417,6 +1418,11 @@ type InitResults = {
   orgDefaults?: InitClassroomStep
   configRepo?: InitClassroomStep
   skeleton?: InitClassroomStep
+  pages?: InitClassroomStep
+  actionsPermissions?: InitClassroomStep
+  reusableWorkflowAccess?: InitClassroomStep
+  branchProtection?: InitClassroomStep
+  collectToken?: InitClassroomStep
 }
 
 async function updateOrgClassroomSafetyDefaults(
@@ -1629,6 +1635,480 @@ export async function ensureSkeletonFiles(client: GitHubClient, org: string) {
     status: "complete",
     created: missing.map((f) => f.path),
   }
+}
+
+export type EnsurePagesResult = {
+  status: "warning" | "complete"
+  pagesEnabled: boolean
+  pagesAlreadyEnabled: boolean
+  visibilityPublic: boolean
+  settingsUrl: string
+  warnings: string[]
+  pagesUrl: string
+}
+
+function expectedPagesUrl(org: string): string {
+  return `https://${org}.github.io/classroom50/`
+}
+
+function pagesSettingsUrl(owner: string, repo: string): string {
+  return `https://github.com/${owner}/${repo}/settings/pages`
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return "Unknown GitHub API error"
+}
+
+async function enableWorkflowPages(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<{
+  enabled: boolean
+  alreadyEnabled: boolean
+}> {
+  try {
+    await client.request(`/repos/${owner}/${repo}/pages`, {
+      method: "POST",
+      body: {
+        build_type: "workflow",
+      },
+    })
+
+    return {
+      enabled: true,
+      alreadyEnabled: false,
+    }
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 409) {
+      return {
+        enabled: true,
+        alreadyEnabled: true,
+      }
+    }
+
+    throw new Error(
+      `Could not enable GitHub Pages for ${owner}/${repo}: ${getErrorMessage(
+        err,
+      )}`,
+    )
+  }
+}
+
+async function setPagesPublic(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<{
+  visibilityPublic: boolean
+  warning?: string
+}> {
+  try {
+    await client.request(`/repos/${owner}/${repo}/pages`, {
+      method: "PUT",
+      body: {
+        public: true,
+      },
+    })
+
+    return {
+      visibilityPublic: true,
+    }
+  } catch (err) {
+    return {
+      visibilityPublic: false,
+      warning: `Couldn't set Pages visibility to public for ${owner}/${repo}: ${getErrorMessage(
+        err,
+      )}. Toggle it manually at ${pagesSettingsUrl(
+        owner,
+        repo,
+      )} → Visibility if students see 404s on the Pages URL.`,
+    }
+  }
+}
+
+export async function ensurePages(
+  client: GitHubClient,
+  org: string,
+  repo = "classroom50",
+): Promise<EnsurePagesResult> {
+  const warnings: string[] = []
+
+  const enableResult = await enableWorkflowPages(client, org, repo)
+  const visibilityResult = await setPagesPublic(client, org, repo)
+
+  if (visibilityResult.warning) {
+    warnings.push(visibilityResult.warning)
+  }
+
+  return {
+    status: warnings.length > 0 ? "warning" : "complete",
+    pagesEnabled: enableResult.enabled,
+    pagesAlreadyEnabled: enableResult.alreadyEnabled,
+    visibilityPublic: visibilityResult.visibilityPublic,
+    pagesUrl: expectedPagesUrl(org),
+    settingsUrl: pagesSettingsUrl(org, repo),
+    warnings,
+  }
+}
+
+export type EnsureWorkflowPermissionsResult =
+  | {
+      status: "complete"
+      repo: string
+      defaultWorkflowPermissions: "write"
+      managedByOrgPolicy: false
+      message: string
+    }
+  | {
+      status: "warning"
+      repo: string
+      defaultWorkflowPermissions: "read" | "write" | "unknown"
+      managedByOrgPolicy: true
+      message: string
+    }
+
+type WorkflowPermissionsResponse = {
+  default_workflow_permissions: "read" | "write"
+  can_approve_pull_request_reviews?: boolean
+}
+
+export async function setRepoWorkflowPermissions(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<void> {
+  await client.request(`/repos/${owner}/${repo}/actions/permissions/workflow`, {
+    method: "PUT",
+    body: {
+      default_workflow_permissions: "write",
+      can_approve_pull_request_reviews: false,
+    },
+  })
+}
+
+export async function getRepoWorkflowPermissions(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<WorkflowPermissionsResponse> {
+  return client.request<WorkflowPermissionsResponse>(
+    `/repos/${owner}/${repo}/actions/permissions/workflow`,
+  )
+}
+
+export async function ensureWorkflowPermissions(
+  client: GitHubClient,
+  owner: string,
+  repo = "classroom50",
+): Promise<EnsureWorkflowPermissionsResult> {
+  try {
+    await setRepoWorkflowPermissions(client, owner, repo)
+
+    return {
+      status: "complete",
+      repo: `${owner}/${repo}`,
+      defaultWorkflowPermissions: "write",
+      managedByOrgPolicy: false,
+      message: `${owner}/${repo}: workflow permissions set to write.`,
+    }
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 409) {
+      throw new Error(
+        `Could not set workflow permissions for ${owner}/${repo}: ${getErrorMessage(
+          err,
+        )}`,
+      )
+    }
+
+    return reportOrgWorkflowPermissions(client, owner, repo)
+  }
+}
+
+async function reportOrgWorkflowPermissions(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<EnsureWorkflowPermissionsResult> {
+  try {
+    const permissions = await getRepoWorkflowPermissions(client, owner, repo)
+
+    if (permissions.default_workflow_permissions === "write") {
+      return {
+        status: "warning",
+        repo: `${owner}/${repo}`,
+        defaultWorkflowPermissions: "write",
+        managedByOrgPolicy: true,
+        message: `${owner}/${repo}: workflow permissions are already write, managed by organization policy.`,
+      }
+    }
+
+    return {
+      status: "warning",
+      repo: `${owner}/${repo}`,
+      defaultWorkflowPermissions: permissions.default_workflow_permissions,
+      managedByOrgPolicy: true,
+      message: `${owner}/${repo}: organization default workflow permissions are ${permissions.default_workflow_permissions}. This is okay because the Classroom 50 skeleton workflows declare workflow-level write permissions where needed.`,
+    }
+  } catch {
+    return {
+      status: "warning",
+      repo: `${owner}/${repo}`,
+      defaultWorkflowPermissions: "unknown",
+      managedByOrgPolicy: true,
+      message: `${owner}/${repo}: workflow permissions are managed by an organization policy. The effective setting could not be read, but setup can continue because the Classroom 50 skeleton workflows declare their own permissions.`,
+    }
+  }
+}
+
+function actionsSettingsUrl(owner: string, repo: string): string {
+  return `https://github.com/${owner}/${repo}/settings/actions`
+}
+
+export type EnsureReusableWorkflowAccessResult =
+  | {
+      status: "complete"
+      repo: string
+      accessLevel: "organization"
+      message: string
+      settingsUrl: string
+    }
+  | {
+      status: "warning"
+      repo: string
+      accessLevel: "unknown"
+      reason:
+        | "permission_denied"
+        | "policy_conflict"
+        | "unexpected_status"
+        | "unknown"
+      message: string
+      settingsUrl: string
+    }
+
+export async function ensureReusableWorkflowAccess(
+  client: GitHubClient,
+  owner: string,
+  repo = "classroom50",
+): Promise<EnsureReusableWorkflowAccessResult> {
+  const settingsUrl = actionsSettingsUrl(owner, repo)
+
+  try {
+    await client.request(`/repos/${owner}/${repo}/actions/permissions/access`, {
+      method: "PUT",
+      body: {
+        access_level: "organization",
+      },
+    })
+
+    return {
+      status: "complete",
+      repo: `${owner}/${repo}`,
+      accessLevel: "organization",
+      settingsUrl,
+      message: `${owner}/${repo}: reusable-workflow access enabled for the organization.`,
+    }
+  } catch (err) {
+    const message = getErrorMessage(err)
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 403) {
+        return {
+          status: "warning",
+          repo: `${owner}/${repo}`,
+          accessLevel: "unknown",
+          reason: "permission_denied",
+          settingsUrl,
+          message: `${owner}/${repo}: couldn't enable reusable-workflow access for the organization. Student autograde workflows may fail with a 403 when resolving the reusable workflow. Retry with an org-admin token or toggle it manually at ${settingsUrl} → Access.`,
+        }
+      }
+
+      if (err.status === 409) {
+        return {
+          status: "warning",
+          repo: `${owner}/${repo}`,
+          accessLevel: "unknown",
+          reason: "policy_conflict",
+          settingsUrl,
+          message: `${owner}/${repo}: reusable-workflow access appears to be controlled by an organization or enterprise policy. Student autograde workflows may fail resolving the reusable workflow unless org-level access allows it. Review ${settingsUrl} → Access.`,
+        }
+      }
+    }
+    return {
+      status: "warning",
+      repo: `${owner}/${repo}`,
+      accessLevel: "unknown",
+      reason: "unknown",
+      settingsUrl,
+      message: `${owner}/${repo}: couldn't enable reusable-workflow access: ${message}. Student autograde workflows may fail resolving the reusable workflow. Review ${settingsUrl} → Access.`,
+    }
+  }
+}
+
+function encodePathPart(value: string): string {
+  return encodeURIComponent(value)
+}
+
+async function getDefaultBranch(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+): Promise<string> {
+  const repoData = await client.request<GitHubRepo>(`/repos/${owner}/${repo}`)
+
+  return repoData.default_branch
+}
+
+export async function putMinimalBranchProtection(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<void> {
+  await client.request(
+    `/repos/${owner}/${repo}/branches/${encodePathPart(branch)}/protection`,
+    {
+      method: "PUT",
+      body: {
+        required_status_checks: null,
+        enforce_admins: false,
+        required_pull_request_reviews: null,
+        restrictions: null,
+        allow_force_pushes: false,
+        allow_deletions: false,
+      },
+    },
+  )
+}
+
+function branchSettingsUrl(owner: string, repo: string): string {
+  return `https://github.com/${owner}/${repo}/settings/branches`
+}
+
+export type EnsureBranchProtectionResult =
+  | {
+      status: "complete"
+      repo: string
+      branch: string
+      message: string
+      settingsUrl: string
+    }
+  | {
+      status: "warning"
+      repo: string
+      branch: string | null
+      reason:
+        | "permission_denied"
+        | "branch_not_found"
+        | "unsupported"
+        | "unexpected"
+      message: string
+      settingsUrl: string
+    }
+
+export async function ensureBranchProtection(
+  client: GitHubClient,
+  owner: string,
+  repo = "classroom50",
+  branch?: string,
+): Promise<EnsureBranchProtectionResult> {
+  const settingsUrl = branchSettingsUrl(owner, repo)
+
+  let targetBranch: string | null = branch ?? null
+
+  try {
+    targetBranch ??= await getDefaultBranch(client, owner, repo)
+
+    await putMinimalBranchProtection(client, owner, repo, targetBranch)
+
+    return {
+      status: "complete",
+      repo: `${owner}/${repo}`,
+      branch: targetBranch,
+      settingsUrl,
+      message: `${owner}/${repo}: branch protection applied to ${targetBranch}; force-pushes and deletions are disabled.`,
+    }
+  } catch (err) {
+    const message = getErrorMessage(err)
+
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 403) {
+        return {
+          status: "warning",
+          repo: `${owner}/${repo}`,
+          branch: targetBranch,
+          reason: "permission_denied",
+          settingsUrl,
+          message: `${owner}/${repo}: branch protection could not be applied because the authenticated user lacks permission. Review branch protection manually at ${settingsUrl}.`,
+        }
+      }
+
+      if (err.status === 404) {
+        return {
+          status: "warning",
+          repo: `${owner}/${repo}`,
+          branch: targetBranch,
+          reason: "branch_not_found",
+          settingsUrl,
+          message: `${owner}/${repo}: branch protection could not be applied because the target branch was not found. The repository may still be initializing. Retry setup or review ${settingsUrl}.`,
+        }
+      }
+
+      if (err.status === 422) {
+        return {
+          status: "warning",
+          repo: `${owner}/${repo}`,
+          branch: targetBranch,
+          reason: "unsupported",
+          settingsUrl,
+          message: `${owner}/${repo}: GitHub rejected the branch protection request. This may be due to repository plan, ruleset, or policy constraints. Review ${settingsUrl}.`,
+        }
+      }
+    }
+
+    return {
+      status: "warning",
+      repo: `${owner}/${repo}`,
+      branch: targetBranch,
+      reason: "unexpected",
+      settingsUrl,
+      message: `${owner}/${repo}: branch protection could not be applied: ${message}. Review ${settingsUrl}.`,
+    }
+  }
+}
+
+export async function encryptSecret(publicKey: string, secret: string) {
+  await sodium.ready
+
+  const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL)
+  const binsec = sodium.from_string(secret)
+
+  const encBytes = sodium.crypto_box_seal(binsec, binkey)
+
+  return sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL)
+}
+
+export async function putRepoSecret(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  name: string,
+  plaintext: string,
+) {
+  const key = await client.request<{
+    key_id: string
+    key: string
+  }>(`/repos/${owner}/${repo}/actions/secrets/public-key`)
+
+  const encryptedValue = await encryptSecret(key.key, plaintext)
+
+  await client.request(`/repos/${owner}/${repo}/actions/secrets/${name}`, {
+    method: "PUT",
+    body: {
+      encrypted_value: encryptedValue,
+      key_id: key.key_id,
+    },
+  })
 }
 
 export async function initClassroom50({
