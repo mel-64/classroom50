@@ -1376,24 +1376,75 @@ export async function acceptAssignment(params: {
   }
 }
 
-async function tryStep<T>(
-  fn: () => Promise<T>,
-  options?: { warningCodes: number[] },
-) {
+async function tryStep<T>({
+  id,
+  fn,
+  onStepUpdate,
+  options,
+}: {
+  id: InitStepId
+  fn: () => Promise<T>
+  onStepUpdate?: (update: InitStepUpdate) => void
+  options?: { warningCodes: number[] }
+}): Promise<T | null> {
+  const { warningCodes } = options || {}
+
+  onStepUpdate?.({
+    id,
+    status: "running",
+  })
+
   try {
-    const data = await fn()
-    return { status: "complete" as const, data }
+    const result = await fn()
+
+    const maybeStatus =
+      typeof result === "object" &&
+      result !== null &&
+      "status" in result &&
+      typeof result.status === "string"
+        ? result.status
+        : "complete"
+
+    onStepUpdate?.({
+      id,
+      status:
+        maybeStatus === "warning"
+          ? "warning"
+          : maybeStatus === "complete"
+            ? "complete"
+            : "complete",
+      data: result,
+      message:
+        typeof result === "object" &&
+        result !== null &&
+        "message" in result &&
+        typeof result.message === "string"
+          ? result.message
+          : undefined,
+    })
+
+    return result
   } catch (err) {
     if (
       err instanceof GitHubAPIError &&
-      options?.warningCodes?.some((code) => err.status === code)
+      warningCodes?.some((code) => err.status === code)
     ) {
+      onStepUpdate?.({
+        id,
+        status: "warning",
+        error: err?.message,
+      })
       return {
         status: "warning" as const,
         message: err.message,
       }
     }
 
+    onStepUpdate?.({
+      id,
+      status: "error",
+      error: err?.message,
+    })
     return {
       status: "error" as const,
       message: err?.message ?? "Unknown error",
@@ -2111,59 +2162,261 @@ export async function putRepoSecret(
   })
 }
 
+type OrgActionsPermissions = {
+  enabled_repositories: "all" | "none" | "selected"
+  allowed_actions?: "all" | "local_only" | "selected"
+  selected_actions_url?: string
+}
+
+export type EnsureOrgActionsEnabledResult =
+  | {
+      status: "complete"
+      org: string
+      enabledRepositories: "all"
+      allowedActions: "all"
+      message: string
+      settingsUrl: string
+    }
+  | {
+      status: "warning"
+      org: string
+      enabledRepositories: "all" | "none" | "selected" | "unknown"
+      allowedActions: "all" | "local_only" | "selected" | "unknown"
+      reason:
+        | "permission_denied"
+        | "enterprise_policy"
+        | "validation_failed"
+        | "readback_failed"
+        | "unknown"
+      message: string
+      settingsUrl: string
+    }
+
+function orgActionsSettingsUrl(org: string): string {
+  return `https://github.com/organizations/${org}/settings/actions`
+}
+
+async function getOrgActionsPermissions(
+  client: GitHubClient,
+  org: string,
+): Promise<OrgActionsPermissions> {
+  return client.request<OrgActionsPermissions>(
+    `/orgs/${org}/actions/permissions`,
+  )
+}
+
+async function setOrgActionsPermissions(
+  client: GitHubClient,
+  org: string,
+): Promise<void> {
+  await client.request(`/orgs/${org}/actions/permissions`, {
+    method: "PUT",
+    body: {
+      enabled_repositories: "all",
+      allowed_actions: "all",
+    },
+  })
+}
+
+export async function ensureOrgActionsEnabled(
+  client: GitHubClient,
+  org: string,
+): Promise<EnsureOrgActionsEnabledResult> {
+  const settingsUrl = orgActionsSettingsUrl(org)
+
+  try {
+    await setOrgActionsPermissions(client, org)
+
+    return {
+      status: "complete",
+      org,
+      enabledRepositories: "all",
+      allowedActions: "all",
+      settingsUrl,
+      message: `${org}: GitHub Actions enabled for all repositories.`,
+    }
+  } catch (err) {
+    const message = getErrorMessage(err)
+
+    let current: OrgActionsPermissions | null = null
+
+    try {
+      current = await getOrgActionsPermissions(client, org)
+    } catch {
+      // nothing for now, still want good warning info
+    }
+
+    const enabledRepositories = current?.enabled_repositories ?? "unknown"
+    const allowedActions = current?.allowed_actions ?? "unknown"
+
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 403) {
+        return {
+          status: "warning",
+          org,
+          enabledRepositories,
+          allowedActions,
+          reason: "permission_denied",
+          settingsUrl,
+          message:
+            `${org}: couldn't enable GitHub Actions at the organization level. ` +
+            `The authenticated user may lack org-owner/admin permissions, or an enterprise policy may block this change. ` +
+            `Open ${settingsUrl} and set Actions permissions to allow repositories in this organization to run workflows.`,
+        }
+      }
+
+      if (err.status === 409) {
+        return {
+          status: "warning",
+          org,
+          enabledRepositories,
+          allowedActions,
+          reason: "enterprise_policy",
+          settingsUrl,
+          message:
+            `${org}: GitHub Actions permissions appear to be controlled by an organization or enterprise policy. ` +
+            `Current setting: enabled_repositories="${enabledRepositories}", allowed_actions="${allowedActions}". ` +
+            `Classroom50 workflows may not run until Actions are enabled. Review ${settingsUrl}.`,
+        }
+      }
+
+      if (err.status === 422) {
+        return {
+          status: "warning",
+          org,
+          enabledRepositories,
+          allowedActions,
+          reason: "validation_failed",
+          settingsUrl,
+          message:
+            `${org}: GitHub rejected the Actions permissions update. ` +
+            `Current setting: enabled_repositories="${enabledRepositories}", allowed_actions="${allowedActions}". ` +
+            `Review ${settingsUrl}. Original error: ${message}`,
+        }
+      }
+    }
+
+    return {
+      status: "warning",
+      org,
+      enabledRepositories,
+      allowedActions,
+      reason: current ? "unknown" : "readback_failed",
+      settingsUrl,
+      message:
+        `${org}: couldn't enable GitHub Actions. ` +
+        `Current setting: enabled_repositories="${enabledRepositories}", allowed_actions="${allowedActions}". ` +
+        `Review ${settingsUrl}. Original error: ${message}`,
+    }
+  }
+}
+
+export type InitStepId =
+  | "orgDefaults"
+  | "orgActions"
+  | "configRepo"
+  | "skeleton"
+  | "branchProtection"
+  | "workflowPermissions"
+  | "reusableWorkflowAccess"
+  | "pages"
+  | "collectToken"
+
+export type InitStepUpdate = {
+  id: InitStepId
+  status: InitStepStatus
+  title?: string
+  message?: string
+  error?: string
+  data?: unknown
+}
+
 export async function initClassroom50({
   client,
   org,
   collectToken,
   serviceAccountConfirmed,
+  onStepUpdate,
 }: {
   client: GitHubClient
   org: string
   collectToken?: string
   serviceAccountConfirmed: boolean
+  onStepUpdate: (update: InitStepUpdate) => void
 }) {
-  const results: InitResults = {}
+  const results: Partial<Record<InitStepId, unknown>> = {}
 
-  results.orgDefaults = await tryStep(
-    () => updateOrgClassroomSafetyDefaults(client, org),
-    { warningCodes: [403, 422] },
-  )
+  results.orgDefaults = await tryStep({
+    id: "orgDefaults",
+    onStepUpdate,
+    fn: () => updateOrgClassroomSafetyDefaults(client, org),
+    options: { warningCodes: [403, 422] },
+  })
 
-  results.configRepo = await tryStep(() => ensureClassroom50Repo(client, org))
+  results.orgActions = await tryStep({
+    id: "orgActions",
+    onStepUpdate,
+    fn: () => ensureOrgActionsEnabled(client, org),
+  })
 
-  results.skeleton = await tryStep(() => ensureSkeletonFiles(client, org))
+  results.configRepo = await tryStep({
+    id: "configRepo",
+    onStepUpdate,
+    fn: () => ensureClassroom50Repo(client, org),
+  })
 
-  results.pages = await tryStep(() => ensurePages(client, org, "classroom50"))
+  results.skeleton = await tryStep({
+    id: "skeleton",
+    onStepUpdate,
+    fn: () => ensureSkeletonFiles(client, org),
+  })
 
-  results.actionsPermissions = await tryStep(() =>
-    ensureWorkflowPermissions(client, org, "classroom50"),
-  )
+  results.pages = await tryStep({
+    id: "pages",
+    onStepUpdate,
+    fn: () => ensurePages(client, org, "classroom50"),
+  })
 
-  results.reusableWorkflowAccess = await tryStep(() =>
-    ensureReusableWorkflowAccess(client, org, "classroom50"),
-  )
+  results.workflowPermissions = await tryStep({
+    id: "workflowPermissions",
+    onStepUpdate,
+    fn: () => ensureWorkflowPermissions(client, org, "classroom50"),
+  })
 
-  results.branchProtection = await tryStep(() =>
-    ensureBranchProtection(client, org, "classroom50", "main"),
-  )
+  results.reusableWorkflowAccess = await tryStep({
+    id: "reusableWorkflowAccess",
+    onStepUpdate,
+    fn: () => ensureReusableWorkflowAccess(client, org, "classroom50"),
+  })
+
+  results.branchProtection = await tryStep({
+    id: "branchProtection",
+    onStepUpdate,
+    fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
+  })
 
   if (collectToken) {
     if (!serviceAccountConfirmed) {
       throw new Error("Service account confirmation is required.")
     }
 
-    results.collectToken = await tryStep(() =>
-      putRepoSecret(
-        client,
-        org,
-        "classroom50",
-        "CLASSROOM50_COLLECT_TOKEN",
-        collectToken,
-      ),
-    )
+    results.collectToken = await tryStep({
+      id: "collectToken",
+      onStepUpdate,
+      fn: () =>
+        putRepoSecret(
+          client,
+          org,
+          "classroom50",
+          "CLASSROOM50_COLLECT_TOKEN",
+          collectToken,
+        ),
+    })
   }
 
   return {
+    org,
+    repo: "classroom50",
     ...results,
     pagesUrl: `https://${org}.github.io/classroom50/`,
   }

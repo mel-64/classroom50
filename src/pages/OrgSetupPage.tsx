@@ -7,6 +7,14 @@ import Drawer, {
 } from "@/components/drawer"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
+import { useState } from "react"
+import {
+  initClassroom50,
+  type InitStepId,
+  type InitStepUpdate,
+} from "@/hooks/github/mutations"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const InitStep = ({
   title,
@@ -41,15 +49,18 @@ const InitStep = ({
   )
 }
 
-const OrgSteps = ({ runInit }) => {
-  const status = {
-    orgDefaults: { status: "pending" as const, message: "" },
-    configRepo: { status: "pending" as const, message: "" },
-    skeleton: { status: "pending" as const, message: "" },
-    pages: { status: "pending" as const, message: "" },
-    collectToken: { status: "pending" as const, message: "" },
-  }
-
+const INIT_STEP_ORDER: InitStepId[] = [
+  "orgDefaults",
+  "orgActions",
+  "configRepo",
+  "skeleton",
+  "branchProtection",
+  "workflowPermissions",
+  "reusableWorkflowAccess",
+  "pages",
+  "collectToken",
+]
+const OrgSteps = ({ steps }) => {
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-5">
@@ -62,40 +73,22 @@ const OrgSteps = ({ runInit }) => {
         </div>
 
         <div className="grid gap-3">
-          <InitStep
-            title="Organization safety defaults"
-            description="Prevents new members from receiving implicit repo access and disables public repo creation by members."
-            status={status.orgDefaults.status}
-            message={status.orgDefaults.message}
-          />
-          <InitStep
-            title="Private config repository"
-            description="Creates or verifies the org-owned classroom50 repository."
-            status={status.configRepo.status}
-            message={status.configRepo.message}
-          />
-          <InitStep
-            title="Skeleton workflows"
-            description="Adds missing Classroom50 workflows without overwriting teacher edits."
-            status={status.skeleton.status}
-            message={status.skeleton.message}
-          />
-          <InitStep
-            title="GitHub Pages"
-            description="Publishes assignment manifests at the org Pages URL."
-            status={status.pages.status}
-            message={status.pages.message}
-          />
-          <InitStep
-            title="Collect token"
-            description="Stores the score collection PAT as a repository Actions secret."
-            status={status.collectToken.status}
-            message={status.collectToken.message}
-          />
+          {INIT_STEP_ORDER.map((id) => {
+            const step = steps[id]
+
+            return (
+              <InitStep
+                key={step.id}
+                title={step.title ?? step.id}
+                status={step.status}
+                description={step.message ?? step.error}
+              />
+            )
+          })}
         </div>
 
         <div className="card-actions justify-end">
-          <button className="btn btn-primary" onClick={runInit}>
+          <button className="btn btn-primary" onClick={() => {}}>
             Run setup
           </button>
         </div>
@@ -123,12 +116,97 @@ const NotTeamOrEnterpriseWarning = () => {
   )
 }
 
+const initialSteps: Record<InitStepId, InitStepUpdate> = {
+  orgDefaults: {
+    id: "orgDefaults",
+    status: "pending",
+    title: "Organization safety defaults",
+  },
+  orgActions: {
+    id: "orgActions",
+    status: "pending",
+    title: "Actions permissions",
+  },
+  configRepo: {
+    id: "configRepo",
+    status: "pending",
+    title: "Config repository",
+  },
+  skeleton: {
+    id: "skeleton",
+    status: "pending",
+    title: "Skeleton files",
+  },
+  branchProtection: {
+    id: "branchProtection",
+    status: "pending",
+    title: "Branch protection",
+  },
+  workflowPermissions: {
+    id: "workflowPermissions",
+    status: "pending",
+    title: "Workflow permissions",
+  },
+  reusableWorkflowAccess: {
+    id: "reusableWorkflowAccess",
+    status: "pending",
+    title: "Reusable workflow access",
+  },
+  pages: {
+    id: "pages",
+    status: "pending",
+    title: "GitHub Pages",
+  },
+  collectToken: {
+    id: "collectToken",
+    status: "pending",
+    title: "Collect token",
+  },
+}
+
+function applyStepUpdate(
+  steps: Record<InitStepId, InitStepUpdate>,
+  update: InitStepUpdate,
+): Record<InitStepId, InitStepUpdate> {
+  return {
+    ...steps,
+    [update.id]: {
+      ...steps[update.id],
+      ...update,
+    },
+  }
+}
+
 const OrgSetupPage = () => {
+  const queryClient = useQueryClient()
+  const githubClient = useGitHubClient()
+
   const { org } = useParams({ strict: false })
-  const runInit = () => console.log("init")
+  const [steps, setSteps] =
+    useState<Record<InitStepId, InitStepUpdate>>(initialSteps)
   const { data: orgMembership, isLoading } = useGetOrgMembership(org)
   const { data: orgPlanDetails, isLoading: isLoadingPlanDetails } =
     useGetOrgPlanDetails(org)
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!org) return
+      return initClassroom50({
+        client: githubClient,
+        org,
+        collectToken: "",
+        serviceAccountConfirmed: false,
+        onStepUpdate: (update) => {
+          setSteps((steps) => applyStepUpdate(steps, update))
+        },
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["orgs"],
+      })
+    },
+  })
 
   const isOwner = orgMembership?.role === "admin"
   const isTeamOrEnterprise =
@@ -145,7 +223,7 @@ const OrgSetupPage = () => {
           )}
           {isLoading && <div className="w-full loading-spinner" />}
           {!isLoading && !isOwner && <NotAdminAlert />}
-          {!isLoading && isOwner && <OrgSteps runInit={runInit} />}
+          {!isLoading && isOwner && <OrgSteps steps={steps} />}
         </DrawerContent>
         <DrawerSidebar page="classes" selected="assignments" />
       </Drawer>
