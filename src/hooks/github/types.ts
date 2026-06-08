@@ -83,3 +83,14 @@ export type GitHubTeam = {
   privacy: "secret" | "closed"
   description: string | null
 }
+
+export type GitHubOrgDetails = {
+  login: string
+  id: number
+  plan: {
+    name: string
+    space: number
+    filled_seats: number
+    seats: number
+  }
+}

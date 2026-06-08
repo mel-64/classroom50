@@ -620,3 +620,18 @@ export async function getClassroom50OrgSummary(
     },
   }
 }
+
+export async function getRepo(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+) {
+  try {
+    return await client.request(`/repos/${owner}/${repo}`)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return null
+    }
+    throw err
+  }
+}

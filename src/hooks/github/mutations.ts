@@ -19,6 +19,7 @@ import {
   waitForBranchRefRepo,
   fetchTextWithFriendlyErrors,
   fetchAssignmentFromPages,
+  getRepo,
 } from "./queries"
 import type { Assignment, AssignmentTest } from "@/types/classroom"
 import Papa from "papaparse"
@@ -108,6 +109,26 @@ export function createTree(
   )
 }
 
+export function createTreeRepo(
+  client: GitHubClient,
+  input: {
+    base_tree: string
+    org: string
+    repo: string
+    tree: { path: string; mode: string; type: string; content: string }[]
+  },
+) {
+  const { base_tree, org, repo, tree } = input
+
+  return client.request<GitHubTree>(`/repos/${org}/${repo}/git/trees`, {
+    method: "POST",
+    body: {
+      base_tree,
+      tree,
+    },
+  })
+}
+
 type GitHubTree = {
   sha: string
 }
@@ -156,6 +177,31 @@ export function createCommit(
       body: {
         message: `Create init files for new classroom: ${classroom}`,
         tree: tree_sha,
+        parents,
+      },
+    },
+  )
+}
+
+export function createCommitRepo(
+  client: GitHubClient,
+  input: {
+    org: string
+    repo: string
+    parents: [string]
+    tree: string
+    message: string
+  },
+) {
+  const { org, repo, parents, tree, message } = input
+
+  return client.request<GitHubCreateCommit>(
+    `/repos/${org}/${repo}/git/commits`,
+    {
+      method: "POST",
+      body: {
+        message,
+        tree,
         parents,
       },
     },
@@ -1329,14 +1375,17 @@ export async function acceptAssignment(params: {
   }
 }
 
-async function tryStep<T>(fn: () => Promise<T>) {
+async function tryStep<T>(
+  fn: () => Promise<T>,
+  options?: { warningCodes: number[] },
+) {
   try {
     const data = await fn()
     return { status: "complete" as const, data }
   } catch (err) {
     if (
       err instanceof GitHubAPIError &&
-      (err.status === 409 || err.status === 403)
+      options?.warningCodes?.some((code) => err.status === code)
     ) {
       return {
         status: "warning" as const,
@@ -1351,6 +1400,11 @@ async function tryStep<T>(fn: () => Promise<T>) {
   }
 }
 
+type InitClassroomStep = {
+  status: InitStepStatus
+  message?: string
+  data?: unknown
+}
 type InitStepStatus =
   | "pending"
   | "running"
@@ -1360,7 +1414,96 @@ type InitStepStatus =
   | "skipped"
 
 type InitResults = {
-  orgDefaults: string
+  orgDefaults?: InitClassroomStep
+  configRepo?: InitClassroomStep
+  skeleton?: InitClassroomStep
+}
+
+async function updateOrgClassroomSafetyDefaults(
+  client: GitHubClient,
+  org: string,
+) {
+  return client.request(`/orgs/${org}`, {
+    method: "PATCH",
+    body: {
+      default_repository_permission: "none",
+      members_can_create_public_repositories: false,
+    },
+  })
+}
+
+export async function createOrgRepo(client: GitHubClient, org: string) {
+  return client.request(`/orgs/${org}/repos`, {
+    method: "POST",
+    body: {
+      name: "classroom50",
+      private: true,
+      auto_init: true,
+      description:
+        "Classroom 50 configuration, manifests, workflows, and scores",
+    },
+  })
+}
+
+export async function ensureClassroom50Repo(client: GitHubClient, org: string) {
+  const existing = await getRepo(client, org, "classroom50")
+
+  if (existing) {
+    return { status: "complete" as const, created: false, repo: existing }
+  }
+
+  const repo = await createOrgRepo(client, org)
+
+  return { status: "complete" as const, created: true, repo }
+}
+
+export async function findMissingSkeletonFiles(
+  client: GitHubClient,
+  org: string,
+) {}
+
+export async function ensureSkeletonFiles(client: GitHubClient, org: string) {
+  const missing = await findMissingSkeletonFiles(client, org)
+
+  if (missing.length === 0) {
+    return { status: "complete", created: [] }
+  }
+
+  const branch = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, branch.object.sha)
+
+  const tree = await createTreeRepo(client, {
+    org,
+    repo: "classroom50",
+    base_tree: commit.tree.sha,
+    tree: missing.map((file) => ({
+      path: file.path,
+      mode: "100644",
+      type: "blob",
+      content: file.content,
+    })),
+  })
+
+  const newCommit = await createCommitRepo(client, {
+    org,
+    repo: "classroom50",
+    message: "Bootstrap Classroom 50 skeleton",
+    tree: tree.sha,
+    parents: [commit.sha],
+  })
+
+  await updateRefForRepo({
+    client,
+    owner: org,
+    repo: "classroom50",
+    branch: "main",
+    commitSha: newCommit.sha,
+  })
+
+  return {
+    status: "complete",
+    created: missing.map((f) => f.path),
+  }
 }
 
 export async function initClassroom50({
@@ -1376,8 +1519,9 @@ export async function initClassroom50({
 }) {
   const results: InitResults = {}
 
-  results.orgDefaults = await tryStep(() =>
-    updateOrgClassroomSafetyDefaults(client, org),
+  results.orgDefaults = await tryStep(
+    () => updateOrgClassroomSafetyDefaults(client, org),
+    { warningCodes: [403, 422] },
   )
 
   results.configRepo = await tryStep(() => ensureClassroom50Repo(client, org))
