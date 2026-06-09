@@ -12,7 +12,7 @@ import type {
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
-import { createTeam } from "./mutations"
+import { createTeam, getErrorMessage } from "./mutations"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -572,6 +572,7 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
+    collectToken: CollectTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
@@ -586,12 +587,15 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
+  let collectToken: CollectTokenStatus | null = null
   let status: Classroom50Status = "unknown"
 
   try {
     await client.request(`/repos/${org.login}/classroom50`)
     canAccessRepo = true
     status = "ready"
+
+    collectToken = await getCollectTokenStatus(client, org.login)
   } catch (error: any) {
     if (error.status === 404) {
       canAccessRepo = false
@@ -614,6 +618,7 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
+      collectToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
@@ -633,5 +638,80 @@ export async function getRepo(
       return null
     }
     throw err
+  }
+}
+
+type RepositorySecret = {
+  name: string
+  created_at: string
+  updated_at: string
+}
+const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_COLLECT_TOKEN"
+export type CollectTokenStatus =
+  | {
+      status: "present"
+      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      createdAt: string
+      updatedAt: string
+      message: string
+    }
+  | {
+      status: "missing"
+      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      message: string
+    }
+  | {
+      status: "unknown"
+      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      reason: "repo_missing_or_no_access" | "permission_denied" | "unknown"
+      message: string
+    }
+
+export async function getCollectTokenStatus(
+  client: GitHubClient,
+  org: string,
+): Promise<CollectTokenStatus> {
+  try {
+    const secret = await client.request<RepositorySecret>(
+      `/repos/${org}/classroom50/actions/secrets/${COLLECT_TOKEN_SECRET_NAME}`,
+    )
+
+    return {
+      status: "present",
+      secretName: COLLECT_TOKEN_SECRET_NAME,
+      createdAt: secret.created_at,
+      updatedAt: secret.updated_at,
+      message: `Collect token secret exists. Last updated ${new Date(
+        secret.updated_at,
+      ).toLocaleString()}.`,
+    }
+  } catch (err) {
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 404) {
+        return {
+          status: "missing",
+          secretName: COLLECT_TOKEN_SECRET_NAME,
+          message:
+            "Collect token secret is missing. Store collection workflows will not be able to read student repositories until a token is stored.",
+        }
+      }
+
+      if (err.status === 403) {
+        return {
+          status: "unknown",
+          secretName: COLLECT_TOKEN_SECRET_NAME,
+          reason: "permission_denied",
+          message:
+            "Could not check the collect token secret because this GitHub authorization cannot read repository Actions secrets.",
+        }
+      }
+    }
+
+    return {
+      status: "unknown",
+      secretName: COLLECT_TOKEN_SECRET_NAME,
+      reason: "unknown",
+      message: `Could not check collect token secret: ${getErrorMessage(err)}`,
+    }
   }
 }
