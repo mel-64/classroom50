@@ -60,7 +60,7 @@ const INIT_STEP_ORDER: InitStepId[] = [
   "pages",
   "collectToken",
 ]
-const OrgSteps = ({ steps }) => {
+const OrgSteps = ({ steps, mutation }) => {
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-5">
@@ -88,8 +88,16 @@ const OrgSteps = ({ steps }) => {
         </div>
 
         <div className="card-actions justify-end">
-          <button className="btn btn-primary" onClick={() => {}}>
-            Run setup
+          <button
+            disabled={mutation.isPending}
+            className="btn btn-primary"
+            onClick={mutation.mutateAsync}
+          >
+            {mutation.isPending ? (
+              <span className="loading loading-spinner" />
+            ) : (
+              "Run setup"
+            )}
           </button>
         </div>
       </div>
@@ -190,7 +198,11 @@ const OrgSetupPage = () => {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      if (!org) return
+      console.log("triggering mutation")
+      if (!org) {
+        console.log("org missing", org)
+        return
+      }
       return initClassroom50({
         client: githubClient,
         org,
@@ -223,7 +235,9 @@ const OrgSetupPage = () => {
           )}
           {isLoading && <div className="w-full loading-spinner" />}
           {!isLoading && !isOwner && <NotAdminAlert />}
-          {!isLoading && isOwner && <OrgSteps steps={steps} />}
+          {!isLoading && isOwner && (
+            <OrgSteps steps={steps} mutation={mutation} />
+          )}
         </DrawerContent>
         <DrawerSidebar page="classes" selected="assignments" />
       </Drawer>

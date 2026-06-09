@@ -1558,7 +1558,7 @@ export async function listTargetRepoPaths(
   }>(`/repos/${org}/${CONFIG_REPO}/git/commits/${ref.object.sha}`)
 
   const tree = await client.request<GitHubTreeResponse>(
-    `/repos/${org}/${CONFIG_REPO}/git/trees/${commit.tree.sha}/?recursive=1`,
+    `/repos/${org}/${CONFIG_REPO}/git/trees/${commit.tree.sha}?recursive=1`,
   )
 
   if (tree.truncated) {
