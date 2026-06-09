@@ -14,7 +14,7 @@ function OrgCard({ summary }: { summary: Classroom50OrgSummary }) {
   const isReady = classroom50.status === "ready"
   const needsSetup = classroom50.status === "needs_setup"
   const noAccess = classroom50.status === "no_access"
-  const hasCollectToken = classroom50.collectToken.status === "present"
+  const hasCollectToken = classroom50.collectToken?.status === "present"
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
