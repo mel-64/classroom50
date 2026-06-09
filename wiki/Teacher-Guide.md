@@ -15,7 +15,7 @@ The base permission ("No permission") and public-repo-creation lockdown are now 
 
 ## 2. Log in with the right scopes
 
-Org invitations require the `admin:org` OAuth scope, which `gh auth login` doesn't grant by default. Run once:
+`gh teacher login` grants the OAuth scopes the teacher commands need (`admin:org` for org invitations, `workflow` so `gh teacher init` can commit the config repo's workflow files), which a plain `gh auth login` doesn't. Run once:
 
 ```sh
 gh teacher login
@@ -23,9 +23,9 @@ gh teacher login
 
 ![Demo: gh teacher login](images/gh_teacher_auth.gif)
 
-This shells out to `gh auth login -s admin:org` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants `admin:org` in one shot; if you have, it re-authenticates with the new scope appended.
+This shells out to `gh auth login -s admin:org -s workflow` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants both scopes in one shot; if you have, it re-authenticates with them appended.
 
-If you skip this step and have no token at all, the CLI detects the missing token and runs `gh teacher login` automatically. If a token exists but lacks `admin:org`, commands like `gh teacher invite` will fail with an error instructing you to run `gh teacher login` to grant the scope.
+If you skip this step and have no token at all, the CLI detects the missing token and runs `gh teacher login` automatically. If a token exists but lacks `admin:org` or `workflow`, the affected command (`gh teacher invite` or `gh teacher init`, respectively) fails with an error instructing you to run `gh teacher login` to grant the missing scope.
 
 ## 3. Bootstrap the classroom50 config repo
 

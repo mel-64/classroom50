@@ -27,6 +27,22 @@ gh teacher login
 
 This re-authenticates with `admin:org` appended. The CLI also detects this missing scope and runs the login flow for you automatically if you skip it.
 
+## `git/trees: HTTP 404` on `gh teacher init`
+
+`gh teacher init` commits the config repo's `.github/workflows/` files via the Git Data API, which GitHub gates behind the `workflow` OAuth scope. A token without it is rejected with a misleading `404 Not Found` (`POST .../git/trees: HTTP 404`), leaving the `classroom50` repo with only a README. Re-authenticate so the token carries `workflow`:
+
+```sh
+gh teacher login
+```
+
+`gh teacher login` requests `workflow` automatically. To add it to your existing token in place instead:
+
+```sh
+gh auth refresh -s admin:org,workflow
+```
+
+Whether a plain `gh auth login` already granted `workflow` depends on unrelated choices in its prompts (gh adds it only when you set it up as your HTTPS git credential helper), which is why this surfaces on some machines and not others. `init` now detects the missing scope and fails fast with this remediation instead of the bare 404.
+
 ## "Not an admin" on `gh teacher invite`
 
 Your authenticated user has to be an org owner (or have a role that includes member-invitation permission) for `POST /orgs/{org}/invitations` to succeed. Verify your role under `https://github.com/orgs/<org>/people` — your name should show `Owner`. If you're an admin via a team, GitHub's invitation API still requires owner-level permission.

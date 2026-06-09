@@ -22,13 +22,14 @@ Run once per machine or after a token rotation:
 gh teacher login
 ```
 
-This shells out to `gh auth login -s admin:org` and opens a browser to complete GitHub's OAuth device flow (a one-time code you enter at <https://github.com/login/device>). The `admin:org` scope is required for org-level invitations; it is **not** granted by a plain `gh auth login`. If you skip this step and have no token at all, the CLI detects the missing token and runs the login flow automatically. If a token exists but lacks `admin:org`, commands will fail with an error instructing you to run `gh teacher login` to grant the scope.
+This shells out to `gh auth login -s admin:org -s workflow` and opens a browser to complete GitHub's OAuth device flow (a one-time code you enter at <https://github.com/login/device>). Neither scope is granted by a plain `gh auth login`: `admin:org` is required for org-level invitations, and `workflow` lets `gh teacher init` commit the config repo's `.github/workflows/` files via the Git Data API (GitHub returns a misleading `404` on that write without it). If you skip this step and have no token at all, the CLI detects the missing token and runs the login flow automatically. If a token exists but lacks `admin:org` or `workflow`, the affected command fails with an error telling you to run `gh teacher login` to grant the missing scope.
 
 OAuth scopes requested by the teacher CLI:
 
 | Scope | Required for |
 |-------|--------------|
 | `admin:org` | Sending org invitations, reading and removing org memberships |
+| `workflow` | Committing the config repo's `.github/workflows/` files during `gh teacher init` (GitHub 404s the Git Data API write without it) |
 
 ### 3. Student authentication (`gh student login`)
 

@@ -43,7 +43,7 @@ gh student --help
 Each CLI has a `login` command that runs `gh auth login` with the extra OAuth scopes the classroom workflows require.
 
 ```sh
-gh teacher login   # requests admin:org (needed for org invites)
+gh teacher login   # requests admin:org (org invites) + workflow (init commits the config repo's workflows)
 gh student login   # requests read:org and repo (needed to accept assignments)
 ```
 
