@@ -11,7 +11,7 @@ export const GITHUB_AUTH_SESSION = {
   SCOPE: "gh_oauth_scope",
 } as const
 
-export const DEFAULT_GITHUB_SCOPE = "read:user read:org repo workflow"
+export const DEFAULT_GITHUB_SCOPE = "read:user read:org repo workflow admin:org"
 
 export const GITHUB_OAUTH_WORKER_BASE =
   import.meta.env.VITE_GITHUB_OAUTH_WORKER_BASE ??
