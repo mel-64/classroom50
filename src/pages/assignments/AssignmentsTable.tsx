@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
@@ -15,6 +15,7 @@ function formatDate(dateString: string) {
 
 const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
   const { data: scoresData } = useGetScores(org, classroom)
+  const navigate = useNavigate()
 
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
@@ -25,7 +26,6 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
             <th>Type</th>
             <th>Due Date</th>
             <th>Submissions</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -37,8 +37,17 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
             </tr>
           )}
           {assignments?.map((assignment) => (
-            <tr>
-              <td>{assignment.name}</td>
+            <tr
+              className="hover:cursor-pointer hover:bg-[#fafafa]"
+              onClick={() =>
+                navigate({
+                  to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
+                })
+              }
+            >
+              <td className="font-bold link link-info no-underline">
+                {assignment.name}
+              </td>
               <td className="flex">
                 {assignment.mode === "individual" && (
                   <div className="flex gap-2">
@@ -75,13 +84,6 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                   max="100"
                 ></progress>
               </td>
-              <th className="text-[#233da0]">
-                <Link
-                  to={`/${org}/${classroom}/assignments/${assignment.slug}/submissions`}
-                >
-                  View &gt;
-                </Link>
-              </th>
             </tr>
           ))}
         </tbody>
