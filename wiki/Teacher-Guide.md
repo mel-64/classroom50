@@ -41,7 +41,7 @@ Or omit the env var and the command prompts for the token interactively:
 gh teacher init <org>
 ```
 
-`init` is idempotent: re-running picks up where a prior run left off (it does not overwrite teacher edits to the skeleton).
+`init` is idempotent: re-running picks up where a prior run left off. It also offers to refresh skeleton files that differ from the CLI's embedded version (how an existing org gains new features like declarative tests) — since that resets any teacher edits to those files, it asks for confirmation first and skips them if you decline (`--yes` skips the prompt for scripted runs).
 
 **Collect token.** Supply a fine-grained PAT with **Contents: read** on org repos whose names match `<classroom>-*`. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
 
