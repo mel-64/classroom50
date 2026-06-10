@@ -203,7 +203,7 @@ const UploadRoster = ({
 
   return (
     <>
-      <div className="card card-border w-96 bg-base-100 shadow-sm">
+      <div className="card card-border bg-base-100 shadow-sm">
         <div className="card-body">
           <p className="font-bold">Upload Roster</p>
           <span>

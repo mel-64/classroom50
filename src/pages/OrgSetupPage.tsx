@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 
 import Drawer, {
   DrawerContent,
@@ -15,6 +15,7 @@ import {
 } from "@/hooks/github/mutations"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { AlertCircle, AlertTriangle, CheckCircle } from "lucide-react"
 
 const InitStep = ({
   title,
@@ -34,7 +35,7 @@ const InitStep = ({
         ? "badge-warning"
         : status === "error"
           ? "badge-error"
-          : "badge-neutral"
+          : "badge-neutral badge-ghost"
 
   return (
     <div className="flex items-start justify-between gap-4 rounded-xl border border-base-300 bg-base-100 p-4">
@@ -44,7 +45,17 @@ const InitStep = ({
           {message || description}
         </p>
       </div>
-      <span className={`badge ${badgeClass}`}>{status}</span>
+      <span className={`badge ${badgeClass}`}>
+        {status === "complete" ? <CheckCircle className="size-4" /> : <></>}
+        {status === "pending" ? "" : <></>}
+        {status === "warning" ? <AlertCircle className="size-4" /> : <></>}
+        {status === "running" ? (
+          <span className="loading loading-spinner size-4" />
+        ) : (
+          <></>
+        )}
+        {status === "error" ? <AlertTriangle className="size-4" /> : <></>}
+      </span>
     </div>
   )
 }
@@ -59,16 +70,36 @@ const INIT_STEP_ORDER: InitStepId[] = [
   "reusableWorkflowAccess",
   "pages",
 ]
-const OrgSteps = ({ steps, mutation }) => {
+const OrgSteps = ({ steps, mutation, nextStep = false, org = "" }) => {
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-5">
-        <div>
-          <h2 className="card-title">Initialize Classroom50</h2>
-          <p className="text-sm text-base-content/70">
-            This creates and configures the private classroom50 repo for this
-            teaching organization.
-          </p>
+        <div className="flex justify-between">
+          <div>
+            <h2 className="card-title">Setup Classroom 50</h2>
+            <p className="text-sm text-base-content/70">
+              This will set up your GitHub organization to use Classroom 50.
+            </p>
+          </div>
+          <div className="card-actions justify-end">
+            {!nextStep ? (
+              <button
+                disabled={mutation.isPending}
+                className="btn btn-primary"
+                onClick={mutation.mutateAsync}
+              >
+                {mutation.isPending ? (
+                  <span className="loading loading-spinner" />
+                ) : (
+                  "Run setup"
+                )}
+              </button>
+            ) : (
+              <Link className="btn btn-primary" to={`/${org}/settings`}>
+                Next
+              </Link>
+            )}
+          </div>
         </div>
 
         <div className="grid gap-3">
@@ -84,20 +115,6 @@ const OrgSteps = ({ steps, mutation }) => {
               />
             )
           })}
-        </div>
-
-        <div className="card-actions justify-end">
-          <button
-            disabled={mutation.isPending}
-            className="btn btn-primary"
-            onClick={mutation.mutateAsync}
-          >
-            {mutation.isPending ? (
-              <span className="loading loading-spinner" />
-            ) : (
-              "Run setup"
-            )}
-          </button>
         </div>
       </div>
     </div>
@@ -115,7 +132,7 @@ const NotAdminAlert = () => {
 
 const NotTeamOrEnterpriseWarning = () => {
   return (
-    <div className="alert alert-warning">
+    <div className="alert alert-warning mb-4">
       GitHub Pages from a private repository may require GitHub Team or
       Enterprise Cloud. You can continue setup, but published assignments may
       not be accessible until Pages is available for this org.
@@ -189,6 +206,7 @@ const OrgSetupPage = () => {
   const { data: orgMembership, isLoading } = useGetOrgMembership(org)
   const { data: orgPlanDetails, isLoading: isLoadingPlanDetails } =
     useGetOrgPlanDetails(org)
+  const [nextStep, setNextStep] = useState(false)
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -211,6 +229,7 @@ const OrgSetupPage = () => {
       queryClient.invalidateQueries({
         queryKey: ["orgs"],
       })
+      setNextStep(true)
     },
   })
 
@@ -230,7 +249,12 @@ const OrgSetupPage = () => {
           {isLoading && <div className="w-full loading-spinner" />}
           {!isLoading && !isOwner && <NotAdminAlert />}
           {!isLoading && isOwner && (
-            <OrgSteps steps={steps} mutation={mutation} />
+            <OrgSteps
+              steps={steps}
+              mutation={mutation}
+              nextStep={nextStep}
+              org={org}
+            />
           )}
         </DrawerContent>
         <DrawerSidebar page="classes" selected="assignments" />

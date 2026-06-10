@@ -2,6 +2,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetClasses from "@/hooks/useGetClasses"
 import { useForm } from "@tanstack/react-form"
 import { useParams } from "@tanstack/react-router"
+import { useState } from "react"
 
 export type CreateClassroomFormValues = {
   name: string
@@ -29,6 +30,8 @@ const CreateClassroomForm = ({
 }: CreateClassroomFormProps) => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
+  const [submitted, setSubmitted] = useState(false)
+
   const form = useForm({
     defaultValues: {
       name: defaultValues?.name ?? "",
@@ -64,6 +67,7 @@ const CreateClassroomForm = ({
         slug: slugify(value.slug),
         term: value.term.trim(),
       })
+      setSubmitted(true)
     },
   })
   return (
@@ -167,7 +171,7 @@ const CreateClassroomForm = ({
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={!canSubmit || isSubmitting}
+                disabled={!canSubmit || isSubmitting || submitted}
               >
                 {isSubmitting ? "Creating..." : "Create Classroom"}
               </button>

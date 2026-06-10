@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "@tanstack/react-router"
+import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import {
@@ -16,12 +16,15 @@ import Drawer, {
 import Breadcrumb from "@/components/breadcrumb"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
+import { useState } from "react"
 
 const CreateClassroomPage = () => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const { org } = useParams({ strict: false })
-  const navigate = useNavigate()
+  const [classroomCreated, setClassroomCreated] = useState(false)
+  const [classroomSlug, setClassroomSlug] = useState("")
+
   const createClassroomMutation = useMutation<
     CreateClassroomResult,
     GitHubAPIError,
@@ -52,7 +55,7 @@ const CreateClassroomPage = () => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.rawFile(org, "classroom50", `/`),
       })
-      navigate({ to: `/${org}/` })
+      setClassroomCreated(true)
     },
   })
 
@@ -67,17 +70,32 @@ const CreateClassroomPage = () => {
               <h1 className="text-xl pt-8 pb-10 font-bold">Create Classroom</h1>
             </div>
           </div>
+          {classroomCreated ? (
+            <div className="alert alert-success mb-4">
+              <div>
+                Your classroom has been created. Click{" "}
+                <Link className="underline" to={`/${org}/${classroomSlug}`}>
+                  here
+                </Link>{" "}
+                to view your new classroom; please note it may take a minute or
+                two for the new class to show up.
+              </div>
+            </div>
+          ) : (
+            <></>
+          )}
           <div className="flex flex-col">
             <div className="mb-8">
               <CreateClassroomForm
-                onSubmit={(values) =>
+                onSubmit={(values) => {
+                  setClassroomSlug(values.slug)
                   createClassroomMutation.mutateAsync({
                     name: values.name,
                     classroom: values.slug,
                     org,
                     term: values.term,
                   })
-                }
+                }}
               />
             </div>
           </div>

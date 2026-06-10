@@ -15,16 +15,20 @@ export const DrawerContent = ({ children, className }) => (
 )
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
-export const DrawerSidebar = ({ selected = "", page = "" }) => {
+export const DrawerSidebar = ({
+  selected = "",
+  page = "",
+  settings = false,
+}) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
         {page === "classes" ? (
-          <SidebarContentClasses />
+          <SidebarContentClasses selected={selected} settings={settings} />
         ) : page === "orgs" ? (
-          <SidebarContentOrgs selected={selected} />
+          <SidebarContentOrgs selected={selected} settings={settings} />
         ) : (
-          <SidebarContent selected={selected} />
+          <SidebarContent selected={selected} settings={settings} />
         )}
       </div>
     </div>
@@ -33,9 +37,12 @@ export const DrawerSidebar = ({ selected = "", page = "" }) => {
 
 export const ClassroomLogo = () => {
   return (
-    <div className="flex p-6 text-lg text-white font-bold border-b-1 border-[#444]">
+    <Link
+      to="/"
+      className="flex p-6 text-lg text-white font-bold border-b-1 border-[#444]"
+    >
       <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
-    </div>
+    </Link>
   )
 }
 
@@ -114,18 +121,22 @@ export const SidebarFooter = () => {
 
   return (
     <div className="mt-auto border-t border-[#444] py-4">
-      <div className="flex justify-start gap-4">
+      <div className="flex items-center justify-start gap-4">
         <div className="avatar avatar-placeholder">
           <img src={avatar_img} className="w-12 rounded-full" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-medium text-white">{name}</div>
 
-          <div>
-            <span className="text-[#aaa]">
-              {isTeacher ? "Teacher" : "Student"}
-            </span>
-          </div>
+          {org ? (
+            <div>
+              <span className="text-[#aaa]">
+                {isTeacher ? "Teacher" : "Student"}
+              </span>
+            </div>
+          ) : (
+            <></>
+          )}
         </div>
       </div>
     </div>
@@ -147,17 +158,31 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
   )
 }
 
-export const MyClasses = () => {
+export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
         <Link to={`/${org}`}>
-          <li className="flex bg-[#323b49] px-2 rounded-box">
+          <li
+            className={`flex${settings || selected === "settings" ? "" : " bg-[#323b49]"} px-2 rounded-box`}
+          >
             <BookText />
             <span>My Classes</span>
           </li>
         </Link>
+        {org ? (
+          <Link to={`/${org}/settings`}>
+            <li
+              className={`flex${!(settings || selected === "settings") ? "" : " bg-[#323b49]"} px-2 rounded-box`}
+            >
+              <Settings />
+              <span>Settings</span>
+            </li>
+          </Link>
+        ) : (
+          <></>
+        )}
       </ul>
     </div>
   )
@@ -165,6 +190,7 @@ export const MyClasses = () => {
 
 export const MyOrgs = ({ settings = false }) => {
   const { org } = useParams({ strict: false })
+
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -173,27 +199,31 @@ export const MyOrgs = ({ settings = false }) => {
             className={`flex${!settings ? " bg-[#323b49]" : ""} px-2 rounded-box`}
           >
             <BookText />
-            <span>My Orgs</span>
+            <span>Organizations</span>
           </li>
         </Link>
-        <Link to={`/${org}`}>
-          <li
-            className={`flex${!settings ? "" : " bg-[#323b49]"} px-2 rounded-box`}
-          >
-            <Settings />
-            <span>Settings</span>
-          </li>
-        </Link>
+        {org ? (
+          <Link to={`/${org}/settings`}>
+            <li
+              className={`flex${!settings ? "" : " bg-[#323b49]"} px-2 rounded-box`}
+            >
+              <Settings />
+              <span>Settings</span>
+            </li>
+          </Link>
+        ) : (
+          <></>
+        )}
       </ul>
     </div>
   )
 }
 
-export const SidebarContentClasses = () => {
+export const SidebarContentClasses = ({ selected, settings = false }) => {
   return (
     <>
       <ClassroomLogo />
-      <MyClasses />
+      <MyClasses selected={selected} settings={settings} />
       <SidebarFooter />
     </>
   )

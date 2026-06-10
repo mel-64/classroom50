@@ -40,14 +40,6 @@ const AddByGithubUsername = ({
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
 
-  useEffect(() => {
-    console.log("team", team)
-  }, [team])
-
-  useEffect(() => {
-    console.log("members", members)
-  }, [members])
-
   const addStudentMutation = useMutation({
     mutationFn: ({ username }) =>
       enrollStudentInClassroom(githubClient, { org, classroom, username }),
@@ -79,7 +71,7 @@ const AddByGithubUsername = ({
   })
 
   return (
-    <div className={`card card-border w-96 bg-base-100 shadow-sm ${className}`}>
+    <div className={`card card-border bg-base-100 shadow-sm ${className}`}>
       <form
         onSubmit={(e) => {
           e.preventDefault()

@@ -84,7 +84,7 @@ const AutogradingTestModal = ({
 
           <form.Field name={`tests[${index}].points`}>
             {(field) => (
-              <div>
+              <div className="flex flex-col">
                 <label className="label font-bold">Points</label>
                 <input
                   className="input w-32"
@@ -203,14 +203,14 @@ const AutogradingTestsPane = ({ form }) => {
                     (test: AssignmentTest, index: number) => (
                       <tr key={index}>
                         <td>
-                          <div className="font-bold">
+                          <div className="font-bold max-w-[12rem] truncate">
                             {test.name || `Test ${index + 1}`}
                           </div>
                         </td>
 
                         <td>
                           <div className="max-w-xs">
-                            <pre className="whitespace-pre-wrap rounded bg-base-200 p-2 text-xs">
+                            <pre className="max-w-[12rem] truncate rounded bg-base-200 p-2 text-xs">
                               {test.input || "-"}
                             </pre>
                           </div>
@@ -218,7 +218,7 @@ const AutogradingTestsPane = ({ form }) => {
 
                         <td>
                           <div className="max-w-xs">
-                            <pre className="whitespace-pre-wrap rounded bg-base-200 p-2 text-xs">
+                            <pre className="max-w-[12rem] truncate rounded bg-base-200 p-2 text-xs">
                               {test.output || "-"}
                             </pre>
                           </div>
@@ -226,7 +226,7 @@ const AutogradingTestsPane = ({ form }) => {
 
                         <td>
                           <span className="badge badge-primary badge-soft">
-                            {test.points} Points
+                            {test.points}
                           </span>
                         </td>
 

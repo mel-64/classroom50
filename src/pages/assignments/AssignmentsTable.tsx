@@ -41,14 +41,14 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               <td>{assignment.name}</td>
               <td className="flex">
                 {assignment.mode === "individual" && (
-                  <>
-                    <UserRound /> Individual Assignment
-                  </>
+                  <div className="flex gap-2">
+                    <UserRound /> Individual
+                  </div>
                 )}
                 {assignment.mode === "group" && (
-                  <>
-                    <UsersRound /> Group Assignment
-                  </>
+                  <div className="flex gap-2">
+                    <UsersRound /> Group
+                  </div>
                 )}
               </td>
               <td>

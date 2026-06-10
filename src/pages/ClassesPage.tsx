@@ -1,5 +1,5 @@
 import { useParams, Link } from "@tanstack/react-router"
-import { BookText, UsersRound } from "lucide-react"
+import { BookText, Plus, UsersRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
 import useGetClasses from "@/hooks/useGetClasses"
@@ -82,18 +82,46 @@ const ClassesPage = () => {
                 </div>
               </div>
 
-              <div className="flex sm:self-end">
-                <Link
-                  type="button"
-                  to={`/${org}/classes/new`}
-                  className="btn btn-primary"
-                >
-                  + New Class
-                </Link>
-              </div>
+              {classes.length && (
+                <div className="flex sm:self-end">
+                  <Link
+                    type="button"
+                    to={`/${org}/classes/new`}
+                    className="btn btn-primary"
+                  >
+                    + New Class
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
+          {classes.length === 0 ? (
+            <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
+              <div className="card-body items-center py-12 text-center">
+                <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Plus className="size-7" />
+                </div>
 
+                <h2 className="card-title text-xl">No classrooms yet</h2>
+
+                <p className="max-w-md text-base-content/70">
+                  Create your first classroom to start adding assignments,
+                  importing students, and managing submissions.
+                </p>
+
+                <div className="card-actions mt-4">
+                  <Link
+                    to={`/${org}/classes/new`}
+                    type="button"
+                    className="btn btn-primary"
+                  >
+                    <Plus className="size-4" />
+                    Create classroom
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="grid grid-cols-12 gap-4 mb-6">
             {classes.map((cl) => (
               <ClassCard key={cl.path} cl={cl} org={org} />

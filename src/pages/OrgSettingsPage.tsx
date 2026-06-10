@@ -4,7 +4,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import { useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -36,8 +36,8 @@ const OrgSettingsPage = () => {
   const collectTokenUrl =
     "https://github.com/settings/personal-access-tokens/new?" +
     new URLSearchParams({
-      name: `classroom50 collect token`,
-      description: `Read-only token for classroom50 collection from ${org} repos`,
+      name: `Classroom 50 Actions Token`,
+      description: `Read-only token for Classroom 50 GitHub Actions for ${org} organization`,
       target_name: org ?? "",
       expires_in: "90",
       contents: "read",
@@ -49,21 +49,33 @@ const OrgSettingsPage = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Org Settings</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Organization Settings
+            </h1>
             <p className="mt-2 max-w-2xl text-sm text-base-content/60">
-              Adjust the settings for your org, including setting up a PAT
-              (Personal Access Token).
+              Adjust the settings for your organization, including setting up a
+              PAT (Personal Access Token).
             </p>
           </div>
           <div className="divider" />
+          {patSaved && (
+            <div className="alert alert-success mt-4">
+              <div>
+                Your Personal Access Token has been saved and your organization
+                is ready to use with Classroom 50. Click{" "}
+                <Link to={`/${org}`} className="underline">
+                  here
+                </Link>{" "}
+                to go to your classroom.
+              </div>
+            </div>
+          )}
           <div className="mt-8">
             <h2 className="text-xl font-bold">Personal Access Token (PAT)</h2>
             <p className="mt-2 text-sm text-base-content/60">
-              Assign a Personal Access Token (PAT) to your Classroom 50 org to
-              allow for the collection of scores.
-            </p>
-            <p className="text-sm text-base-content/60">
-              Visit{" "}
+              Classroom 50 requires a Personal Access Token (PAT) with the
+              ability to read repositories in your classroom’s GitHub
+              organization. Visit{" "}
               <a
                 className="link link-info"
                 href={collectTokenUrl}
@@ -72,13 +84,9 @@ const OrgSettingsPage = () => {
               >
                 this URL
               </a>{" "}
-              to set up your token on GitHub.
+              and click "Generate Token" to create an access token. Then, paste
+              your newly created token here.
             </p>
-            <div className="alert mt-4 max-w-2xl">
-              NOTE: It is highly advised to NOT use your personal Teacher
-              account to set up your Personal Access Token. Consider using a
-              specially designated service account for this purpose.
-            </div>
             <form
               onSubmit={(e) => {
                 e.preventDefault()
@@ -87,25 +95,21 @@ const OrgSettingsPage = () => {
               }}
             >
               <div className="flex flex-col gap-2 max-w-2xl">
+                <label className="label font-bold mt-4 text-sm">
+                  Enter PAT
+                </label>
                 <input
                   type="password"
-                  className="input input-bordered w-full max-w-2xl mt-4"
+                  placeholder="Enter token (e.g., github_pat_123...)"
+                  className="input input-bordered w-full max-w-2xl"
                   autoComplete="off"
                   value={collectToken}
                   onChange={(e) => setCollectToken(e.target.value)}
                 />
-                <label className="label cursor-pointer justify-start gap-3 max-w-xl mt-2">
-                  <input type="checkbox" className="checkbox" />
-                  <span className="label-text max-w-xl">
-                    I confirm this token belongs to an org-owned service
-                    account, not a personal
-                    <br /> teacher account.
-                  </span>
-                </label>
                 <button
                   disabled={patMutation.isPending}
                   type="submit"
-                  className="btn btn-primary w-40 self-end"
+                  className="btn btn-primary w-40 self-end mt-2"
                 >
                   {patMutation.isPending ? (
                     <span className="loading loading-spinner" />
@@ -113,16 +117,11 @@ const OrgSettingsPage = () => {
                     "Save PAT"
                   )}
                 </button>
-                {patSaved && (
-                  <div className="alert alert-success mt-4">
-                    Your Personal Access Token has been successfully saved.
-                  </div>
-                )}
               </div>
             </form>
           </div>
         </DrawerContent>
-        <DrawerSidebar page="orgs" selected="settings" />
+        <DrawerSidebar page="classes" settings selected="settings" />
       </Drawer>
     </div>
   )
