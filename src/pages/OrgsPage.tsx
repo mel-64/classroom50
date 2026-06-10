@@ -5,6 +5,7 @@ import Drawer, {
 } from "@/components/drawer"
 import type { Classroom50OrgSummary } from "@/hooks/github/queries"
 import useGetOrgs from "@/hooks/useGetOrgs"
+import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
   AlertTriangle,
@@ -12,9 +13,7 @@ import {
   Info,
   Lock,
   RefreshCw,
-  ShieldCheck,
 } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
 
 function MissingOrgNotice() {
   const queryClient = useQueryClient()
@@ -97,7 +96,7 @@ function OrgCard({
             <h2 className="truncate text-lg font-bold">{org.login}</h2>
 
             <p className="mt-1 line-clamp-2 text-sm text-base-content/70">
-              {org.description || "Description unavailable."}
+              {org.description || ""}
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -141,7 +140,7 @@ function OrgCard({
               params={{ org: org.login }}
               className="btn btn-warning btn-sm"
             >
-              Setup Classroom 50
+              Set Up
             </Link>
           )}
 
@@ -213,7 +212,7 @@ const OrgsPage = () => {
                 <div className="space-y-4 w-full">
                   <div>
                     <h1 className="text-2xl font-bold tracking-tight">
-                      Other Organizations
+                      Set Up New Classroom 50 Organization
                     </h1>
                   </div>
                   <div className="grid grid-cols-12 gap-4 mt-6">
