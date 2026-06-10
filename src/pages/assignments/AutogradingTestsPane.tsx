@@ -99,7 +99,7 @@ const AutogradingTestModal = ({
         }
       }}
     >
-      <div className="modal-box max-w-3xl">
+      <div className="modal-box max-w-3xl max-h-[90vh]">
         <div className="mb-6">
           <h3 className="text-lg font-bold">Edit Test {index + 1}</h3>
           <p className="text-sm opacity-70">
@@ -183,9 +183,7 @@ const AutogradingTestModal = ({
             )}
           </form.Field>
 
-          <form.Subscribe
-            selector={(state) => state.values.tests[index]?.type}
-          >
+          <form.Subscribe selector={(state) => state.values.tests[index]?.type}>
             {(typeValue) => (
               <>
                 {typeValue === "io" && (
@@ -290,8 +288,8 @@ const AutogradingTestModal = ({
                 {typeValue === "python" && (
                   <p className="rounded-box border border-dashed p-3 text-sm opacity-70">
                     The run command should invoke pytest (e.g.{" "}
-                    <code>python3 -m pytest -q</code>) against test files in
-                    the assignment template. Points are split across the cases
+                    <code>python3 -m pytest -q</code>) against test files in the
+                    assignment template. Points are split across the cases
                     pytest discovers.
                   </p>
                 )}
@@ -359,9 +357,6 @@ const AutogradingTestModal = ({
           </button>
         </div>
       </div>
-      {/* Plain div instead of daisyUI's usual <form method="dialog">
-          backdrop: the modal renders inside the create-assignment form,
-          and React (19) rejects nested <form> elements. */}
       <div className="modal-backdrop">
         <button type="button" onClick={onClose}>
           close
