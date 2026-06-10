@@ -17,12 +17,15 @@ import {
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { slugify } from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
+import { useState } from "react"
 
 const CreateAssignmentPage = () => {
   const client = useGitHubClient()
   const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
   const queryClient = useQueryClient()
+  const [errorMessage, setErrorMessage] = useState("")
+
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
     GitHubAPIError,
@@ -48,6 +51,8 @@ const CreateAssignmentPage = () => {
       } else {
         console.error("non-GitHub API error:", err)
       }
+      setErrorMessage(err.message)
+      window.scrollTo({ top: 0, behavior: "smooth" })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -73,10 +78,16 @@ const CreateAssignmentPage = () => {
               </h1>
             </div>
           </div>
+          {errorMessage ? (
+            <div className="alert alert-error mb-6">{errorMessage}</div>
+          ) : (
+            <></>
+          )}
           <div className="flex flex-col">
             <div className="mb-8">
               <CreateAssignmentForm
-                onSubmit={(values) =>
+                onSubmit={(values) => {
+                  setErrorMessage("")
                   createClassroomMutation.mutateAsync({
                     name: values.name,
                     slug: slugify(values.name),
@@ -89,7 +100,7 @@ const CreateAssignmentPage = () => {
                     classroom,
                     tests: values.tests,
                   })
-                }
+                }}
               />
             </div>
           </div>
