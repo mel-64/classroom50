@@ -35,6 +35,7 @@ const FormErrors = ({ form }) => (
 const CreateAssignmentForm = ({
   defaultValues,
   onSubmit,
+  loading = false,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
@@ -42,7 +43,8 @@ const CreateAssignmentForm = ({
       description: defaultValues?.description ?? "",
       mode: defaultValues?.mode ?? "individual",
       template_repo: defaultValues?.template_repo ?? "",
-      due_date: defaultValues?.due_date ?? new Date().toISOString().slice(0, 10),
+      due_date:
+        defaultValues?.due_date ?? new Date().toISOString().slice(0, 10),
       max_group_size: defaultValues?.max_group_size ?? 2,
       tests: defaultValues?.tests ?? [],
     } satisfies CreateAssignmentFormValues,
@@ -266,9 +268,13 @@ const CreateAssignmentForm = ({
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={!canSubmit || isSubmitting}
+              disabled={!canSubmit || isSubmitting || loading}
             >
-              {isSubmitting ? "Creating..." : "Create Assignment"}
+              {isSubmitting || loading ? (
+                <span className="loading loading-spinner" />
+              ) : (
+                "Create Assignment"
+              )}
             </button>
           )}
         </form.Subscribe>

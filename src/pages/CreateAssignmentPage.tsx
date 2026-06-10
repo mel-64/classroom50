@@ -86,6 +86,7 @@ const CreateAssignmentPage = () => {
           <div className="flex flex-col">
             <div className="mb-8">
               <CreateAssignmentForm
+                loading={createClassroomMutation.isPending}
                 onSubmit={(values) => {
                   setErrorMessage("")
                   createClassroomMutation.mutateAsync({
