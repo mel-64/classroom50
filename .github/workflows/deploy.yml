@@ -27,6 +27,12 @@ jobs:
 
       - run: npm ci
 
+      # Surface type errors as a CI signal without blocking deploys; the
+      # codebase has pre-existing type errors still being burned down.
+      - name: Typecheck (non-blocking)
+        run: npx tsc -b --force
+        continue-on-error: true
+
       # vite build directly (instead of "npm run build") skips the tsc
       # typecheck, which currently fails on pre-existing errors. The site
       # is served from the root of the custom domain (classroom50.org),
