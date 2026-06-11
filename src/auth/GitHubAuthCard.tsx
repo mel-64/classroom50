@@ -1,3 +1,5 @@
+import { useEffect } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { AlertTriangle, CheckCircle, GraduationCap } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
@@ -18,6 +20,17 @@ function LoadingScreen({ label }: { label: string }) {
 
 export function GitHubAuthCard() {
   const auth = useGithubAuth()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (auth.screen !== "success") return
+
+    const timer = window.setTimeout(() => {
+      void navigate({ to: "/" })
+    }, 3000)
+
+    return () => window.clearTimeout(timer)
+  }, [auth.screen, navigate])
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4 py-8">
@@ -45,7 +58,7 @@ export function GitHubAuthCard() {
             />
           ) : auth.screen === "exchanging" ? (
             <LoadingScreen label="Exchanging code for access token..." />
-          ) : auth.screen === "device-success" ? (
+          ) : auth.screen === "success" ? (
             <div className="flex flex-col items-center gap-4 py-10 text-center">
               <div className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
                 <CheckCircle className="size-7" />
@@ -55,7 +68,7 @@ export function GitHubAuthCard() {
                   Authentication successful
                 </h2>
                 <p className="mt-2 text-sm text-base-content/60">
-                  Loading your profile...
+                  Redirecting you to the app...
                 </p>
               </div>
             </div>

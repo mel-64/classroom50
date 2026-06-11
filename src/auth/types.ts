@@ -31,5 +31,5 @@ export type GithubAuthScreen =
   | 'config'
   | 'exchanging'
   | 'device-prompt'
-  | 'device-success'
+  | 'success'
   | 'authed'

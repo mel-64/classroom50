@@ -89,6 +89,31 @@ function useGithubAuthState() {
     mutationFn: requestDeviceCode,
   })
 
+  // Shared landing point for both web and device flows. Shows the success
+  // screen; the login card redirects to "/" 3s later and the timeout below
+  // settles the screen state for any future visit to the login page.
+  const completeSignIn = useCallback(
+    (data: { access_token: string; scope?: string }) => {
+      persistGithubToken(data.access_token, data.scope || "")
+      setToken(data.access_token)
+      setTokenScope(data.scope || "")
+      setDevice(null)
+      setScreen("success")
+
+      queryClient.prefetchQuery({
+        queryKey: ["github", "user", data.access_token],
+        queryFn: () => fetchGithubUser(data.access_token),
+      })
+
+      // Slightly after the card's 3s redirect so the success screen doesn't
+      // flash into the authed panel right before navigation.
+      window.setTimeout(() => {
+        setScreen("authed")
+      }, 3500)
+    },
+    [queryClient],
+  )
+
   useEffect(() => {
     const storedToken = getStoredGithubToken()
     const storedClientId = getStoredGithubClientId()
@@ -161,10 +186,7 @@ function useGithubAuthState() {
       },
       {
         onSuccess: (data) => {
-          persistGithubToken(data.access_token, data.scope || "")
-          setToken(data.access_token)
-          setTokenScope(data.scope || "")
-          setScreen("authed")
+          completeSignIn(data)
         },
         onError: (err) => {
           setError(formatError(err))
@@ -315,25 +337,12 @@ function useGithubAuthState() {
           return
         }
 
-        persistGithubToken(data.access_token, data.scope || "")
-        setToken(data.access_token)
-        setTokenScope(data.scope || "")
-        setDevice(null)
-        setScreen("device-success")
-
-        queryClient.prefetchQuery({
-          queryKey: ["github", "user", data.access_token],
-          queryFn: () => fetchGithubUser(data.access_token!),
-        })
-
-        window.setTimeout(() => {
-          setScreen("authed")
-        }, 3000)
+        completeSignIn({ access_token: data.access_token, scope: data.scope })
 
         return
       }
     },
-    [failDeviceFlow, queryClient],
+    [completeSignIn, failDeviceFlow],
   )
 
   const startDeviceFlow = useCallback(async () => {
