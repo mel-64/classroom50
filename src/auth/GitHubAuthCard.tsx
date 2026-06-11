@@ -6,8 +6,6 @@ import GitHub from "@/assets/github.svg?react"
 import { useGithubAuth } from "./useGithubAuth"
 import { GitHubAuthedPanel } from "./GitHubAuthedPanel"
 import { GitHubDevicePrompt } from "./GitHubDevicePrompt"
-import { useEffect } from "react"
-import { useNavigate } from "@tanstack/react-router"
 
 function LoadingScreen({ label }: { label: string }) {
   return (
