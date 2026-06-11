@@ -1,5 +1,3 @@
-import { useEffect } from "react"
-import { useNavigate } from "@tanstack/react-router"
 import { AlertTriangle, CheckCircle, GraduationCap } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
@@ -18,17 +16,6 @@ function LoadingScreen({ label }: { label: string }) {
 
 export function GitHubAuthCard() {
   const auth = useGithubAuth()
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    if (auth.screen !== "success") return
-
-    const timer = window.setTimeout(() => {
-      void navigate({ to: "/" })
-    }, 3000)
-
-    return () => window.clearTimeout(timer)
-  }, [auth.screen, navigate])
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4 py-8">

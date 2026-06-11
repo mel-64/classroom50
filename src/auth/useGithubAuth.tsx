@@ -90,8 +90,9 @@ function useGithubAuthState() {
   })
 
   // Shared landing point for both web and device flows. Shows the success
-  // screen; the login card redirects to "/" 3s later and the timeout below
-  // settles the screen state for any future visit to the login page.
+  // screen; once the profile loads, the /login route guard redirects to "/".
+  // The timeout below settles the screen state in case that doesn't happen
+  // (e.g. the profile fetch fails and the user stays on the card).
   const completeSignIn = useCallback(
     (data: { access_token: string; scope?: string }) => {
       persistGithubToken(data.access_token, data.scope || "")
@@ -105,8 +106,6 @@ function useGithubAuthState() {
         queryFn: () => fetchGithubUser(data.access_token),
       })
 
-      // Slightly after the card's 3s redirect so the success screen doesn't
-      // flash into the authed panel right before navigation.
       window.setTimeout(() => {
         setScreen("authed")
       }, 3500)
