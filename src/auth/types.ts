@@ -16,14 +16,6 @@ export type GithubDeviceCodeResponse = {
   error_description?: string
 }
 
-export type GithubUser = {
-  login: string
-  name: string | null
-  avatar_url: string | null
-  bio: string | null
-  html_url: string
-}
-
 export type DeviceAuthState = {
   userCode: string
   verificationUri: string
@@ -39,5 +31,5 @@ export type GithubAuthScreen =
   | 'config'
   | 'exchanging'
   | 'device-prompt'
-  | 'device-success'
+  | 'success'
   | 'authed'

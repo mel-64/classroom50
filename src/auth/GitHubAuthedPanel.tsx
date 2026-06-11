@@ -1,4 +1,6 @@
-import type { GithubUser } from './types'
+import { CheckCircle } from 'lucide-react'
+
+import type { GitHubUser } from '@/hooks/github/types'
 
 function previewToken(token: string | null) {
   if (!token) return ''
@@ -12,7 +14,7 @@ export function GitHubAuthedPanel({
   tokenScope,
   onSignOut
 }: {
-  user: GithubUser | undefined
+  user: GitHubUser | null
   isLoadingUser: boolean
   token: string | null
   tokenScope: string
@@ -21,7 +23,7 @@ export function GitHubAuthedPanel({
   return (
     <div className="space-y-5">
       <div className="alert alert-success items-start text-sm">
-        <span>/</span>
+        <CheckCircle className="size-4 shrink-0" />
         <span>
           Signed in - token stored in{' '}
           <code className="font-mono">localStorage</code>
@@ -31,12 +33,12 @@ export function GitHubAuthedPanel({
       <div className="flex flex-col items-center gap-3 text-center">
         {user?.avatar_url ? (
           <img
-            className="size-20 rounded-full border-2 border-success object-cover"
+            className="size-20 rounded-full border border-base-300 object-cover"
             src={user.avatar_url}
             alt=""
           />
         ) : (
-          <div className="flex size-20 items-center justify-center rounded-full border-2 border-success bg-base-300 text-2xl opacity-70">
+          <div className="flex size-20 items-center justify-center rounded-full border border-base-300 bg-base-200 text-2xl opacity-70">
             ◉
           </div>
         )}
@@ -45,7 +47,7 @@ export function GitHubAuthedPanel({
           <div className="text-sm text-base-content/60">Fetching profile...</div>
         ) : user ? (
           <div>
-            <div className="font-serif text-2xl italic">
+            <div className="text-xl font-bold tracking-tight">
               {user.name || user.login}
             </div>
             <div className="text-sm text-base-content/60">@{user.login}</div>
@@ -59,13 +61,13 @@ export function GitHubAuthedPanel({
           </div>
         )}
 
-        <div className="w-full rounded-box border border-base-content/10 bg-base-300 p-3 text-left font-mono text-xs text-base-content/60">
-          <strong className="text-success">gh_access_token</strong> →{' '}
+        <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+          <strong className="text-base-content">gh_access_token</strong> →{' '}
           {previewToken(token)}
         </div>
 
-        <div className="w-full rounded-box border border-base-content/10 bg-base-300 p-3 text-left font-mono text-xs text-base-content/60">
-          <strong className="text-success">granted scopes</strong> →{' '}
+        <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+          <strong className="text-base-content">granted scopes</strong> →{' '}
           {tokenScope || '(none reported)'}
         </div>
       </div>

@@ -13,6 +13,10 @@ export const GITHUB_AUTH_SESSION = {
 
 export const DEFAULT_GITHUB_SCOPE = "read:user read:org repo workflow admin:org"
 
+// Public OAuth app identifier (not a secret); injected at build time.
+export const GITHUB_OAUTH_CLIENT_ID: string =
+  import.meta.env.VITE_GITHUB_CLIENT_ID ?? ""
+
 export const GITHUB_OAUTH_WORKER_BASE =
   import.meta.env.VITE_GITHUB_OAUTH_WORKER_BASE ??
   "https://tiny-bonus-7dc1.fifty-foundation.workers.dev"

@@ -1,3 +1,5 @@
+import { Check, Copy, ExternalLink } from "lucide-react"
+
 import type { DeviceAuthState } from "./types"
 
 function StepNumber({ value, done }: { value: number; done: boolean }) {
@@ -5,10 +7,12 @@ function StepNumber({ value, done }: { value: number; done: boolean }) {
     <div
       className={[
         "flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-        done ? "bg-success text-success-content" : "bg-base-300 opacity-70",
+        done
+          ? "bg-success/10 text-success"
+          : "bg-primary/10 text-primary",
       ].join(" ")}
     >
-      {done ? "✓" : value}
+      {done ? <Check className="size-4" /> : value}
     </div>
   )
 }
@@ -41,23 +45,27 @@ export function GitHubDevicePrompt({
 
   return (
     <div className="space-y-5">
-      <div className="flex gap-4 border-b border-base-content/10 pb-5">
+      <div className="flex gap-4 border-b border-base-200 pb-5">
         <StepNumber value={1} done={device.progress >= 1} />
 
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Copy the one-time code</h2>
 
-          <div className="my-3 select-all rounded-box border border-base-content/10 bg-base-300 px-4 py-3 text-center font-mono text-3xl font-bold tracking-[0.2em] text-success">
+          <div className="my-3 select-all rounded-xl border border-[#eee] bg-base-200 px-4 py-3 text-center font-mono text-3xl font-bold tracking-[0.2em]">
             {device.userCode}
           </div>
 
-          <button className="btn btn-outline btn-sm w-full" onClick={copyCode}>
+          <button
+            className="btn btn-outline btn-primary btn-sm w-full"
+            onClick={copyCode}
+          >
+            <Copy className="size-4" />
             Copy code
           </button>
         </div>
       </div>
 
-      <div className="flex gap-4 border-b border-base-content/10 pb-5">
+      <div className="flex gap-4 border-b border-base-200 pb-5">
         <StepNumber value={2} done={device.progress >= 2} />
 
         <div className="min-w-0 flex-1">
@@ -66,7 +74,7 @@ export function GitHubDevicePrompt({
           </h2>
 
           <a
-            className="btn btn-outline btn-sm mt-3 w-full"
+            className="btn btn-outline btn-primary btn-sm mt-3 w-full"
             href={device.verificationUri}
             target="_blank"
             rel="noopener noreferrer"
@@ -74,7 +82,8 @@ export function GitHubDevicePrompt({
               window.setTimeout(onVerificationOpened, 0)
             }}
           >
-            ↗ Open {device.verificationUri}
+            <ExternalLink className="size-4" />
+            Open {device.verificationUri}
           </a>
 
           <p className="mt-2 text-xs leading-relaxed text-base-content/50">

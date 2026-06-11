@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { RouterProvider } from "@tanstack/react-router"
 
 import router from "./router"
-import { useGithubAuth } from "./auth/useGithubAuth"
+import { useGithubAuth } from "@/auth/useGithubAuth"
 
 export function App() {
   const { status, token, user } = useGithubAuth()

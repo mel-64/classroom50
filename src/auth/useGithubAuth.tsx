@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { DEFAULT_GITHUB_SCOPE } from "./constants"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PropsWithChildren,
+} from "react"
+import { DEFAULT_GITHUB_SCOPE, GITHUB_OAUTH_CLIENT_ID } from "./constants"
 import {
   buildGithubAuthorizeUrl,
   exchangeWebCode,
@@ -49,13 +58,14 @@ function sleep(ms: number, signal: AbortSignal) {
   })
 }
 
-export function useGithubAuth() {
+// Holds all auth state. Must only be instantiated once, by GitHubAuthProvider;
+// every other consumer goes through the useGithubAuth() context hook below.
+function useGithubAuthState() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
 
   const [screen, setScreen] = useState<GithubAuthScreen>("config")
-  const [clientId, setClientId] = useState("")
-  const [scope, setScope] = useState(DEFAULT_GITHUB_SCOPE)
+  const [clientId, setClientId] = useState(GITHUB_OAUTH_CLIENT_ID)
   const [token, setToken] = useState<string | null>(null)
   const [tokenScope, setTokenScope] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -79,12 +89,39 @@ export function useGithubAuth() {
     mutationFn: requestDeviceCode,
   })
 
+  // Shared landing point for both web and device flows. Shows the success
+  // screen; once the profile loads, the /login route guard redirects to "/".
+  // The timeout below settles the screen state in case that doesn't happen
+  // (e.g. the profile fetch fails and the user stays on the card).
+  const completeSignIn = useCallback(
+    (data: { access_token: string; scope?: string }) => {
+      persistGithubToken(data.access_token, data.scope || "")
+      setToken(data.access_token)
+      setTokenScope(data.scope || "")
+      setDevice(null)
+      setScreen("success")
+
+      queryClient.prefetchQuery({
+        queryKey: ["github", "user", data.access_token],
+        queryFn: () => fetchGithubUser(data.access_token),
+      })
+
+      window.setTimeout(() => {
+        setScreen("authed")
+      }, 3500)
+    },
+    [queryClient],
+  )
+
   useEffect(() => {
     const storedToken = getStoredGithubToken()
     const storedClientId = getStoredGithubClientId()
     const storedScope = getStoredGithubScope()
 
-    setClientId(storedClientId)
+    // The build-time client ID wins; localStorage is a dev-only fallback.
+    if (!GITHUB_OAUTH_CLIENT_ID && storedClientId) {
+      setClientId(storedClientId)
+    }
     setTokenScope(storedScope)
 
     if (storedToken) {
@@ -118,7 +155,6 @@ export function useGithubAuth() {
       verifier,
       expectedState,
       clientId: callbackClientId,
-      scope: callbackScope,
     } = consumeOAuthSession()
 
     if (!returnedState || returnedState !== expectedState) {
@@ -135,10 +171,7 @@ export function useGithubAuth() {
       return
     }
 
-    const restoredScope = callbackScope || DEFAULT_GITHUB_SCOPE
-
     setClientId(callbackClientId)
-    setScope(restoredScope)
     persistGithubClientId(callbackClientId)
 
     setScreen("exchanging")
@@ -152,10 +185,7 @@ export function useGithubAuth() {
       },
       {
         onSuccess: (data) => {
-          persistGithubToken(data.access_token, data.scope || "")
-          setToken(data.access_token)
-          setTokenScope(data.scope || "")
-          setScreen("authed")
+          completeSignIn(data)
         },
         onError: (err) => {
           setError(formatError(err))
@@ -167,23 +197,22 @@ export function useGithubAuth() {
 
   const validateConfig = useCallback(() => {
     const trimmedClientId = clientId.trim()
-    const trimmedScope = scope.trim() || DEFAULT_GITHUB_SCOPE
 
     if (!trimmedClientId) {
-      setError("OAuth App Client ID is required.")
+      setError(
+        "GitHub OAuth client ID is not configured (VITE_GITHUB_CLIENT_ID).",
+      )
       return null
     }
 
     persistGithubClientId(trimmedClientId)
-    setClientId(trimmedClientId)
-    setScope(trimmedScope)
     setError(null)
 
     return {
       clientId: trimmedClientId,
-      scope: trimmedScope,
+      scope: DEFAULT_GITHUB_SCOPE,
     }
-  }, [clientId, scope])
+  }, [clientId])
 
   const startWebFlow = useCallback(async () => {
     const config = validateConfig()
@@ -307,25 +336,12 @@ export function useGithubAuth() {
           return
         }
 
-        persistGithubToken(data.access_token, data.scope || "")
-        setToken(data.access_token)
-        setTokenScope(data.scope || "")
-        setDevice(null)
-        setScreen("device-success")
-
-        queryClient.prefetchQuery({
-          queryKey: ["github", "user", data.access_token],
-          queryFn: () => fetchGithubUser(data.access_token!),
-        })
-
-        window.setTimeout(() => {
-          setScreen("authed")
-        }, 3000)
+        completeSignIn({ access_token: data.access_token, scope: data.scope })
 
         return
       }
     },
-    [failDeviceFlow, queryClient],
+    [completeSignIn, failDeviceFlow],
   )
 
   const startDeviceFlow = useCallback(async () => {
@@ -463,17 +479,13 @@ export function useGithubAuth() {
 
   return {
     screen,
-    clientId,
-    setClientId,
-    scope,
-    setScope,
     token,
     tokenScope,
     error,
     device,
     deviceStatus,
-    githubUserQuery,
-    user: githubUserQuery.data || null,
+    user: githubUserQuery.data ?? null,
+    isLoadingUser: githubUserQuery.isLoading,
     isStartingWebFlow: screen === "exchanging",
     isRequestingDeviceCode: requestDeviceCodeMutation.isPending,
     startWebFlow,
@@ -484,4 +496,28 @@ export function useGithubAuth() {
     signOut,
     status,
   }
+}
+
+type GitHubAuth = ReturnType<typeof useGithubAuthState>
+
+const GitHubAuthContext = createContext<GitHubAuth | null>(null)
+
+export function GitHubAuthProvider({ children }: PropsWithChildren) {
+  const githubAuth = useGithubAuthState()
+
+  return (
+    <GitHubAuthContext.Provider value={githubAuth}>
+      {children}
+    </GitHubAuthContext.Provider>
+  )
+}
+
+export function useGithubAuth() {
+  const value = useContext(GitHubAuthContext)
+
+  if (!value) {
+    throw new Error("useGithubAuth must be used within GitHubAuthProvider")
+  }
+
+  return value
 }

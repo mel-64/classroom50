@@ -1,10 +1,18 @@
-import { GraduationCap, BookText, UsersRound, Settings } from "lucide-react"
+import {
+  GraduationCap,
+  BookText,
+  UsersRound,
+  Settings,
+  LogOut,
+  MessageCircleQuestionMark,
+} from "lucide-react"
 import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import type { Classroom } from "@/types/classroom"
+import { useEffect, useRef, useState } from "react"
 
 const Drawer = ({ children }) => (
   <div className="drawer lg:drawer-open">{children}</div>
@@ -113,20 +121,99 @@ const truncateName = (name: string) => {
 }
 
 export const SidebarFooter = () => {
-  const { user } = useGithubAuth()
+  const { signOut, user } = useGithubAuth()
   const avatar_img = user?.avatar_url || duck
   const name = truncateName(user?.name || "") || "User"
   const { org } = useParams({ strict: false })
   const { isTeacher } = useCourseTeacherAccess(org)
 
+  const [menuOpen, setMenuOpen] = useState(false)
+  const footerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!footerRef.current) return
+
+      if (!footerRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown)
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown)
+    }
+  }, [menuOpen])
+
   return (
-    <div className="mt-auto border-t border-[#444] py-4">
-      <div className="flex items-center justify-start gap-4">
+    <div
+      ref={footerRef}
+      className="relative mt-auto cursor-pointer border-t border-[#444] py-4"
+      onClick={() => setMenuOpen((open) => !open)}
+      role="button"
+      tabIndex={0}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          setMenuOpen((open) => !open)
+        }
+
+        if (event.key === "Escape") {
+          setMenuOpen(false)
+        }
+      }}
+    >
+      <div
+        className={`
+        absolute bottom-full left-6 right-6 z-50 mb-3
+        origin-bottom rounded-box
+        transition-all duration-150 ease-out
+
+        ${
+          menuOpen
+            ? "translate-y-0 scale-100 opacity-100"
+            : "pointer-events-none translate-y-2 scale-95 opacity-0"
+        }
+      `}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <ul className="menu w-full rounded-box border border-base-300 bg-base-100 p-2 text-base-content shadow-xl">
+          <li>
+            <a
+              href="https://github.com/foundation50/classroom50/discussions"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <MessageCircleQuestionMark className="size-4" />
+              Classroom 50 Help
+            </a>
+          </li>
+
+          <li>
+            <button type="button" className="text-error" onClick={signOut}>
+              <LogOut className="size-4" />
+              Sign Out
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div className="flex w-full items-center justify-start gap-4 text-left">
         <div className="avatar avatar-placeholder">
-          <img src={avatar_img} className="w-12 rounded-full" />
+          <img
+            src={avatar_img}
+            alt={`${name}'s avatar`}
+            className="w-12 rounded-full"
+          />
         </div>
+
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-white">{name}</div>
+          <div className="truncate font-medium text-white">{name}</div>
 
           {org ? (
             <div>
@@ -134,9 +221,7 @@ export const SidebarFooter = () => {
                 {isTeacher ? "Teacher" : "Student"}
               </span>
             </div>
-          ) : (
-            <></>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
