@@ -1199,6 +1199,10 @@ export async function resolveAutograderWorkflow(
   return workflow
 }
 
+const extractTemplate = (template: string) => {
+  if (!/\//.test(template)) return template
+  return template.split("/")?.[1] ?? template
+}
 async function createRepoFromTemplate(params: {
   client: GitHubClient
   templateOwner: string
@@ -1210,7 +1214,7 @@ async function createRepoFromTemplate(params: {
 
   try {
     return await client.request<GitHubRepo>(
-      `/repos/${templateOwner}/${templateRepo}/generate`,
+      `/repos/${templateOwner}/${extractTemplate(templateRepo)}/generate`,
       {
         method: "POST",
         body: {
@@ -1236,7 +1240,7 @@ async function createRepoFromTemplate(params: {
 
       if (err.status === 404) {
         throw new Error(
-          `Template ${templateOwner}/${templateRepo} is not accessible to you. Ask your instructor to make it public or grant your account access.`,
+          `Template ${templateOwner}/${extractTemplate(templateRepo)} is not accessible to you. Ask your instructor to make it public or grant your account access.`,
         )
       }
 
@@ -1710,9 +1714,7 @@ export async function findMissingSkeletonFiles(
 
   // The skeleton is committed against the config repo's actual default
   // branch (org policy can rename `main`), matching gh teacher init.
-  const repo = await client.request<GitHubRepo>(
-    `/repos/${org}/${CONFIG_REPO}`,
-  )
+  const repo = await client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`)
   const defaultBranch = repo.default_branch || "main"
 
   return Promise.all(
