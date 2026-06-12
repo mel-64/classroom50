@@ -22,7 +22,7 @@ The assignment list for a single classroom. Each row shows the assignment slug, 
 
 ## Submissions
 
-The per-assignment detail view. Headline stats summarise the cohort (how many submitted, class average); the table below lists each enrolled student with their submission count, latest autograded score, and last-submitted timestamp. The per-row actions jump to the student's repo (**Commit**), open the latest submission for review (**Review**), or drill into the full grade breakdown (**Details**). **Download Scores (CSV)** exports the same data the CLI prints from `gh teacher download`.
+The per-assignment detail view. Headline stats summarise the cohort (how many submitted, class average); the table below lists each enrolled student with their submission count, latest autograded score, and last-submitted timestamp. The per-row actions jump to the student's repo (**Commit**), open the full diff of the student's work since the starter code (**Review**), or drill into the full grade breakdown (**Details**). **Download Scores (CSV)** exports the same data the CLI prints from `gh teacher download`.
 
 ![Assignment submissions view](images/assignment_single_view.png)
 

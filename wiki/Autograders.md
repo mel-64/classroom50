@@ -30,7 +30,7 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
   "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
   "commit":     "https://github.com/.../commit/<sha>",
   "release":    "https://github.com/.../releases/tag/submit%2F...",
-  "review":     "https://github.com/.../commit/<sha>",
+  "review":     "https://github.com/.../compare/<baseline-sha>...<sha>",
   "datetime":   "2026-06-01T14:33:11Z",
   "score":      4,
   "max-score":  5,
@@ -50,7 +50,7 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 | `submission` | string | The submit-tag name |
 | `commit` | string | URL to the submission commit |
 | `release` | string | URL to the release |
-| `review` | string | URL teachers click to review (commit view) |
+| `review` | string | URL teachers click to review — the full diff from the starter code to the graded commit (compare view); falls back to the commit view when repo history is unavailable or there is nothing to compare (baseline == graded commit) |
 | `datetime` | string | UTC ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`) |
 | `score` | int | Sum of test scores (0 ≤ score ≤ max-score) |
 | `max-score` | int | Sum of test max-scores |
@@ -167,7 +167,7 @@ The runner provides:
 - **Environment variables**:
   - `CLASSROOM`, `ASSIGNMENT`, `SUBMISSION_TAG`, `PAGES_BASE_URL`
   - `USERNAME` (derived from the repo name)
-  - `COMMIT_URL`, `RELEASE_URL`
+  - `COMMIT_URL`, `RELEASE_URL`, `REVIEW_URL` (full diff from the starter code to the graded commit; equals `COMMIT_URL` when history is unavailable or there is nothing to compare)
   - All standard `GITHUB_*` (REPOSITORY, SHA, ACTOR, OUTPUT, etc.)
 - **Working directory**: the student's repo checkout (relative paths resolve to student code).
 - **Sibling files**: anything else under `<classroom>/autograders/<slug>/` is bundled with the autograder and lives at `Path(__file__).parent` after extraction. Use `Path(__file__).parent` to find fixtures, helpers, framework configs, etc.
@@ -244,7 +244,7 @@ result = {
     "submission": os.environ["SUBMISSION_TAG"],
     "commit":     os.environ["COMMIT_URL"],
     "release":    os.environ["RELEASE_URL"],
-    "review":     os.environ["COMMIT_URL"],
+    "review":     os.environ.get("REVIEW_URL") or os.environ["COMMIT_URL"],
     "datetime":   datetime.datetime.now(datetime.timezone.utc)
                   .strftime("%Y-%m-%dT%H:%M:%SZ"),
     "score":      sum(t["score"] for t in tests),
@@ -280,7 +280,7 @@ result = {
     "submission": os.environ["SUBMISSION_TAG"],
     "commit":     os.environ["COMMIT_URL"],
     "release":    os.environ["RELEASE_URL"],
-    "review":     os.environ["COMMIT_URL"],
+    "review":     os.environ.get("REVIEW_URL") or os.environ["COMMIT_URL"],
     "datetime":   datetime.datetime.now(datetime.timezone.utc)
                   .strftime("%Y-%m-%dT%H:%M:%SZ"),
     "score":      1 if passed else 0,

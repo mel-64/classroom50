@@ -241,7 +241,7 @@ What it does on each run:
         "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
         "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
         "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
-        "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+        "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/compare/...",
         "datetime": "2026-06-01T14:33:11Z",
         "score": 18,
         "max-score": 30,
