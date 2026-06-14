@@ -36,8 +36,14 @@ const AddByGithubUsername = ({
   const githubClient = useGitHubClient()
 
   const addStudentMutation = useMutation({
-    mutationFn: ({ username }) =>
-      enrollStudentInClassroom(githubClient, { org, classroom, username }),
+    mutationFn: ({ username, first_name, last_name }) =>
+      enrollStudentInClassroom(githubClient, {
+        org,
+        classroom,
+        username,
+        first_name,
+        last_name,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(org, classroom, "students.csv"),
@@ -61,7 +67,10 @@ const AddByGithubUsername = ({
       },
     },
     onSubmit: async ({ value }) => {
-      await addStudentMutation.mutateAsync(value)
+      const nameParts = value.name.split(" ")
+      const first_name = nameParts.at(0)
+      const last_name = nameParts.at(-1)
+      await addStudentMutation.mutateAsync({ ...value, first_name, last_name })
     },
   })
 
