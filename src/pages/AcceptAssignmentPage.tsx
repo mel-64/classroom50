@@ -14,6 +14,7 @@ import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
 import { acceptAssignment } from "@/hooks/github/mutations"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
+import { formatDueDate } from "@/util/formatDate"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -156,16 +157,6 @@ const modeMap = {
   group: "Group Assignment",
 }
 
-function formatDate(dateString: string) {
-  const [year, month, day] = dateString.split("-").map(Number)
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(year, month - 1, day))
-}
-
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const client = useGitHubClient()
@@ -221,7 +212,7 @@ const AcceptAssignmentPage = () => {
             </span>
             <span className="badge">
               {assignmentData?.due
-                ? `Due ${formatDate(assignmentData.due)}`
+                ? `Due ${formatDueDate(assignmentData.due)}`
                 : "No due date"}
             </span>
           </div>

@@ -2,16 +2,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
-
-function formatDate(dateString: string) {
-  const [year, month, day] = dateString.split("-").map(Number)
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(year, month - 1, day))
-}
+import { formatDueDate } from "@/util/formatDate"
 
 const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
   const { data: scoresData } = useGetScores(org, classroom)
@@ -63,7 +54,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               </td>
               <td>
                 <span className="badge badge-soft">
-                  {assignment.due ? formatDate(assignment.due) : "No due date"}
+                  {assignment.due ? formatDueDate(assignment.due) : "No due date"}
                 </span>
               </td>
               <td>
