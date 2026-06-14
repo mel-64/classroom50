@@ -10,10 +10,9 @@ const dueDateFormatter = new Intl.DateTimeFormat("en-US", {
 export const formatDueDate = (dateString: string): string => {
   // Bare YYYY-MM-DD parses as UTC midnight, which can render as the previous
   // day in negative offsets. Pin it to local midnight to avoid the shift.
-  const normalized = dateString.includes("T")
-    ? dateString
-    : `${dateString}T00:00:00`
-
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+    ? `${dateString}T00:00:00`
+    : dateString
   const date = new Date(normalized)
   if (Number.isNaN(date.getTime())) {
     return "Invalid date"
