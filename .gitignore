@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .tanstack/tmp
+
+# Local dev launcher (machine-specific paths)
+dev.sh

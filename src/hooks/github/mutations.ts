@@ -24,7 +24,7 @@ import {
 import type { Assignment } from "@/types/classroom"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest } from "@/util/assignmentTests"
-import { toRfc3339DueDate } from "@/util/formatDate"
+import { buildDueFields } from "@/util/formatDate"
 import Papa from "papaparse"
 import sodium from "libsodium-wrappers"
 
@@ -483,7 +483,11 @@ export async function createAssignment(
     assignmentBody.description = input.description.trim()
   }
   if (input.due_date.trim()) {
-    assignmentBody.due = toRfc3339DueDate(input.due_date.trim())
+    const { due, due_meta } = buildDueFields(input.due_date.trim())
+    assignmentBody.due = due
+    if (due_meta) {
+      assignmentBody.due_meta = due_meta
+    }
   }
   if (input.mode === "group" && input.max_group_size > 0) {
     assignmentBody.max_group_size = input.max_group_size

@@ -20,6 +20,7 @@ export type Assignment = {
     branch: string
   }
   due?: string
+  due_meta?: DueMeta
   mode: string
   autograder: string
   max_group_size?: number
@@ -30,6 +31,16 @@ export type Assignment = {
     }
   }
   tests?: AssignmentTest[]
+}
+
+// Write-side provenance for `due`. Since `due` is stored as a UTC instant
+// (losing the teacher's wall-clock and offset), this records what was supplied.
+// Required: input, offset, source. `zone` is set only for auto-detected offsets.
+export type DueMeta = {
+  input: string
+  zone?: string
+  offset: string
+  source: "explicit-offset" | "auto-detected" | "migrated"
 }
 
 export type AssignmentTestType = "io" | "run" | "python"

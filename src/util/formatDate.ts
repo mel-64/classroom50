@@ -1,15 +1,15 @@
+import type { DueMeta } from "@/types/classroom"
+
 const dueDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
 })
 
-// Read side. Accepts RFC 3339 timestamps (the schema/CLI format, e.g.
-// 2026-06-10T13:00:00-04:00) as well as legacy bare YYYY-MM-DD values. Never
-// throws: a single bad value must not unmount the whole assignments page.
+// Formats a due date for display. Accepts RFC 3339 timestamps (incl. UTC `Z`)
+// and legacy bare YYYY-MM-DD values; returns a fallback instead of throwing.
 export const formatDueDate = (dateString: string): string => {
-  // Bare YYYY-MM-DD parses as UTC midnight, which can render as the previous
-  // day in negative offsets. Pin it to local midnight to avoid the shift.
+  // Pin bare dates to local midnight so they don't shift a day in negative offsets.
   const normalized = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
     ? `${dateString}T00:00:00`
     : dateString
@@ -23,28 +23,41 @@ export const formatDueDate = (dateString: string): string => {
 
 const pad = (n: number) => String(n).padStart(2, "0")
 
-// Write side. Converts a bare YYYY-MM-DD (from <input type="date">) into a
-// schema-compliant RFC 3339 timestamp pinned to 23:59:00 in the local timezone
-// (e.g. 2026-06-10 -> 2026-06-10T23:59:00-04:00). Values that already carry a
-// time component are passed through unchanged.
-export const toRfc3339DueDate = (dateOnly: string): string => {
-  // Only normalize the exact <input type="date"> shape.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-    return dateOnly
-  }
-
-  const [year, month, day] = dateOnly.split("-").map(Number)
-  const date = new Date(year, month - 1, day, 23, 59, 0)
-  if (Number.isNaN(date.getTime())) {
-    return dateOnly
-  }
-
+const formatOffset = (date: Date): string => {
   const offsetMinutes = -date.getTimezoneOffset()
   const sign = offsetMinutes >= 0 ? "+" : "-"
-  const absMinutes = Math.abs(offsetMinutes)
-  const offset = `${sign}${pad(Math.floor(absMinutes / 60))}:${pad(
-    absMinutes % 60,
-  )}`
+  const abs = Math.abs(offsetMinutes)
+  return `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+}
 
-  return `${year}-${pad(month)}-${pad(day)}T23:59:00${offset}`
+export type DueFields = { due: string; due_meta?: DueMeta }
+
+// Builds the `due`/`due_meta` pair for assignments.json from a <input type="date">
+// value, mirroring gh-teacher's --due normalization: the picked date is pinned to
+// 23:59:00 in the browser's local zone, stored as a UTC instant, and the
+// pre-normalization local value/offset/zone are recorded in due_meta. Inputs that
+// aren't a bare YYYY-MM-DD are stored verbatim without provenance.
+export const buildDueFields = (dueInput: string): DueFields => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueInput)) {
+    return { due: dueInput }
+  }
+
+  const [year, month, day] = dueInput.split("-").map(Number)
+  const local = new Date(year, month - 1, day, 23, 59, 0)
+  if (Number.isNaN(local.getTime())) {
+    return { due: dueInput }
+  }
+
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const due_meta: DueMeta = {
+    input: `${year}-${pad(month)}-${pad(day)}T23:59:00`,
+    ...(zone ? { zone } : {}),
+    offset: formatOffset(local),
+    source: "auto-detected",
+  }
+
+  return {
+    due: local.toISOString().replace(/\.\d{3}Z$/, "Z"),
+    due_meta,
+  }
 }
