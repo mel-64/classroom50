@@ -1,6 +1,6 @@
 # Web Interface (Preview)
 
-The Classroom 50 web interface is available at [classroom50.org](https://classroom50.org). It covers the same operations as the CLI tools documented in the [Teacher Guide](Teacher-Guide) and [Student Guide](Student-Guide) -- if you can do it from `gh teacher` or `gh student`, you can do it from a browser.
+The Classroom 50 web interface is available at [classroom50.org](https://classroom50.org). It covers the same operations as the CLI tools documented in the [CLI Teacher Guide](CLI-Teacher-Guide) and [CLI Student Guide](CLI-Student-Guide) -- if you can do it from `gh teacher` or `gh student`, you can do it from a browser.
 
 ## Sign in
 

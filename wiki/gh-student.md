@@ -1,6 +1,6 @@
 # `gh student` reference
 
-Complete reference for the student CLI. For a step-by-step walkthrough, see the [Student Guide](Student-Guide).
+Complete reference for the student CLI. For a step-by-step walkthrough, see the [CLI Student Guide](CLI-Student-Guide).
 
 Run `gh student <command> --help` for the live flag list. Errors always go to stderr with a non-zero exit code. Pass `--verbose` / `-v` to any command to see per-step operational details (repo creation, collaborator updates, metadata writes, `git` activity).
 

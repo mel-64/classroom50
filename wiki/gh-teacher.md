@@ -1,6 +1,6 @@
 # `gh teacher` reference
 
-Complete reference for the teacher CLI. For a step-by-step walkthrough, see the [Teacher Guide](Teacher-Guide).
+Complete reference for the teacher CLI. For a step-by-step walkthrough, see the [CLI Teacher Guide](CLI-Teacher-Guide).
 
 Run `gh teacher <command> --help` for the live flag list. Errors always go to stderr with a non-zero exit code. Commands that emit informational output accept `--quiet` / `-q` to suppress it; pass `--verbose` / `-v` to see per-step operational details (e.g. raw `git` output during `download`).
 
@@ -34,7 +34,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 
 ## `gh teacher init`
 
-One-shot bootstrap for the per-org `classroom50` config repo. See the [Teacher Guide](Teacher-Guide) for when to run it in your workflow.
+One-shot bootstrap for the per-org `classroom50` config repo. See the [CLI Teacher Guide](CLI-Teacher-Guide) for when to run it in your workflow.
 
 ```sh
 CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>

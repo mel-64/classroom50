@@ -53,5 +53,5 @@ If you skip this step and run another command first, the CLI detects the missing
 
 ## What's next
 
-- Teachers: continue to the [Teacher Guide](Teacher-Guide).
-- Students: continue to the [Student Guide](Student-Guide).
+- Teachers: continue to the [CLI Teacher Guide](CLI-Teacher-Guide).
+- Students: continue to the [CLI Student Guide](CLI-Student-Guide).

@@ -1,10 +1,12 @@
 - [Home](Home)
-- [Installation](Installation)
-- [Web Interface (Preview)](Web-Interface)
-- **Walkthroughs**
-  - [Teacher Guide](Teacher-Guide)
-  - [Student Guide](Student-Guide)
-- **Command reference**
+- **Web Interface**
+  - [Web Teacher Guide](Web-Teacher-Guide)
+  - [Web Student Guide](Web-Student-Guide)
+  - [Web Interface (Preview)](Web-Interface)
+- **Command-Line Interface**
+  - [Installation](Installation)
+  - [CLI Teacher Guide](CLI-Teacher-Guide)
+  - [CLI Student Guide](CLI-Student-Guide)
   - [gh teacher](gh-teacher)
   - [gh student](gh-student)
 - **Reference**

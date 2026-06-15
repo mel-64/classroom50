@@ -1,4 +1,4 @@
-# Student Guide
+# Classroom 50 CLI - Student Guide
 
 End-to-end walkthrough for students. Install the CLI first — see [Installation](Installation).
 
