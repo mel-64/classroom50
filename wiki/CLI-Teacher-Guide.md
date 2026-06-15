@@ -100,6 +100,8 @@ The command commits all four paths in a single Tree commit on the default branch
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
+**Managing classrooms later.** List what's registered with `gh teacher classroom list <org>` (add `--json` for the display name and term). Change a classroom's display name or term with `gh teacher classroom edit <org> <short-name> --name "…" --term …` (the short-name itself is immutable). Delete one with `gh teacher classroom remove <org> <short-name>` — it removes the `<short-name>/` config directory only (not student repos) and asks you to type the short-name to confirm (`--yes` skips the prompt). See the [`gh teacher` reference](gh-teacher#gh-teacher-classroom-list) for details.
+
 ## 5. Invite students to the org
 
 The fastest way to add students is `gh teacher roster add` (next step) — it registers them in the classroom roster *and* sends an org invite in one shot. Use the bare `gh teacher invite` only for ad-hoc cases (e.g., inviting a TA who shouldn't be in the student roster, or bringing in someone before the roster is set up):

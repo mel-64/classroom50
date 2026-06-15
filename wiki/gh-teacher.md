@@ -20,6 +20,9 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, collect-token secret). Idempotent; re-runs also refresh stale skeleton files after a confirmation prompt (`--yes` to skip). |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
+| `gh teacher classroom list <org>` | List the classrooms registered in `<org>/classroom50`, one short-name per line. Optional: `--json` (full `{short_name, name, term}` objects), `--quiet` (suppress the stderr summary). Read-only. |
+| `gh teacher classroom edit <org> <short-name>` | Update a classroom's display name and/or term in `classroom.json`. Requires at least one of `--name "<display name>"`, `--term <term>`. The short-name itself is immutable. No-op when values are unchanged. |
+| `gh teacher classroom remove <org> <short-name>` | Delete a classroom's `<short-name>/` directory from `<org>/classroom50` in one commit. Prompts for the typed short-name to confirm; `--yes` skips the prompt. Does NOT delete student repos. |
 | `gh teacher classroom migrate --source <id-or-org> --target <org>` | Import an existing GitHub Classroom into `<target>/classroom50`. Discovers the source classroom (numeric ID or org login), copies each starter repo into the target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. Optional: `--short-name`, `--term`, `--template-suffix`, `--include-archived`, `--dry-run`. Roster and scores are NOT migrated. |
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
@@ -129,6 +132,61 @@ Per-assignment autograders (an `autograder.py` entrypoint + any sibling fixtures
 - Short-name fails the slug regex → prints the exact rule with the offending input.
 
 The command commits all four paths in a single Tree commit on the default branch.
+
+## `gh teacher classroom list`
+
+List every classroom registered in `<org>/classroom50`. A classroom is a root-level directory containing a `classroom.json`; directories without one (e.g. `.github`) are skipped.
+
+```sh
+gh teacher classroom list <org>
+gh teacher classroom list cs50-fall-2026
+gh teacher classroom list cs50-fall-2026 --json
+```
+
+Default output is one short-name per line on stdout — pipeable into `xargs`, `grep`, or an agent loop. A one-line `<org>/classroom50: N classroom(s)` summary prints to stderr.
+
+**Flags:**
+
+- `--json` — emit the full JSON array of `{short_name, name, term}` objects instead of bare short-names, preserving the display name and term without a second call.
+- `-q`, `--quiet` — suppress the stderr summary so stdout is the only output stream a capturing script has to parse.
+
+This is a read-only command; no commit lands on the repo. Missing `<org>/classroom50` points at `gh teacher init`. Exits 0 with empty stdout when no classrooms are registered yet.
+
+## `gh teacher classroom edit`
+
+Update the display name and/or term in `<org>/classroom50/<short-name>/classroom.json`:
+
+```sh
+gh teacher classroom edit <org> <short-name> --name "<full name>" --term <term>
+gh teacher classroom edit cs50-fall-2026 cs-principles --name "Computer Science Principles"
+gh teacher classroom edit cs50-fall-2026 cs-principles --term Fall-2026
+```
+
+At least one of `--name` / `--term` must be provided. Only the flags you pass are changed; the rest of `classroom.json` (including `short_name`, `org`, and any `migrated_from` provenance) is preserved.
+
+**The short-name is immutable.** It flows into student repo names (`<short-name>-<assignment>-<username>`), so renaming it would orphan existing repos — to rename, add a new classroom instead.
+
+Lands as a single Tree commit on the default branch. Re-running with values that already match the file is a no-op (no commit). Missing config repo points at `gh teacher init`; a missing classroom points at `gh teacher classroom add`.
+
+## `gh teacher classroom remove`
+
+Delete a classroom's `<short-name>/` directory — `classroom.json`, `assignments.json`, `students.csv`, `scores.json`, and any `autograders/` — from `<org>/classroom50` in a single commit:
+
+```sh
+gh teacher classroom remove <org> <short-name>
+gh teacher classroom remove cs50-fall-2026 cs-principles
+gh teacher classroom remove --yes cs50-fall-2026 cs-principles
+```
+
+This removes the classroom's **configuration only**. It does NOT delete student assignment repositories already created in the org — remove those via the GitHub web UI (or `gh teacher teardown` for a full development reset) if intended.
+
+**Confirmation.** You'll be asked to type the short-name to confirm before anything is deleted. Pass `--yes` to skip the prompt (scripted runs only).
+
+**Flags:**
+
+- `--yes` — skip the typed-confirmation prompt.
+
+Missing config repo points at `gh teacher init`; a non-existent classroom exits non-zero with `nothing to remove`. The deletion is one Tree commit that sets every blob under `<short-name>/` to `null`; git prunes the now-empty directory automatically.
 
 ## `gh teacher classroom migrate`
 
