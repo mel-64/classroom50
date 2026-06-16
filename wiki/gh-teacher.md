@@ -32,6 +32,9 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher assignment test list <org> <classroom> <slug>` | Print the declarative test names on an assignment, one per line. `--json` for the full spec array, `-q` to suppress the stderr summary. Read-only. |
 | `gh teacher assignment test remove <org> <classroom> <slug> <test-name>` | Drop one declarative test by name. Idempotent. |
 | `gh teacher autograder set-default <org> <classroom>` | Drop a default `autograder.py` at `<classroom>/autograder.py` in the config repo. With `--from <path>` (or `--from -` for stdin), uploads the given Python source. Without `--from`, installs a diagnostic stub that echoes runner metadata and emits a vacuous-pass `result.json` — useful for verifying the runner pipeline before authoring real grading logic. |
+| `gh teacher autograder show <org> <classroom>` | Print the classroom default `autograder.py` to stdout, or report none. Optional: `--json` (metadata `{path, exists, is_stub, size, sha}` instead of the body), `--quiet` (suppress the stderr summary). Read-only. |
+| `gh teacher autograder list <org> <classroom>` | List named shims (`<name>.yaml`) and per-assignment override bundles (`<slug>/`) under `<classroom>/autograders/`, one per line. Optional: `--json` (full `{name, kind, path}` objects), `--quiet`. The classroom default is not listed (use `show`). Read-only. |
+| `gh teacher autograder remove <org> <classroom>` | Delete the classroom default `<classroom>/autograder.py` in one commit (distinct from overwriting it with the stub). Prompts `[y/N]` to confirm; `--yes` skips. Idempotent. Does NOT touch per-assignment overrides or named shims. |
 | `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
 | `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
 
@@ -406,7 +409,7 @@ Writes flow through the same optimistic-rebase loop as every other `assignments.
 
 ## `gh teacher autograder`
 
-Manage the **classroom default autograder** at `<classroom>/autograder.py`. The runner uses this script for every assignment in the classroom that has neither a per-assignment override under `<classroom>/autograders/<slug>/` nor a declarative `tests` block on its entry.
+Manage the **classroom default autograder** at `<classroom>/autograder.py` — `set-default` to install or replace it, `show` to read it, `remove` to delete it, and `list` to enumerate the named shims and per-assignment overrides under `<classroom>/autograders/`. The runner uses the default for every assignment in the classroom that has neither a per-assignment override under `<classroom>/autograders/<slug>/` nor a declarative `tests` block on its entry.
 
 ### `gh teacher autograder set-default`
 
@@ -424,7 +427,57 @@ Lands as a single Tree commit on the config repo's default branch and is picked 
 
 **Validation.** The classroom must already exist (`<classroom>/classroom.json` present in the repo). If it doesn't, the command refuses to write — preventing typos from creating phantom-classroom directories that contain only `autograder.py`. Run `gh teacher classroom add` first.
 
-**No `unset-default`.** Delete the file via the GitHub web UI (or `git rm` + push) when you want to revert a classroom to "no autograder configured" (the runner's default vacuous-pass behavior).
+### `gh teacher autograder show`
+
+```sh
+gh teacher autograder show <org> <classroom>
+gh teacher autograder show cs50-fall-2026 cs-principles
+gh teacher autograder show cs50-fall-2026 cs-principles --json
+gh teacher autograder show cs50-fall-2026 cs-principles > autograder.py
+```
+
+Print the classroom default at `<classroom>/autograder.py`. Default output writes the file body to stdout (pipe it to a file or pager); a one-line stderr summary says whether it's the shipped diagnostic stub or a custom autograder, with its size.
+
+**Flags:**
+
+- `--json` — emit metadata only — `{path, exists, is_stub, size, sha}` — without the body, so a script can branch on whether a real autograder is installed. `sha` is the git blob object id (matches what the contents/trees API reports).
+- `-q`, `--quiet` — suppress the stderr summary so stdout is the only output stream.
+
+Read-only; no commit lands. When the classroom has no default autograder, stdout stays empty and stderr says so — the command still exits 0, because an unset default is a valid mid-setup state (graded as a vacuous pass). A missing classroom points at `gh teacher classroom add`.
+
+### `gh teacher autograder list`
+
+```sh
+gh teacher autograder list <org> <classroom>
+gh teacher autograder list cs50-fall-2026 cs-principles
+gh teacher autograder list cs50-fall-2026 cs-principles --json
+```
+
+List everything under `<classroom>/autograders/`: named workflow shims (`<name>.yaml`, opted into with `gh teacher assignment add --autograder <name>`) and per-assignment override bundles (`<slug>/`, holding a hand-written `autograder.py` for that one assignment). Default output is one entry per line on stdout — named shims as `<name>.yaml`, override bundles as `<slug>/` (trailing slash). A one-line `<path>: N autograder(s)` summary goes to stderr.
+
+**Flags:**
+
+- `--json` — emit the full array of `{name, kind, path}` objects (`kind` is `named-shim` or `per-assignment`).
+- `-q`, `--quiet` — suppress the stderr summary.
+
+The classroom **default** (`<classroom>/autograder.py`) is not listed here — inspect it with `gh teacher autograder show`. Read-only; no commit lands. Stray non-`.yaml` files at the top of `autograders/` are skipped.
+
+### `gh teacher autograder remove`
+
+```sh
+gh teacher autograder remove <org> <classroom>
+gh teacher autograder remove --yes cs50-fall-2026 cs-principles
+```
+
+Delete `<classroom>/autograder.py` in a single commit. This is distinct from `set-default` with no `--from`, which **overwrites** the file with the diagnostic stub — `remove` deletes it outright.
+
+**Grading impact.** Once removed, any assignment in the classroom that has neither a per-assignment override (`<classroom>/autograders/<slug>/autograder.py`) nor a declarative `tests` block falls back to a vacuous pass (0/0) on its next submission, until you set a new default. Per-assignment overrides and named shims are **not** touched.
+
+**Confirmation.** You'll be asked to confirm (`[y/N]`) before anything is deleted; pass `--yes` to skip the prompt (scripted runs only). Idempotent: removing a classroom that has no default autograder is a clean no-op.
+
+### Named and per-assignment autograders
+
+Named shims (`<classroom>/autograders/<name>.yaml`) and per-assignment overrides (`<classroom>/autograders/<slug>/autograder.py`) are **read-only from the CLI** — `autograder list` shows what's present, but authoring, editing, and deleting them is done with ordinary git operations against the config repo (the files ride into each submission's Pages bundle). See [Autograders](Autograders) for the file layout and precedence rules.
 
 ## `gh teacher invite`
 

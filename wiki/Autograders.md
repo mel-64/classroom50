@@ -189,6 +189,8 @@ Exit code:
 
 If you skip `set-default` entirely, the runner produces the same vacuous-pass result on its own — submissions still tag and publish releases, just with status=`success` 0/0. The stub is only useful if you want diagnostic stdout in the workflow log.
 
+Inspect the current default with `gh teacher autograder show <org> <classroom>` (`--json` for metadata: whether it's the stub, its size, and git blob `sha`). To revert a classroom to "no autograder configured" outright, `gh teacher autograder remove <org> <classroom>` deletes the file (distinct from `set-default` with no `--from`, which overwrites it with the stub). Named shims and per-assignment overrides under `autograders/` are listed by `gh teacher autograder list` but authored via ordinary git operations.
+
 ### Template: pytest
 
 Drop this at `<classroom>/autograders/<slug>/autograder.py` alongside your `test_*.py` files:
