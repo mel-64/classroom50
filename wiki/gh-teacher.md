@@ -30,7 +30,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
-| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (only `individual` currently supported), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (`individual` default, or `group`), `--max-group-size <N>` (required with `--mode group`, `>= 2`), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
 | `gh teacher assignment test add <org> <classroom> <slug>` | Add or update one declarative test on an existing assignment's `tests` block. Required flags: `--name`, `--type {io,run,python}`, `--run`. Optional: `--setup`, `--input`/`--input-file`, `--expected`/`--expected-file`, `--comparison {included,exact,regex}`, `--timeout`, `--exit-code`, `--points`. Mutually exclusive with a per-assignment `autograder.py`. |
 | `gh teacher assignment test list <org> <classroom> <slug>` | Print the declarative test names on an assignment, one per line. `--json` for the full spec array, `-q` to suppress the stderr summary. Read-only. |
 | `gh teacher assignment test remove <org> <classroom> <slug> <test-name>` | Drop one declarative test by name. Idempotent. |
@@ -234,7 +234,7 @@ gh teacher classroom migrate --source 95884 --target cs50-fall-2026 \
 
 **`migrated_from` provenance.** Every migrated `classroom.json` and `assignments.json` entry carries an optional `migrated_from` block recording the legacy classroom/assignment IDs, source starter-repo path, GitHub Classroom invite link, and migration timestamp. Hand-authored classrooms (from `gh teacher classroom add` / `gh teacher assignment add`) never carry this block — it's exclusively a provenance marker for migrated content.
 
-**`mode: "group"` preserved.** Group assignments from the source are recorded losslessly in `assignments.json` (preserving teacher intent across the migration), but `gh teacher assignment add --mode group` and `gh student accept` still reject group entries at their own seams until group-mode support lands. Once it does, no re-migration is needed.
+**`mode: "group"` preserved.** Group assignments from the source are recorded in `assignments.json` with their `max_group_size` (mapped from the source's `max_teams`, falling back to the cap when the source doesn't report a usable value). Migrated group assignments work end-to-end like CLI-created ones — no re-migration needed.
 
 **What's NOT migrated** (covered by separate workflows):
 
@@ -324,15 +324,16 @@ Duplicate usernames within the input (case-insensitive) collapse with last-wins 
 
 ## `gh teacher assignment`
 
-Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (only `individual` is currently supported), and an optional `autograder` name (defaults to `default`).
+Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (`individual` or `group`), and an optional `autograder` name (defaults to `default`).
 
 Writes flow through the same optimistic-update-with-rebase loop the roster commands use (up to 5 attempts with exponential backoff), so concurrent edits from multiple teachers don't silently lose each other's work.
 
 ### `gh teacher assignment add`
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--runtime <path-to-json>] [--tests <path-to-json>] [--autograder <name>]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual|group] [--max-group-size <N>] [--runtime <path-to-json>] [--tests <path-to-json>] [--autograder <name>]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
+gh teacher assignment add cs50-fall-2026 cs-principles project --name "Project" --template cs50/project-template --mode group --max-group-size 3
 gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main --runtime ./runtime-c.json
 ```
 
@@ -349,7 +350,8 @@ Register or upsert one assignment. Idempotent on re-run: the same `slug` replace
 
 - `--description <text>` — short description written into the entry (omitted from the file when empty).
 - `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
-- `--mode individual` — `individual` is the only currently-supported value; `group` is planned for a future release and produces an explicit error today.
+- `--mode individual|group` — `individual` (default) gives each student their own repo. `group` lets teammates share one repo: the first student to `gh student accept` creates it, and others join with `gh student group join` (see the [gh student](gh-student) reference). Requires `--max-group-size`.
+- `--max-group-size <N>` — maximum collaborators on a group repo (`>= 2`; required with `--mode group`, rejected otherwise). **The limit is enforced only within the CLI** at join time — a student can still add collaborators directly through GitHub's web UI, which the tooling cannot prevent. **Grading attribution is a follow-up:** today a group submission's score is recorded against the repo owner (the first accepter); per-member score rows are not yet emitted.
 - `--runtime <path>` — JSON file describing the runtime environment for this assignment's autograde job. Supports `runs-on` (allow-listed GitHub-hosted runner labels only), `python` / `node` / `java` / `go` toolchain versions, `apt` packages, and an escape-hatch `container` image. Omit for the defaults (ubuntu-latest + Python 3.12). See the [Autograders](Autograders) wiki page for the schema and worked examples.
 - `--tests <path>` — JSON file with a bare array of declarative test specs (`io` / `run` / `python`), or `-` for stdin. Replaces the entry's whole `tests` block — the bulk counterpart to `gh teacher assignment test add`, in the same shape `assignment test list --json` emits. Mutually exclusive with a per-assignment `autograder.py`. See the [Autograders](Autograders) wiki page for the field reference.
 - `--autograder <name>` — reserved for the rare case where you want to call a different *reusable workflow* entirely (not just different language toolchains — for that, use `--runtime`). The default `default` resolves to the universal shim embedded in `gh-student`. Non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml` in the config repo; the referenced file must exist at write time.
