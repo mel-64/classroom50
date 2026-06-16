@@ -77,10 +77,15 @@ export const AllClasses = ({ org }: { org: string }) => {
 }
 
 export const SidebarClassInfo = ({ classInfo }: { classInfo?: Classroom }) => {
+  const { classroom } = useParams({ strict: false })
+
   return (
     <div className="py-2">
       <h3 className="font-bold">
-        {classInfo?.name || classInfo?.short_name || "Untitled Course"}
+        {classInfo?.name ||
+          classInfo?.short_name ||
+          classroom ||
+          "Untitled Course"}
       </h3>
       <p className="text-gray-500 text-sm">{classInfo?.term ?? ""}</p>
     </div>
@@ -91,10 +96,12 @@ export const TeacherSidebarMenu = ({
   org,
   classroom,
   selected,
+  isTeacher,
 }: {
   org: string
   classroom: string
   selected: string
+  isTeacher?: boolean
 }) => {
   return (
     <div className="py-4">
@@ -107,14 +114,16 @@ export const TeacherSidebarMenu = ({
             <span>Assignments</span>
           </li>
         </Link>
-        <Link to={`/${org}/${classroom}/students`}>
-          <li
-            className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
-          >
-            <UsersRound />
-            <span>Students</span>
-          </li>
-        </Link>
+        {isTeacher && (
+          <Link to={`/${org}/${classroom}/students`}>
+            <li
+              className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
+            >
+              <UsersRound />
+              <span>Students</span>
+            </li>
+          </Link>
+        )}
       </ul>
     </div>
   )

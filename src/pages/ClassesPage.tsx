@@ -161,10 +161,6 @@ const RepoCard = ({ org, repo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
   const { classroom } = cl50Yaml
 
-  useEffect(() => {
-    console.log(".classroom50.yaml", cl50Yaml)
-  }, [cl50Yaml])
-
   return (
     <div className="card col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
       <div className="card-body gap-4">
@@ -234,16 +230,23 @@ const RepoCard = ({ org, repo }) => {
   )
 }
 
-const OrgRepos = ({ org }: { org: string }) => {
+export const OrgRepos = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom?: string
+}) => {
   const { data: repos } = useGetOrgRepos(org)
-
-  useEffect(() => {
-    console.log("repos", repos)
-  }, [repos])
 
   if (!repos) return <></>
 
-  const maintainRepos = repos.filter((repo) => repo.permissions?.maintain)
+  let maintainRepos = repos.filter((repo) => repo.permissions?.maintain)
+  if (classroom) {
+    maintainRepos = maintainRepos.filter((repo) =>
+      repo.name.startsWith(classroom),
+    )
+  }
 
   if (maintainRepos.length === 0) {
     return (

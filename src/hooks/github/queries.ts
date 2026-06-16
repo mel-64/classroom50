@@ -304,6 +304,7 @@ export function csvFileQuery<T>(
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
+    retry: false,
   })
 }
 

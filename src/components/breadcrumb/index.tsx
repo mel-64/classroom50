@@ -5,9 +5,11 @@ import { Link } from "@tanstack/react-router"
 const Breadcrumb = ({
   className,
   endpoint,
+  isTeacher,
 }: {
   className?: string
   endpoint: string
+  isTeacher?: boolean
 }) => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
@@ -19,7 +21,7 @@ const Breadcrumb = ({
       {org && <Link to={`/${org}`}>Classes</Link>} {classroom && <>&gt; </>}
       {classroom && (
         <Link to={`/${org}/${classroom}`}>
-          {classData?.name || classData?.short_name || "Untitled Course"}
+          {classData?.name || classData?.short_name || classroom}
         </Link>
       )}{" "}
       {assignment && (
