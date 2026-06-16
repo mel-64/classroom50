@@ -1,5 +1,16 @@
 import { useParams, Link } from "@tanstack/react-router"
-import { BookText, Plus, UsersRound } from "lucide-react"
+import {
+  BookOpen,
+  BookText,
+  Clock,
+  Code2,
+  ExternalLink,
+  GitBranch,
+  Lock,
+  Plus,
+  ShieldCheck,
+  UsersRound,
+} from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
 import useGetClasses from "@/hooks/useGetClasses"
@@ -18,6 +29,7 @@ import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { acceptPendingOrgInvite } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
@@ -148,6 +160,122 @@ const JoinOrgCard = ({ org }: { org: string }) => {
   )
 }
 
+const formatRepoName = (name: string) =>
+  name
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+const formatRelativeDate = (dateString?: string) => {
+  if (!dateString) return "Unknown"
+
+  const date = new Date(dateString)
+  const diffMs = Date.now() - date.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffDays === 0) return "Today"
+  if (diffDays === 1) return "Yesterday"
+  if (diffDays < 30) return `${diffDays} days ago`
+
+  const diffMonths = Math.floor(diffDays / 30)
+  if (diffMonths === 1) return "1 month ago"
+  if (diffMonths < 12) return `${diffMonths} months ago`
+
+  const diffYears = Math.floor(diffMonths / 12)
+  return diffYears === 1 ? "1 year ago" : `${diffYears} years ago`
+}
+
+const RepoCard = ({ repo }) => {
+  const title = formatRepoName(repo.name)
+
+  return (
+    <div className="card col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
+      <div className="card-body gap-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <BookOpen className="size-5" />
+              </div>
+
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold leading-tight">
+                  {repo.name}
+                </h3>
+                <p className="truncate text-xs text-base-content/50">
+                  {repo.owner?.login}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p className="line-clamp-2 min-h-10 text-sm text-base-content/70">
+          {repo.description ||
+            "No description provided for this assignment repository."}
+        </p>
+
+        <div className="card-actions items-center justify-between pt-1">
+          <div className="flex flex-wrap gap-2">
+            {repo.archived && (
+              <div className="badge badge-warning">Archived</div>
+            )}
+            {repo.disabled && <div className="badge badge-error">Disabled</div>}
+            {repo.fork && <div className="badge badge-outline">Fork</div>}
+          </div>
+
+          <a
+            href={repo.html_url}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-sm btn-primary"
+          >
+            Open repo
+            <ExternalLink className="size-4" />
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const OrgRepos = ({ org }: { org: string }) => {
+  const { data: repos } = useGetOrgRepos(org)
+
+  useEffect(() => {
+    console.log("repos", repos)
+  }, [repos])
+
+  if (!repos) return <></>
+
+  const maintainRepos = repos.filter((repo) => repo.permissions?.maintain)
+
+  if (maintainRepos.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center">
+        <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-base-200">
+          <BookOpen className="size-6 text-base-content/60" />
+        </div>
+
+        <h2 className="text-lg font-semibold">No assignment repos yet</h2>
+
+        <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+          Repositories you can maintain will appear here once assignments have
+          been created for this organization.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      {maintainRepos.map((repo) => (
+        <RepoCard key={repo.id ?? repo.full_name} repo={repo} />
+      ))}
+    </div>
+  )
+}
+
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
@@ -180,7 +308,7 @@ const ClassesPage = () => {
 
                 <div>
                   <h1 className="text-2xl font-bold tracking-tight">
-                    My Classes
+                    My {isTeacher ? "Classes" : "Assignments"}
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm text-base-content/60">
                     Manage your courses and assignments.
@@ -211,13 +339,20 @@ const ClassesPage = () => {
           {classes.length === 0 && isTeacher ? (
             <CreateClassroomPane org={org} />
           ) : null}
-          <div className="grid grid-cols-12 gap-4 mb-6">
-            {classes.map((cl) => (
-              <ClassCard key={cl.path} cl={cl} org={org} />
-            ))}
-          </div>
+          {isTeacher && (
+            <div className="grid grid-cols-12 gap-4 mb-6">
+              {classes.map((cl) => (
+                <ClassCard key={cl.path} cl={cl} org={org} />
+              ))}
+            </div>
+          )}
+          {isStudent && isMember && <OrgRepos org={org} />}
         </DrawerContent>
-        <DrawerSidebar page="classes" selected="assignments" />
+        <DrawerSidebar
+          page="classes"
+          selected="assignments"
+          isTeacher={isTeacher}
+        />
       </Drawer>
     </div>
   )

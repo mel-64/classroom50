@@ -2,7 +2,6 @@ import {
   GraduationCap,
   BookText,
   UsersRound,
-  Settings,
   LogOut,
   MessageCircleQuestionMark,
 } from "lucide-react"
@@ -27,16 +26,29 @@ export const DrawerSidebar = ({
   selected = "",
   page = "",
   settings = false,
+  isTeacher = false,
 }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
         {page === "classes" ? (
-          <SidebarContentClasses selected={selected} settings={settings} />
+          <SidebarContentClasses
+            selected={selected}
+            settings={settings}
+            isTeacher={isTeacher}
+          />
         ) : page === "orgs" ? (
-          <SidebarContentOrgs selected={selected} settings={settings} />
+          <SidebarContentOrgs
+            selected={selected}
+            settings={settings}
+            isTeacher={isTeacher}
+          />
         ) : (
-          <SidebarContent selected={selected} settings={settings} />
+          <SidebarContent
+            selected={selected}
+            settings={settings}
+            isTeacher={isTeacher}
+          />
         )}
       </div>
     </div>
@@ -228,7 +240,13 @@ export const SidebarFooter = () => {
   )
 }
 
-export const SidebarContent = ({ selected }: { selected: string }) => {
+export const SidebarContent = ({
+  selected,
+  isTeacher,
+}: {
+  selected: string
+  isTeacher?: boolean
+}) => {
   const { org, classroom } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
 
@@ -243,7 +261,11 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
   )
 }
 
-export const MyClasses = ({ settings = false, selected = "" }) => {
+export const MyClasses = ({
+  settings = false,
+  selected = "",
+  isTeacher = false,
+}) => {
   const { org } = useParams({ strict: false })
   return (
     <div className="py-4">
@@ -253,7 +275,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             className={`flex${settings || selected === "settings" ? "" : " bg-[#323b49]"} px-2 rounded-box`}
           >
             <BookText />
-            <span>My Classes</span>
+            <span>{isTeacher ? "My Classes" : "My Assignments"}</span>
           </li>
         </Link>
       </ul>
@@ -280,17 +302,25 @@ export const MyOrgs = ({ settings = false }) => {
   )
 }
 
-export const SidebarContentClasses = ({ selected, settings = false }) => {
+export const SidebarContentClasses = ({
+  selected,
+  settings = false,
+  isTeacher = false,
+}) => {
   return (
     <>
       <ClassroomLogo />
-      <MyClasses selected={selected} settings={settings} />
+      <MyClasses
+        selected={selected}
+        settings={settings}
+        isTeacher={isTeacher}
+      />
       <SidebarFooter />
     </>
   )
 }
 
-export const SidebarContentOrgs = ({ selected }) => {
+export const SidebarContentOrgs = ({ selected, isTeacher }) => {
   return (
     <>
       <ClassroomLogo />

@@ -648,6 +648,19 @@ export async function getRepo(
   }
 }
 
+export async function getOrgRepos(client: GitHubClient, owner: string) {
+  try {
+    return await client.request<GitHubRepo[]>(
+      `/orgs/${owner}/repos?per_page=100`,
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return null
+    }
+    throw err
+  }
+}
+
 type RepositorySecret = {
   name: string
   created_at: string

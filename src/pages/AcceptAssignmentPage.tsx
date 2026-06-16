@@ -8,7 +8,7 @@ import {
 import GitHub from "@/assets/github.svg?react"
 import GitHubWhite from "@/assets/github_white.svg?react"
 import type { GitHubUser } from "@/hooks/github/types"
-import { useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
@@ -37,9 +37,11 @@ const titleForSlug = (slug: string) =>
 const AcceptNavbar = () => {
   return (
     <div className="navbar bg-base-100 shadow-sm">
-      <div className="flex p-6 text-lg font-bold">
-        <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
-      </div>
+      <Link to="/">
+        <div className="flex p-6 text-lg font-bold">
+          <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
+        </div>
+      </Link>
     </div>
   )
 }
