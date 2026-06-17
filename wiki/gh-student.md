@@ -9,7 +9,7 @@ Run `gh student <command> --help` for the live flag list. Errors always go to st
 | Command | Description |
 | --- | --- |
 | `gh student whoami` | Print the authenticated GitHub user. |
-| `gh student login` | Log in to GitHub via `gh auth login`, requesting `read:org` and `repo` (required for accepting assignments). Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
+| `gh student login` | Log in to GitHub via `gh auth login`, requesting `read:org`, `repo`, and `workflow` (required for accepting assignments — `workflow` covers committing `.github/workflows/autograde.yaml` into the assignment repo). Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
 | `gh student logout` | Log out of GitHub via `gh auth logout`. |
 | `gh student accept <org> <classroom> <assignment>` | Accept an assignment: auto-accept any pending org invite, create a private repo from the template, add the student as `maintain`, write `.classroom50.yaml`, and print clone instructions. |
 | `gh student invite <org>/<repo> <user>` | Invite a classmate or TA to the repo with `push` permission. |
@@ -101,7 +101,7 @@ The hardcoded `main` push target means templates whose default branch is `master
 ## `gh student whoami` / `login` / `logout`
 
 - `gh student whoami` — prints the authenticated GitHub user.
-- `gh student login` — runs `gh auth login -s read:org -s repo`, optionally with additional scopes via `-s/--scope`.
+- `gh student login` — runs `gh auth login -s read:org -s repo -s workflow`, optionally with additional scopes via `-s/--scope`.
 - `gh student logout` — runs `gh auth logout`.
 
 ## Contributing

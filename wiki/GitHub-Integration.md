@@ -45,6 +45,7 @@ Same device flow as above, but with student-appropriate scopes:
 |-------|--------------|
 | `read:org` | Checking and accepting org membership |
 | `repo` | Generating private assignment repos from templates, disabling repo features, adding collaborators |
+| `workflow` | Committing `.github/workflows/autograde.yaml` into the assignment repo at accept time |
 
 ### 4. Fine-grained PAT for score collection
 

@@ -44,7 +44,7 @@ Each CLI has a `login` command that runs `gh auth login` with the extra OAuth sc
 
 ```sh
 gh teacher login   # requests admin:org (org invites) + workflow (init commits the config repo's workflows)
-gh student login   # requests read:org and repo (needed to accept assignments)
+gh student login   # requests read:org, repo, and workflow (needed to accept assignments)
 ```
 
 If you skip this step and run another command first, the CLI detects the missing token and runs the login flow for you. The explicit step is just for predictability on a fresh setup.
