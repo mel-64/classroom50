@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   GraduationCap,
+  UserPlus,
   UserRound,
 } from "lucide-react"
 
@@ -16,6 +17,7 @@ import { acceptAssignment } from "@/hooks/github/mutations"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDate } from "@/util/formatDate"
 import useGetRepo from "@/hooks/useGetRepo"
+import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -26,13 +28,6 @@ const initialsFor = (user: GitHubUser | null) => {
     .map((part) => part[0]?.toUpperCase())
     .join("")
 }
-
-const titleForSlug = (slug: string) =>
-  slug
-    .split("-")
-    .filter(Boolean)
-    .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
-    .join(" ")
 
 const AcceptNavbar = () => {
   return (
@@ -155,6 +150,71 @@ const AssignmentNotFound = ({ user, assignment }) => {
   )
 }
 
+const NotOrgMember = ({ user, org, classroom }) => {
+  return (
+    <div className="min-h-screen bg-base-100">
+      <AcceptNavbar />
+
+      <AcceptCard>
+        <div className="card-body gap-8">
+          <div>
+            <span className="badge badge-error badge-soft gap-2">
+              <AlertTriangle className="size-4" />
+              Access Denied
+            </span>
+
+            <h1 className="mt-6 text-2xl font-bold">Not an org member</h1>
+
+            <p className="mt-2 text-base text-base-content/70">
+              You are not currently a member of the{" "}
+              <span className="font-bold">{org}</span> organization.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-info/20 bg-info/5 p-5">
+            <div className="flex gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-info/10 text-info">
+                <UserPlus className="size-5" />
+              </div>
+
+              <div className="min-w-0">
+                <h2 className="font-semibold text-base-content">
+                  Ask your instructor for access
+                </h2>
+
+                <p className="mt-2 leading-5 text-sm text-base-content/70">
+                  Your instructor needs to invite you to the{" "}
+                  <span className="font-semibold text-base-content">{org}</span>{" "}
+                  GitHub organization and the{" "}
+                  <span className="font-semibold text-base-content">
+                    {classroom}
+                  </span>{" "}
+                  class roster before you can accept this assignment.
+                </p>
+
+                <p className="mt-3 text-xs leading-5 text-base-content/60">
+                  After accepting the GitHub organization invite, return to this
+                  page and try again.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="divider my-0" />
+
+          <div className="space-y-3">
+            <label className="label p-0 text-base font-semibold">
+              Signed in as
+            </label>
+
+            <UserInfo user={user} />
+          </div>
+        </div>
+      </AcceptCard>
+    </div>
+  )
+}
+
 const modeMap = {
   individual: "Individual Assignment",
   group: "Group Assignment",
@@ -169,6 +229,8 @@ const AcceptAssignmentPage = () => {
 
   const { data: assignmentsData, isLoading: loadingAssignments } =
     usePagesAssignments(org, classroom)
+  const { data: orgInvite, isLoading: loadingOrgMembership } =
+    useGetOwnOrgMembership(org)
 
   const assignmentData = assignmentsData?.find((a) => a.slug === assignment)
 
@@ -194,7 +256,7 @@ const AcceptAssignmentPage = () => {
 
   const isBusy = acceptMutation.isPending
 
-  if (loadingAssignments || isLoadingRepo) {
+  if (loadingAssignments || isLoadingRepo || loadingOrgMembership) {
     return (
       <div className="min-h-screen bg-base-100">
         <AcceptNavbar />
@@ -202,6 +264,17 @@ const AcceptAssignmentPage = () => {
           <div className="loading loading-spinner loading-xl text-center m-auto" />
         </AcceptCard>
       </div>
+    )
+  }
+
+  if (!orgInvite) {
+    return (
+      <NotOrgMember
+        assignment={assignment}
+        classroom={classroom}
+        user={user}
+        org={org}
+      />
     )
   }
 

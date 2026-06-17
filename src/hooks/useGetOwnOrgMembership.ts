@@ -9,6 +9,7 @@ const useGetOwnOrgMembership = (org: string) => {
     queryKey: ["github", "memberships", "orgs", org],
     queryFn: () => getPendingOrgInvite(client, org),
     staleTime: 10 * 60 * 1000,
+    retry: false,
   })
 }
 

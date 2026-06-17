@@ -14,6 +14,7 @@ const useGetOrgMembership = (org?: string) => {
         `/orgs/${org}/memberships/${user?.login}`,
       ),
     enabled: !!user && !!org,
+    retry: false,
   })
 }
 
