@@ -42,7 +42,7 @@ What this command does:
 2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`) to find the template repo. The template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it.
 3. Resolves the autograder workflow shim. For the default autograder (the common case), the universal shim embedded in `gh-student` is used directly. For a non-default `--autograder <name>` your instructor registered, the shim is fetched from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`) — if that fetch fails, no half-baked repo is left behind.
 4. Creates a **private** copy of the template at `<org>/<classroom>-<assignment>-<username>` (lowercased), with issues, projects, and wiki disabled.
-5. Adds you as a `maintain` collaborator on the new repo.
+5. Keeps you as an `admin` collaborator on the new repo (so a group founder can add teammates with `gh student invite`).
 6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the resolved shim) in a single commit. The metadata records the classroom, assignment, and template-repo identity; the runner derives everything else at workflow time.
 7. Prints the `git clone` command for your new repo.
 
@@ -73,14 +73,14 @@ That adds them with `push` permission.
 
 If your instructor registered the assignment with `--mode group`, teammates share **one** repo instead of each getting their own:
 
-1. **One teammate accepts first.** Whoever runs `gh student accept <org> <classroom> <assignment>` first creates the shared repo, named after them (`<classroom>-<assignment>-<their-username>`).
-2. **Everyone else joins it** — don't run `accept`; instead run:
+1. **One teammate accepts first.** Whoever runs `gh student accept <org> <classroom> <assignment>` first creates the shared repo, named after them (`<classroom>-<assignment>-<their-username>`). They become the repo's **admin**.
+2. **That same teammate adds the others** — the founder (not the joiners) runs, once per teammate:
 
 ```sh
-gh student group join <org> <classroom> <assignment> <owner-username>
+gh student invite <org>/<repo> <teammate-username>
 ```
 
-`<owner-username>` is the teammate who accepted first (the repo is named after them). You're added as a `push` collaborator, up to the group size your instructor set. Re-running once you're already a member is a clean no-op; if the group is already full, the command refuses and exits non-zero. Pass `--json` to get a `{action, org, repo, login, member_count, max_group_size}` object instead of prose.
+`<repo>` is the shared repo (`<classroom>-<assignment>-<founder-username>`). Each teammate is added with `push` permission and receives a GitHub invitation to accept. Only the repo's admin (the founder) can add collaborators, which is why joins are founder-driven — a plain org member can't see or modify a teammate's private repo. Keep the group within the size your instructor set (the CLI doesn't hard-enforce the cap on `invite`, so coordinate within your group).
 
 The whole group works in the one repo and submits from it like any other assignment (below). At grading time everyone on the roster who is a collaborator on the repo is credited with the same score.
 

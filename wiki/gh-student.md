@@ -11,9 +11,8 @@ Run `gh student <command> --help` for the live flag list. Errors always go to st
 | `gh student whoami` | Print the authenticated GitHub user. |
 | `gh student login` | Log in to GitHub via `gh auth login`, requesting `read:org`, `repo`, and `workflow` (required for accepting assignments — `workflow` covers committing `.github/workflows/autograde.yaml` into the assignment repo). Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
 | `gh student logout` | Log out of GitHub via `gh auth logout`. |
-| `gh student accept <org> <classroom> <assignment>` | Accept an assignment: auto-accept any pending org invite, create a private repo from the template, add the student as `maintain`, write `.classroom50.yaml`, and print clone instructions. |
-| `gh student invite <org>/<repo> <user>` | Invite a classmate or TA to the repo with `push` permission. |
-| `gh student group join <org> <classroom> <assignment> <owner-username>` | For a group assignment, join the shared repo a teammate created (added as `push`, up to the instructor's group size — CLI-enforced, best-effort). |
+| `gh student accept <org> <classroom> <assignment>` | Accept an assignment: auto-accept any pending org invite, create a private repo from the template, keep the student as `admin` (so a group founder can `gh student invite` teammates), write `.classroom50.yaml`, and print clone instructions. |
+| `gh student invite <org>/<repo> <user>` | Invite a classmate or TA to the repo with `push` permission. For group assignments, the founder uses this to add each teammate. |
 | `gh student submit` | Snapshot the current branch and push it as a new commit on top of the assignment repo's `main` branch (after refreshing the instructor's `.gitignore` and `.github/` from the template). The autograde workflow tags and grades automatically. |
 
 ## `gh student accept`
@@ -31,7 +30,7 @@ Under the hood:
    - **Pages 404** → "the classroom may not exist yet, or `publish-pages.yaml` may not have run; ask your instructor to confirm the Pages site has deployed".
    - **Schema mismatch** (e.g. `assignments.json` advertises a v2 shape but this `gh-student` only handles v1) → tells the student to update `gh-student`.
    - **Missing slug** → "ask your instructor to run `gh teacher assignment add <org> <classroom> <assignment>`".
-   - **`mode: group`** → accepted. The first teammate to `gh student accept` creates the shared repo (named after them); the others join it with `gh student group join <org> <classroom> <assignment> <owner-username>`. Only an unrecognized mode errors.
+   - **`mode: group`** → accepted. The first teammate to `gh student accept` creates the shared repo (named after them) and becomes its admin; they then add the others with `gh student invite <org>/<repo> <teammate>`. Only an unrecognized mode errors.
 3. **Resolve the autograder workflow shim.** When the assignment's `autograder` field is `default` (the common case), the universal shim embedded in `gh-student` is used directly — no Pages fetch. When it's a non-default name (a teacher who's wired up a custom reusable workflow), the shim is fetched from `https://<org>.github.io/classroom50/<classroom>/autograders/<entry.autograder>.yaml`. Errors are surfaced loudly:
    - **404** → "autograder `<name>` not published yet — ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the config repo and that `publish-pages.yaml` has run".
    - **Malformed YAML** → "autograder `<name>` is malformed YAML — ask your instructor to check the file in the config repo".
@@ -40,7 +39,7 @@ Under the hood:
    Resolution happens *before* creating the assignment repo so a non-default-shim fetch failure surfaces without leaving a half-baked repo on the teacher's org.
 4. **Create the assignment repo from the resolved template.** `POST /repos/{template.owner}/{template.repo}/generate` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template)) creates `<classroom>-<assignment>-<username>` (lowercased) under `<org>`. The template may live in another org — a **404 on this call** surfaces "template `<owner>/<repo>` is not accessible to you — ask your instructor to make it public or grant your account access". A 422 with the GitHub "already exists" message short-circuits to `Assignment already accepted: <org>/<repo>` and leaves the existing repo untouched.
 5. **Disable issues, projects, and wiki** on the new repo via `PATCH /repos/{owner}/{repo}` so the assignment surface is just code + history.
-6. **Add `<username>` as a `maintain` collaborator** via `PUT /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator)). The PUT is upsert; a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
+6. **Keep `<username>` as an `admin` collaborator** via `PUT /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator)). The PUT is an upsert and re-affirms the creator-default `admin` (no downgrade). Admin is required so a group founder can manage collaborators — they add teammates with `gh student invite <org>/<repo> <teammate>`. The org-level member-privilege lockdown from `gh teacher init` (#112) removes the org-wide danger of repo-admin (no delete/transfer/visibility change).
 7. **Drop `.classroom50.yaml` and `.github/workflows/autograde.yaml` in a single Tree commit** on the templated branch. The metadata records:
    - `classroom` / `assignment` — identity.
    - `source.{owner,repo,branch}` — the template repo (resolved from the assignments.json entry). `gh student submit` reads this on every submit to refresh the instructor's `.gitignore` and `.github/`.
@@ -57,20 +56,6 @@ gh student invite <org>/<repo> <username>
 ```
 
 Invites a classmate or TA to a repo with `push` permission. Calls `PUT /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator)).
-
-## `gh student group join`
-
-```sh
-gh student group join <org> <classroom> <assignment> <owner-username>
-```
-
-For **group assignments**, join the shared repo a teammate already created. The first teammate runs `gh student accept` (which creates the repo, named after them); everyone else runs `group join`, passing that teammate's username as `<owner-username>`.
-
-The command reads the assignment from the classroom's published Pages site, confirms it's a group assignment, then adds you as a `push` collaborator on `<org>/<classroom>-<assignment>-<owner-username>` — provided the group isn't already full. Re-running once you're already a member is a clean no-op.
-
-The group size is the `--max-group-size` the instructor set. **The limit is enforced only through this CLI**: it counts the repo's current student members (admin collaborators — the instructor and any TA — are excluded) and refuses to add you past the maximum. A teammate can still add collaborators directly through GitHub's web UI, which this command cannot prevent — so the limit is best-effort, not a hard guarantee.
-
-Pass `--json` to emit a `{action, org, repo, login, member_count, max_group_size}` object instead of prose, so a script can branch on `action` (`added` | `already_member` | `refused_full` | `not_found`) without matching message text. The `refused_full` and `not_found` cases still print the object (on stdout) and exit non-zero.
 
 ## `gh student submit`
 
