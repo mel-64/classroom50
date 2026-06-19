@@ -2,13 +2,13 @@ import { HardDriveUpload, X } from "lucide-react"
 import { useRef, useState } from "react"
 
 import Papa from "papaparse"
+import { bulkEnrollStudentsInClassroom } from "@/hooks/github/mutations"
+import type { GitHubClient } from "@/hooks/github/client"
 import {
-  bulkEnrollStudentsInClassroom,
   isLikelyGithubUsername,
   normalizeGithubUsername,
   type BulkImportResult,
-} from "@/hooks/github/mutations"
-import type { GitHubClient } from "@/hooks/github/client"
+} from "@/api/mutations/students"
 
 const parseUsernameImportFile = (text: string): string[] => {
   const trimmed = text.trim()

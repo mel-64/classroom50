@@ -13,7 +13,7 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const StudentListPage = () => {
-  const { org, classroom } = useParams({ strict: false })
+  const { org = "", classroom = "" } = useParams({ strict: false })
   const { students } = useGetStudents(org, classroom)
   const { data: classData } = useGetClassroom(org, classroom)
   const client = useGitHubClient()
@@ -39,7 +39,11 @@ const StudentListPage = () => {
               <UploadRoster org={org} classroom={classroom} client={client} />
             </div>
             <div className="col-span-7 px-4">
-              <EnrolledStudents students={students} />
+              <EnrolledStudents
+                students={students}
+                org={org}
+                classroom={classroom}
+              />
             </div>
           </div>
         </DrawerContent>

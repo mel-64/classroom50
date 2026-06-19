@@ -9,6 +9,7 @@ type ConfirmModalProps = {
   confirmLabel?: string
   cancelLabel?: string
   dangerous?: boolean
+  needsConfirm?: boolean
   onConfirm: () => Promise<void>
   onClose: () => void
 }
@@ -21,6 +22,7 @@ export function ConfirmModal({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   dangerous = true,
+  needsConfirm = true,
   onConfirm,
   onClose,
 }: ConfirmModalProps) {
@@ -31,6 +33,7 @@ export function ConfirmModal({
   const [error, setError] = useState<string | null>(null)
 
   const matches = typedText === confirmText
+  const canSubmit = !needsConfirm || matches
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -54,14 +57,16 @@ export function ConfirmModal({
     }
   }, [open])
 
-  const handleClose = (e) => {
-    e?.stopPropagation?.()
+  const handleClose = (event?: React.MouseEvent | Event) => {
+    event?.stopPropagation?.()
+
     if (isSubmitting) return
+
     onClose()
   }
 
   const handleSubmit = async () => {
-    if (!matches || isSubmitting) return
+    if (!canSubmit || isSubmitting) return
 
     setIsSubmitting(true)
     setError(null)
@@ -76,11 +81,19 @@ export function ConfirmModal({
     }
   }
 
+  const confirmButtonClass = dangerous
+    ? "btn btn-error text-white"
+    : "btn btn-primary"
+
+  const acknowledgeButtonClass = dangerous
+    ? "btn btn-error text-white"
+    : "btn btn-warning"
+
   return (
     <dialog
       ref={dialogRef}
       className="modal"
-      onClose={handleClose}
+      onClose={(event) => handleClose(event)}
       onCancel={(event) => {
         if (isSubmitting) {
           event.preventDefault()
@@ -121,6 +134,12 @@ export function ConfirmModal({
               impossible to undo.
             </div>
 
+            {error ? (
+              <div className="alert alert-error alert-soft mt-4 text-sm">
+                {error}
+              </div>
+            ) : null}
+
             <div className="modal-action">
               <button
                 type="button"
@@ -133,16 +152,29 @@ export function ConfirmModal({
 
               <button
                 type="button"
-                className={
-                  dangerous ? "btn btn-error text-white" : "btn btn-warning"
-                }
+                className={acknowledgeButtonClass}
                 disabled={isSubmitting}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setHasAcknowledged(true)
+                onClick={(event) => {
+                  event.stopPropagation()
+
+                  if (needsConfirm) {
+                    setHasAcknowledged(true)
+                    return
+                  }
+
+                  void handleSubmit()
                 }}
               >
-                Yes, continue
+                {isSubmitting && !needsConfirm ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Working...
+                  </>
+                ) : needsConfirm ? (
+                  "Yes, continue"
+                ) : (
+                  confirmLabel
+                )}
               </button>
             </div>
           </>
@@ -190,10 +222,8 @@ export function ConfirmModal({
 
               <button
                 type="button"
-                className={
-                  dangerous ? "btn btn-error text-white" : "btn btn-primary"
-                }
-                disabled={!matches || isSubmitting}
+                className={confirmButtonClass}
+                disabled={!canSubmit || isSubmitting}
                 onClick={() => void handleSubmit()}
               >
                 {isSubmitting ? (

@@ -264,7 +264,12 @@ export const SidebarContent = ({
       <ClassroomLogo />
       <AllClasses org={org} />
       <SidebarClassInfo classInfo={classData} />
-      <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
+      <TeacherSidebarMenu
+        selected={selected}
+        org={org}
+        classroom={classroom}
+        isTeacher={isTeacher}
+      />
       <SidebarFooter />
     </>
   )
