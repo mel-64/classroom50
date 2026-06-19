@@ -32,7 +32,7 @@ If you skip this step and have no token at all, the CLI detects the missing toke
 Run once per teaching org to create `<org>/classroom50` — the private config repo that will hold classroom metadata, published assignment manifests, and collected scores:
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>
+CLASSROOM50_SERVICE_TOKEN=github_pat_... gh teacher init <org>
 ```
 
 Or omit the env var and the command prompts for the token interactively:
@@ -43,14 +43,33 @@ gh teacher init <org>
 
 `init` is idempotent: re-running picks up where a prior run left off. It also offers to refresh skeleton files that differ from the CLI's embedded version (how an existing org gains new features like declarative tests) — since that resets any teacher edits to those files, it asks for confirmation first and skips them if you decline (`--yes` skips the prompt for scripted runs).
 
-**Collect token.** Supply a fine-grained PAT with **Contents: read** to all repositories in the org. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
+**Preview first with `--dry-run`.** `gh teacher init <org> --dry-run` runs the read-only preflight checks (OAuth scopes, org access and ownership, plan, and service-token availability) and lists the steps init would perform, without changing anything. If a hard check fails — a missing `admin:org`/`workflow` scope, an org you can't see or don't own, or no token and no interactive terminal — init stops **before** mutating the org, so you never end up half-configured. Run it once before the real run to catch setup problems early.
+
+**Machine-readable output with `--json`.** `gh teacher init <org> --json` emits a single JSON object on stdout (and suppresses the human progress output) summarizing the run: the config repo and Pages URLs, `lockdown_complete`, `lockdown_manual_steps` (member-privilege settings init couldn't apply via the API — plan-gated or enterprise-pinned — each with the exact GitHub-UI instruction to set by hand), `feedback_pr_ready`, `service_token` (how the token was configured this run), the preflight results, every warning, and `manual_hardening_required` — the four settings that have no REST API — as structured `[{setting, url}]` arrays. This lets an orchestrating script or agent branch on "are there manual steps pending?" and "is the org ready?" without scraping prose. `--dry-run --json` emits the same shape with `"dry_run": true`. Add `--quiet`/`-q` to drop the per-step progress chatter while keeping warnings and the final summary.
+
+### Creating the service token
+
+`gh teacher init` provisions a repo-level Actions secret named `CLASSROOM50_SERVICE_TOKEN` (used by `collect-scores.yaml` to read student submissions). You supply the token value; **create it from your own GitHub account** — GitHub's Terms of Service generally permit only one account per person, so there's no separate "service account" to create. Just scope the token tightly to the org you're provisioning.
+
+Create a **fine-grained personal access token** at **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**:
+
+1. **Token name** — e.g. `classroom50-<org>`.
+2. **Resource owner** — select **the organization** (`<org>`). This is the critical step: the token can only reach repos owned by the resource owner you pick here. If the org isn't listed, the org has blocked fine-grained PATs (an org owner must allow them).
+3. **Expiration** — your choice (fine-grained PATs allow up to 1 year). Set a calendar reminder to rotate before it expires.
+4. **Repository access** — **All repositories**. Student repos are created on demand by `gh student accept`, so they don't exist yet — a "Only select repositories" token silently misses them (see the note below).
+5. **Repository permissions** — set **Contents: Read-only**. (`Metadata: Read-only` is added automatically; that's all group-assignment collaborator reads need too.)
+6. **Generate** and copy the `github_pat_…` value.
+
+**Approval:** if your org requires approval for fine-grained PATs (the GitHub default), a token created by a regular member stays *pending* until an org owner approves it. Because `gh teacher init` requires you to be an **org owner**, a token you create is **auto-approved** — so it just works. (A classic PAT also works; it's broader than necessary, but init won't stop you.)
+
+**How init uses it:** supply the value via the `CLASSROOM50_SERVICE_TOKEN` environment variable, or let init prompt for it (hidden input) on first setup — there is no `--token` flag (command-line PATs leak via shell history and process listings). init **validates the token against your org before storing it** (it must be able to read repo contents), so a mis-scoped or unapproved token is caught immediately instead of surfacing weeks later as a failed `collect-scores` run. On a **re-run**, if the secret is already configured, init leaves it untouched and tells you so — to replace it, set `CLASSROOM50_SERVICE_TOKEN` and re-run, or use `gh teacher rotate-service-token <org>`.
 
 > **Group assignments need no extra scope.** A group assignment grades once in
 > the first-accepter's repo; `collect-scores` then reads that repo's collaborators
 > to give every group member the same score row. Listing collaborators
 > (`GET /repos/{owner}/{repo}/collaborators`) requires only `Metadata: read`,
 > which is auto-included on every fine-grained PAT (and already implied by the
-> `Contents: read` you grant above), so the same collect token works for
+> `Contents: read` you grant above), so the same token works for
 > individual and group assignments alike — no scope change needed.
 
 > **Why all repositories, not just `<classroom>-*`?** Student repos are created on
@@ -62,11 +81,14 @@ gh teacher init <org>
 > `Contents: read` is broader than strictly necessary, but it avoids that trap;
 > tighten it later if your org policy requires.
 
+Rotate before expiry with:
+
 ```sh
-gh teacher rotate-collect-token <org>
+gh teacher rotate-service-token <org>
+
 ```
 
-**What `init` sets up:** a least-privilege lockdown of org member privileges (the only enabled member capabilities are private repo creation — `members_can_create_private_repositories: true` so `gh student accept` works — and public Pages creation, which init **enforces** so the config repo's public Pages site keeps publishing; everything else is denied: `default_repository_permission: none`, no public/internal repo creation, no private Pages, no repo delete/transfer, no repo visibility change, no issue deletion, no team creation, no dependency-insights viewing, no private-repo forking, and no member-invited outside collaborators — applied via a combined `PATCH /orgs/{org}` that falls back to one PATCH per policy if a plan-gated or enterprise-locked field is rejected, warning only for the fields it can't set), GitHub Actions enabled for the org and re-enabled on the `classroom50` repo so the workflows can run, private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, `collect-scores.yaml`, reusable `autograde-runner.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` unauthenticated; non-default `--autograder` YAML shims, when registered, are also fetched from Pages), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), reusable-workflow access for other repos in the org (so student shims can `uses:` the runner), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
+**What `init` sets up:** a least-privilege lockdown of org member privileges (the only enabled member capabilities are private repo creation — `members_can_create_private_repositories: true` so `gh student accept` works — and public Pages creation, which init **enforces** so the config repo's public Pages site keeps publishing; everything else is denied: `default_repository_permission: none`, no private Pages, no repo delete/transfer, no repo visibility change, no issue deletion, no team creation, no dependency-insights viewing, no private-repo forking, and no member-invited outside collaborators — applied via a combined `PATCH /orgs/{org}` that falls back to one PATCH per policy if a plan-gated or enterprise-locked field is rejected, warning only for the fields it can't set; **public/internal repo creation is locked off only on GitHub Enterprise Cloud** — on Team/Free, GitHub couples public and private repo creation into a single "all or none" choice and the student flow needs private creation, so members can also create public repos there and init skips that field), GitHub Actions enabled for the org and re-enabled on the `classroom50` repo so the workflows can run, private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yaml`, `collect-scores.yaml`, reusable `autograde-runner.yaml`), GitHub Pages (workflow build, visibility set to **public** so students can fetch published `assignments.json` unauthenticated; non-default `--autograder` YAML shims, when registered, are also fetched from Pages), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), reusable-workflow access for other repos in the org (so student shims can `uses:` the runner), and the repo-level `CLASSROOM50_SERVICE_TOKEN` Actions secret.
 
 This member-privilege lockdown is what makes it safe for `gh student accept` to leave each student as **admin** of their own assignment repo: students need admin to manage collaborators (so a group founder can add teammates with `gh student invite`), and the org-level locks defang the dangerous repo-admin powers (delete, transfer, visibility change) org-wide.
 
@@ -74,12 +96,19 @@ This member-privilege lockdown is what makes it safe for `gh student accept` to 
 
 Four member-privilege settings have **no REST API**, so `gh teacher init` can't set them (it prints this same reminder). Apply them once at **Org → Settings → Member privileges** (`https://github.com/organizations/<org>/settings/member_privileges`):
 
-- [ ] **App access requests** → Members only (or Disabled)
-- [ ] **GitHub Apps** → deselect "Allow repository admins to install GitHub Apps for their repositories"
-- [ ] **Projects base permissions** → No access
-- [ ] **Branch renames** → deselect "Allow repository administrators to rename branches protected by organization rules" (enabled by default on new orgs; **defense-in-depth** — the `classroom50-protect-submission-history` org ruleset already protects each repo's default branch with org-admin-only bypass, so a student-admin cannot rename out of that protection. Disable it as a tidy-up.)
+- [ ] **Set "App access requests"** to "Members only" (or "Disable app access requests")
+- [ ] **Uncheck "Allow repository admins to install GitHub Apps for their repositories"** (under "GitHub Apps")
+- [ ] **Set "Projects base permissions"** to "No access"
+- [ ] **Uncheck "Allow repository administrators to rename branches protected by organization rules"** (under "Branch renames"; enabled by default on new orgs; **defense-in-depth** — the `classroom50-protect-submission-history` org ruleset already protects each repo's default branch with org-admin-only bypass, so a student-admin cannot rename out of that protection. Disable it as a tidy-up.)
 
 **Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
+
+**Auditing the lockdown (`gh teacher audit <org>`).** After applying the manual settings — or any time you want to confirm the org is still locked down — run `gh teacher audit <org>`. It's **read-only** (makes no changes) and re-reads the org to report, per setting, whether the least-privilege value is actually in effect. It groups results into:
+
+- **Verified (read from the API)** — the settings `init` sets via `PATCH /orgs/{org}`; verify reads each live value and flags any that drifted (e.g. you re-checked "Allow members to delete or transfer repositories").
+- **Confirm by hand** — the four web-UI-only settings above; GitHub exposes no REST API to read them, so verify lists them for you to eyeball rather than implying they're fine.
+
+It exits non-zero when a **critical** API-readable lockdown field is unenforced, so it's scriptable (`gh teacher audit <org> && …`). `--json` emits a machine-readable report (with `lockdown_complete`, `enforced`, `unenforced`, and `manual_unreadable`) for agents. This is the answer to "I unchecked everything from init's Action-required list — did it take?": audit confirms the API-readable ones and reminds you which four you must confirm visually.
 
 After `init` completes, the CLI prints the future Pages URL (`https://<org>.github.io/classroom50/`) and suggests `gh teacher classroom add` as the next step.
 
@@ -273,7 +302,7 @@ What it does on each run:
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
-**Token requirements.** The workflow reads the `CLASSROOM50_COLLECT_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on all org repos; see the collect-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-collect-token <org>`.
+**Token requirements.** The workflow reads the `CLASSROOM50_SERVICE_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on all org repos; see the service-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-service-token <org>`.
 
 **Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 
@@ -306,7 +335,7 @@ What it does on each run:
 
 One row per student (individual assignments) or one row per group (group assignments — `usernames` carries all members) within each assignment bucket. Re-running collect refreshes each row with the latest release's data unless `override: true` is set. (A scores.json still in the older flat-array layout is migrated to this map on the next collect run.)
 
-**Group assignments.** A group assignment is graded once, in the first-accepter's repo. `collect-scores` reads that repo's student collaborators (org admins/instructors excluded), **keeps only those on the classroom roster** (the owner is always credited), and rewrites the row's `usernames` to that member list, so every rostered teammate gets the same score — `scores.csv` then has a row per member with the shared score. A non-rostered collaborator added out-of-band (e.g. via the GitHub UI) is **not** credited. Reading collaborators needs only `Metadata: read` (auto-included on every fine-grained PAT and already implied by `Contents: read`), so the existing collect token works as-is. If the collaborator read fails for any reason, the score is credited to the repo owner only and the run logs a warning. Teammates who joined a repo own no repo of their own, so they are not reported as "missing" in `gh teacher download`.
+**Group assignments.** A group assignment is graded once, in the first-accepter's repo. `collect-scores` reads that repo's student collaborators (org admins/instructors excluded), **keeps only those on the classroom roster** (the owner is always credited), and rewrites the row's `usernames` to that member list, so every rostered teammate gets the same score — `scores.csv` then has a row per member with the shared score. A non-rostered collaborator added out-of-band (e.g. via the GitHub UI) is **not** credited. Reading collaborators needs only `Metadata: read` (auto-included on every fine-grained PAT and already implied by `Contents: read`), so the existing service token works as-is. If the collaborator read fails for any reason, the score is credited to the repo owner only and the run logs a warning. Teammates who joined a repo own no repo of their own, so they are not reported as "missing" in `gh teacher download`.
 
 ## 10. Download submissions
 

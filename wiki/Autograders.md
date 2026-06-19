@@ -452,7 +452,7 @@ Students never configure any tokens, secrets, or env vars. The full grading flow
 2. **Unauthenticated GitHub Pages fetches** — the publish-pages allow-list keeps `assignments.json`, `autograder.py`, `autograders/*.yaml`, and the per-assignment bundles public even when the config repo is private.
 3. **Reusable-workflow access** between the student repo and the `classroom50` config repo — both live in the teacher's org. `gh teacher init` configures this access automatically; teachers in orgs with restrictive Actions policies may need to enable it manually at Settings → Actions → General → Access on the `classroom50` repo.
 
-The only personal access token in the entire system is `CLASSROOM50_COLLECT_TOKEN`, which is teacher-side, stored as an Actions secret on the config repo, used only by `collect-scores.yaml`. Students never see it.
+The only personal access token in the entire system is `CLASSROOM50_SERVICE_TOKEN`, which is teacher-side, stored as an Actions secret on the config repo, used only by `collect-scores.yaml`. Students never see it.
 
 ## Operational notes
 

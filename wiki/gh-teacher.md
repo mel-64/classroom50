@@ -19,8 +19,9 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher member list <org>/<repo>` | List actual repo collaborators, with permission level. Optional: `--json`, `--quiet` (login-only). Read-only. |
 | `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` to skip the roster lookup and clone by name prefix instead. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher teardown <org>` | Delete every repo in a Classroom 50 org (development reset). Requires `<org>/classroom50` to exist (the marker repo guards against accidental teardown of non-Classroom orgs); prompts for typed org-name confirmation unless `--yes`; deletes `classroom50` last so an interrupted run stays safe to re-run. Requires the `delete_repo` OAuth scope (opt in once via `gh teacher login -s delete_repo`). |
-| `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, collect-token secret). Idempotent; re-runs also refresh stale skeleton files after a confirmation prompt (`--yes` to skip). |
-| `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
+| `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, service-token secret). Idempotent; re-runs also refresh stale skeleton files after a confirmation prompt (`--yes` to skip). |
+| `gh teacher audit <org>` | Read-only audit of the org member-privilege lockdown. Re-reads the org and reports which API-readable settings are enforced vs. drifted, plus the four web-UI-only settings it can't read (confirm by hand). Exits non-zero if a critical lockdown field is unenforced; `--json` for a machine-readable report. |
+| `gh teacher rotate-service-token <org>` | Replace the `CLASSROOM50_SERVICE_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
 | `gh teacher classroom list <org>` | List the classrooms registered in `<org>/classroom50`, one short-name per line. Optional: `--json` (full `{short_name, name, term}` objects), `--quiet` (suppress the stderr summary). Read-only. |
 | `gh teacher classroom edit <org> <short-name>` | Update a classroom's display name and/or term in `classroom.json`. Requires at least one of `--name "<display name>"`, `--term <term>`. The short-name itself is immutable. No-op when values are unchanged. |
@@ -46,16 +47,17 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 One-shot bootstrap for the per-org `classroom50` config repo. See the [CLI Teacher Guide](CLI-Teacher-Guide) for when to run it in your workflow.
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>
-gh teacher init <org>                              # interactive token prompt
-gh teacher init <org> --service-account-confirm    # silence service-account reminder
-gh teacher init <org> --yes                        # skip the skeleton-refresh confirmation (scripted runs)
+CLASSROOM50_SERVICE_TOKEN=github_pat_... gh teacher init <org>
+gh teacher init <org>                  # interactive token prompt (first setup)
+gh teacher init <org> --dry-run        # preview preflight + planned steps, no changes
+gh teacher init <org> --json           # machine-readable summary on stdout
+gh teacher init <org> --yes            # skip the skeleton-refresh confirmation (scripted runs)
 ```
 
 Performs these steps in order:
 
 1. **Org plan check** — `GET /orgs/{org}`; warns when the org is not on Team or Enterprise Cloud (Pages from a private repo). Advisory only.
-2. **Tighten org member defaults** — a combined `PATCH /orgs/{org}` setting `default_repository_permission: "none"` (new members don't get implicit read access to other repos in the org -- existing members and their established access are unaffected), `members_can_create_public_repositories: false` (prevents members from accidentally publishing student work), and `members_can_create_private_repositories: true` (so `gh student accept` can create each student's private repo). Idempotent -- re-runs on an already-tightened org are no-ops. On 403/422 (a plan-gated or enterprise-locked field), init retries each policy in its own PATCH, applies the ones GitHub accepts, and warns per rejected field with a manual fix at `https://github.com/organizations/{org}/settings/member_privileges`; init still completes.
+2. **Tighten org member defaults** — a combined `PATCH /orgs/{org}` setting `default_repository_permission: "none"` (new members don't get implicit read access to other repos in the org -- existing members and their established access are unaffected) and `members_can_create_repositories: true` + `members_can_create_private_repositories: true` (so `gh student accept` can create each student's private repo). Restricting members to *private repos only* (`members_can_create_public_repositories: false`) is a GitHub Enterprise Cloud capability and is applied only there; on Team/Free GitHub couples public+private into one "all or none" choice and the student flow needs private creation, so members can also create public repos on those plans (init skips that field rather than attempting an impossible lockdown that would also disable private creation). Idempotent -- re-runs on an already-tightened org are no-ops. On 403/422 (a plan-gated or enterprise-locked field), init retries each policy in its own PATCH, applies the ones GitHub accepts, and warns per rejected field with a manual fix at `https://github.com/organizations/{org}/settings/member_privileges`; init still completes. Re-audit any time with `gh teacher audit <org>`.
 3. **Enable org Actions** — `GET`/`PUT /orgs/{org}/actions/permissions` turns Actions on for the org when it's disabled org-wide (Classroom50's workflows run as Actions and won't run otherwise); if Actions is limited to selected repositories, init warns to include the config and `<classroom>-*` repos. Read failures and enterprise-locked rejections warn-and-continue.
 4. **Create or fetch repo** — `POST /orgs/{org}/repos` with `auto_init: true` for `classroom50`. On 422 (name taken), falls back to `GET /repos/{org}/classroom50`. The default branch from the response flows through to later steps (org policy can rename `main`). Init then re-enables Actions on the new repo via `GET`/`PUT /repos/{owner}/{repo}/actions/permissions` so the skeleton push and first workflow run aren't blocked.
 5. **Skeleton drop / refresh** — fresh repos get a single Tree commit of the embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`); `publish-pages.yaml` is templated with the org's actual default branch at commit time. On re-runs, init diffs the repo's skeleton against this CLI's embedded version: identical files report "skeleton up to date", and stale or missing files (e.g. an org bootstrapped before declarative tests gaining `materialize_tests.py`) are listed and committed **after a confirmation prompt** — teacher-customized skeleton files would be reset, so declining is allowed and init continues. `--yes` skips the prompt.
@@ -63,9 +65,9 @@ Performs these steps in order:
 7. **Branch protection** — no force pushes or branch deletion on the default branch.
 8. **Workflow permissions** — raises default `GITHUB_TOKEN` to `write`. HTTP 409 (org-enforced policy) is tolerated; skeleton workflows declare workflow-level `permissions:` blocks.
 9. **Reusable-workflow access** — `PUT .../actions/permissions/access` with `access_level: organization` so student-repo shims can `uses:` the autograde-runner workflow. 403/409 is warn-and-continue with manual recovery instructions.
-10. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
+10. **Service token** — reads `CLASSROOM50_SERVICE_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; validates it can read org repo contents; libsodium sealbox-encrypts and uploads as a repo-level Actions secret. A re-run with the secret already present leaves it untouched.
 
-**Collect token requirements:** fine-grained PAT with `Contents: read` on all org repos (student repos are created on demand by `gh student accept`, so an "Only select repositories" scope silently misses them). This also covers **group assignments** — `collect-scores` reads a group repo's collaborators via the always-present `Metadata: read` permission (auto-included on every fine-grained PAT), so no extra scope beyond `Contents: read` is needed.
+**Service token requirements:** fine-grained PAT with `Contents: read` on all org repos (student repos are created on demand by `gh student accept`, so an "Only select repositories" scope silently misses them). This also covers **group assignments** — `collect-scores` reads a group repo's collaborators via the always-present `Metadata: read` permission (auto-included on every fine-grained PAT), so no extra scope beyond `Contents: read` is needed.
 
 **Skeleton shipped:**
 
@@ -80,16 +82,35 @@ Performs these steps in order:
 
 Score collection is **pull-based** and **roster-driven**: the collect workflow reads `<classroom>/students.csv` × `assignments.json`, computes the canonical repo name for each pair, and asks GitHub for that repo's latest release. A 404 means the student hasn't accepted or submitted yet (no error — just a gap in the "X of Y submitted" report). No org-repo enumeration, no longest-slug-wins disambiguation, no cross-repo write PAT or `repository_dispatch` from student repos.
 
-## `gh teacher rotate-collect-token`
+## `gh teacher audit`
 
-Re-runs only the collect-token step of `init` — replaces the `CLASSROOM50_COLLECT_TOKEN` secret in place. Use when the PAT nears expiry, staff change, or after a suspected compromise.
+Read-only audit of the org member-privilege lockdown — the standalone counterpart to the read-back `init` does at the end of its run. Makes **no changes**; safe to run any time.
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher rotate-collect-token <org>
-gh teacher rotate-collect-token <org>
+gh teacher audit <org>
+gh teacher audit <org> --json    # machine-readable report on stdout
 ```
 
-Fails with a clear message if `<org>/classroom50` does not exist (`run gh teacher init <org> first`). Accepts the same token input paths and `--service-account-confirm` flag as `init`.
+Re-reads `GET /orgs/{org}` and classifies each in-scope member-default setting (filtered by the org's plan) into:
+
+- **Verified (read from the API)** — settings whose live value matches the locked-down value `init` applies via `PATCH /orgs/{org}`. Drift is flagged here (e.g. you re-checked "Allow members to delete or transfer repositories").
+- **Action required** — API-readable settings that are NOT locked down, each with the exact GitHub-UI fix. Critical fields (the ones that defang the founder repo-admin grant org-wide, issue #112) failing is what makes the command exit non-zero.
+- **Confirm by hand** — the four web-UI-only settings (App access requests, repo-admin GitHub App installs, Projects base permissions, branch renames). GitHub exposes **no REST API to read** these, so audit can neither confirm nor deny them; it lists them for a visual check rather than implying they're fine.
+
+**Exit status** is non-zero when a critical API-readable field is unenforced (so `gh teacher audit <org> && …` is safe in scripts) or when the org couldn't be read back (inconclusive — treated as a conservative failure, never a false all-clear). The unreadable manual items never fail the command. `--json` emits `{org, plan, read_ok, lockdown_complete, enforced[], unenforced[], manual_unreadable[], settings_url}` for an orchestrating agent to branch on.
+
+This answers "I unchecked everything from init's Action-required list — did it take?": audit confirms the API-readable settings landed and reminds you which four you must confirm visually.
+
+## `gh teacher rotate-service-token`
+
+Re-runs only the service-token step of `init` — replaces the `CLASSROOM50_SERVICE_TOKEN` secret in place. Use when the PAT nears expiry or after a suspected compromise. The supplied token is **validated against the org before it's stored** (it must be able to read repository contents), so a misconfigured PAT is caught here rather than via a failed `collect-scores` run.
+
+```sh
+CLASSROOM50_SERVICE_TOKEN=github_pat_... gh teacher rotate-service-token <org>
+gh teacher rotate-service-token <org>
+```
+
+Fails with a clear message if `<org>/classroom50` does not exist (`run gh teacher init <org> first`). Accepts the same token input paths as `init`.
 
 ## `gh teacher classroom add`
 

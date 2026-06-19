@@ -12,14 +12,14 @@ The CLI never creates the org for you. Do the following once before running any 
 
 2. **Flag your template repos as templates** under each repo's `Settings → General → Template repository`. Templates must also be **public** on Free and Team plans so students can read them (the "No permission" baseline prevents org members from reading private repos they aren't direct collaborators on). GitHub Enterprise Cloud's "internal" visibility is the exception — see [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).
 
-Org-level member privileges are locked to least-privilege automatically — `gh teacher init` applies them via `PATCH /orgs/{org}` (see the REST table below), retrying each policy individually if the combined PATCH hits a plan-gated or enterprise-locked field. After init, the only things an org member can do are create a **private** repository (needed so `gh student accept` works) and publish a **public** Pages site (enforced so the `classroom50` config repo's site — the unauthenticated `assignments.json` source — keeps working); public/internal repo creation, private Pages, repo delete/transfer, visibility changes, issue deletion, team creation, dependency insights, private-repo forking, and member-invited outside collaborators are all denied. init *enforces* (not just allows) the Pages policy, so re-running `gh teacher init` resets a teacher who tightened it back to the working state. This is what makes it safe for `gh student accept` to leave the student as **admin** of their own repo (so a group founder can add teammates with `gh student invite`) — the dangerous repo-admin powers are defanged org-wide. The fields GitHub rejects on your plan are the one case where you'd still flip them yourself at `https://github.com/organizations/<org>/settings/member_privileges`; init warns per rejected field with that link.
+Org-level member privileges are locked to least-privilege automatically — `gh teacher init` applies them via `PATCH /orgs/{org}` (see the REST table below), retrying each policy individually if the combined PATCH hits a plan-gated or enterprise-locked field. After init, the only things an org member can do are create a **private** repository (needed so `gh student accept` works) and publish a **public** Pages site (enforced so the `classroom50` config repo's site — the unauthenticated `assignments.json` source — keeps working); private Pages, repo delete/transfer, visibility changes, issue deletion, team creation, dependency insights, private-repo forking, and member-invited outside collaborators are all denied. **Public-repo creation is the one exception by plan:** restricting members to *private repositories only* is a GitHub Enterprise Cloud capability, so init only locks public-repo creation off on Enterprise Cloud. On **Team/Free**, GitHub couples public and private into a single "all or none" choice (the legacy creation-type field has no Team-valid "private-only" value, and the UI auto-checks Public when you check Private) — and since the student flow needs private creation enabled, members can also create public repos there. init therefore skips that field on non-Enterprise plans rather than attempting an impossible lockdown that would also disable private creation. init *enforces* (not just allows) the Pages policy, so re-running `gh teacher init` resets a teacher who tightened it back to the working state. This is what makes it safe for `gh student accept` to leave the student as **admin** of their own repo (so a group founder can add teammates with `gh student invite`) — the dangerous repo-admin powers are defanged org-wide. The fields GitHub rejects on your plan are the one case where you'd still flip them yourself at `https://github.com/organizations/<org>/settings/member_privileges`; init warns per rejected field with that link.
 
 **Four member-privilege settings have no REST API** and `gh teacher init` cannot set or even read them — apply them manually once at `https://github.com/organizations/<org>/settings/member_privileges` (init prints this reminder too):
 
-- **App access requests** → Members only (or Disabled)
-- **GitHub Apps** → deselect "Allow repository admins to install GitHub Apps for their repositories"
-- **Projects base permissions** → No access
-- **Branch renames** → deselect "Allow repository administrators to rename branches protected by organization rules" (enabled by default on new orgs; defense-in-depth — the `classroom50-protect-submission-history` org ruleset already protects each repo's default branch with org-admin-only bypass, so a student-admin can't rename out of that protection. Disable it as a tidy-up.)
+- **Set "App access requests"** to "Members only" (or "Disable app access requests")
+- **Uncheck "Allow repository admins to install GitHub Apps for their repositories"** (under "GitHub Apps")
+- **Set "Projects base permissions"** to "No access"
+- **Uncheck "Allow repository administrators to rename branches protected by organization rules"** (under "Branch renames"; enabled by default on new orgs; defense-in-depth — the `classroom50-protect-submission-history` org ruleset already protects each repo's default branch with org-admin-only bypass, so a student-admin can't rename out of that protection. Disable it as a tidy-up.)
 
 ### 2. Teacher authentication (`gh teacher login`)
 
@@ -56,9 +56,9 @@ Same device flow as above, but with student-appropriate scopes:
 
 ### 4. Fine-grained PAT for score collection
 
-`gh teacher init` uploads a PAT into the `CLASSROOM50_COLLECT_TOKEN` Actions secret of your `classroom50` config repo. That PAT is what the `collect-scores.yaml` workflow uses to read releases from student repos across the org.
+`gh teacher init` uploads a PAT into the `CLASSROOM50_SERVICE_TOKEN` Actions secret of your `classroom50` config repo. That PAT is what the `collect-scores.yaml` workflow uses to read releases from student repos across the org.
 
-**Create the PAT at <https://github.com/settings/personal-access-tokens/new>** (or the equivalent page for your org-owned service account — a service account is strongly recommended so the token isn't tied to a personal account):
+**Create the PAT at <https://github.com/settings/personal-access-tokens/new>** (from your own GitHub account — GitHub's Terms of Service generally permit only one account per person, so there's no separate "service account" to create; scope the token tightly to the org you're provisioning instead):
 
 | Setting | Value |
 |---------|-------|
@@ -75,7 +75,7 @@ Same device flow as above, but with student-appropriate scopes:
 > non-rostered out-of-band collaborator is excluded). Listing collaborators
 > (`GET /repos/{owner}/{repo}/collaborators`) requires only `Metadata: read`,
 > which is auto-included on every fine-grained PAT and already implied by the
-> `Contents: read` grant above — so the same collect token serves individual and
+> `Contents: read` grant above — so the same service token serves individual and
 > group assignments. If the collaborator read fails for any reason, the group
 > submission still scores for the repo owner and `collect-scores` logs a
 > `::warning::` naming the repo.
@@ -83,7 +83,7 @@ Same device flow as above, but with student-appropriate scopes:
 Supply the PAT to `gh teacher init` via the environment variable (never a flag — command-line PATs leak via shell history):
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher init <org>
+CLASSROOM50_SERVICE_TOKEN=github_pat_... gh teacher init <org>
 ```
 
 Or omit it and the CLI prompts for it with hidden TTY input. The token is encrypted with libsodium sealbox before being uploaded to GitHub and is never written to disk.
@@ -91,7 +91,7 @@ Or omit it and the CLI prompts for it with hidden TTY input. The token is encryp
 To rotate an expiring token, create a new one with the same settings and run:
 
 ```sh
-CLASSROOM50_COLLECT_TOKEN=github_pat_... gh teacher rotate-collect-token <org>
+CLASSROOM50_SERVICE_TOKEN=github_pat_... gh teacher rotate-service-token <org>
 ```
 
 ### 5. GitHub Pages (automatic, but requires Actions to run)
@@ -136,7 +136,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 |--------|-----|---------|
 | GET | [`https://api.github.com/user`](https://docs.github.com/en/rest/users/users#get-the-authenticated-user) | Verify authenticated identity (whoami) |
 | GET | [`https://api.github.com/orgs/{org}`](https://docs.github.com/en/rest/orgs/orgs#get-an-organization) | Check org plan (warn if Pages from a private repo requires Team or Enterprise Cloud) |
-| PATCH | [`https://api.github.com/orgs/{org}`](https://docs.github.com/en/rest/orgs/orgs#update-an-organization) | Lock down org member privileges to least-privilege at `init` time. The only enabled member capabilities are private repo creation (`members_can_create_private_repositories: true`) and public Pages creation (`members_can_create_pages: true` + `members_can_create_public_pages: true`, **enforced** so the config repo's public Pages site can publish — re-running init resets it). Everything else is denied: `default_repository_permission: "none"`, and `false` for public/internal repo creation, private Pages, repo delete/transfer, repo visibility change, issue deletion, team creation, dependency-insights viewing, private-repo forking, member-invited outside collaborators, and read-access discussion creation. Combined PATCH with a per-field retry on 403/422 so a plan-gated field only warns. |
+| PATCH | [`https://api.github.com/orgs/{org}`](https://docs.github.com/en/rest/orgs/orgs#update-an-organization) | Lock down org member privileges to least-privilege at `init` time. The only enabled member capabilities are private repo creation (`members_can_create_private_repositories: true`) and public Pages creation (`members_can_create_pages: true` + `members_can_create_public_pages: true`, **enforced** so the config repo's public Pages site can publish — re-running init resets it). Everything else is denied: `default_repository_permission: "none"`, and `false` for private Pages, repo delete/transfer, repo visibility change, issue deletion, team creation, dependency-insights viewing, private-repo forking, member-invited outside collaborators, and read-access discussion creation. **Public/internal repo creation** is only locked off on GitHub Enterprise Cloud (where "private repos only" exists); on Team/Free that field is skipped because public+private are coupled and the student flow needs private creation. Combined PATCH with a per-field retry on 403/422 so a plan-gated field only warns. |
 | GET | [`https://api.github.com/orgs/{org}/actions/permissions`](https://docs.github.com/en/rest/actions/permissions#get-github-actions-permissions-for-an-organization) | Read whether GitHub Actions is enabled for the org |
 | PUT | [`https://api.github.com/orgs/{org}/actions/permissions`](https://docs.github.com/en/rest/actions/permissions#set-github-actions-permissions-for-an-organization) | Enable GitHub Actions for the org when it's disabled org-wide |
 | POST | [`https://api.github.com/orgs/{org}/repos`](https://docs.github.com/en/rest/repos/repos#create-an-organization-repository) | Create the `classroom50` config repo |
@@ -150,7 +150,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 | PUT | [`https://api.github.com/repos/{owner}/{repo}/actions/permissions/workflow`](https://docs.github.com/en/rest/actions/permissions#set-default-workflow-permissions-for-a-repository) | Set default `GITHUB_TOKEN` to write permissions |
 | PUT | [`https://api.github.com/repos/{owner}/{repo}/actions/permissions/access`](https://docs.github.com/en/rest/actions/permissions#set-the-level-of-access-for-workflows-outside-of-the-repository) | Allow reusable workflows from the same org |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/actions/secrets/public-key`](https://docs.github.com/en/rest/actions/secrets#get-a-repository-public-key) | Retrieve sealbox public key for encrypting the collect PAT |
-| PUT | [`https://api.github.com/repos/{owner}/{repo}/actions/secrets/CLASSROOM50_COLLECT_TOKEN`](https://docs.github.com/en/rest/actions/secrets#create-or-update-a-repository-secret) | Upload the encrypted collect PAT as an Actions secret |
+| PUT | [`https://api.github.com/repos/{owner}/{repo}/actions/secrets/CLASSROOM50_SERVICE_TOKEN`](https://docs.github.com/en/rest/actions/secrets#create-or-update-a-repository-secret) | Upload the encrypted service PAT as an Actions secret |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/contents/{path}`](https://docs.github.com/en/rest/repos/contents#get-repository-content) | Read existing files in the config repo (idempotency checks, skeleton probing) |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{branch}`](https://docs.github.com/en/rest/git/refs#get-a-reference) | Resolve branch tip SHA before a tree commit |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/git/commits/{commit_sha}`](https://docs.github.com/en/rest/git/commits#get-a-commit-object) | Read parent commit metadata |
@@ -198,7 +198,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 | PATCH | [`https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{branch}`](https://docs.github.com/en/rest/git/refs#update-a-reference) | Fast-forward the branch to the new commit |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/contents/{path}`](https://docs.github.com/en/rest/repos/contents#get-repository-content) | Fetch `.gitignore` and `.github/` from the template repo (`gh student submit` only) |
 
-### `collect_scores.py` (runs inside GitHub Actions, uses `CLASSROOM50_COLLECT_TOKEN`)
+### `collect_scores.py` (runs inside GitHub Actions, uses `CLASSROOM50_SERVICE_TOKEN`)
 
 | Method | URL | Purpose |
 |--------|-----|---------|
@@ -243,7 +243,7 @@ The runner setup also fetches from GitHub Pages without authentication (public b
 
 | Variable / Secret | Where set | Used by | Purpose |
 |-------------------|-----------|---------|---------|
-| `CLASSROOM50_COLLECT_TOKEN` | `gh teacher init` (Actions secret on `classroom50`) | `collect-scores.yaml`, `collect_scores.py` | Fine-grained PAT for reading student repo releases |
+| `CLASSROOM50_SERVICE_TOKEN` | `gh teacher init` (Actions secret on `classroom50`) | `collect-scores.yaml`, `collect_scores.py` | Fine-grained PAT for reading student repo releases |
 | `GITHUB_TOKEN` / `github.token` | Automatically injected by Actions | `autograde-runner.yaml` | Student-repo Actions token (`contents: write`, `statuses: write`) |
 | `GH_TOKEN` | Set from `github.token` in runner steps | `gh api`, `gh release` inside the runner | `gh` CLI auth inside the autograde workflow |
 | `GH_DEBUG=api` | Developer shell | `go-gh` (teacher & student CLIs) | Log all REST request/response traffic |
