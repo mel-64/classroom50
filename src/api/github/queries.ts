@@ -2,9 +2,13 @@ import type { GitHubClient } from "@/hooks/github/client"
 import type { GitHubBranchRef, GitHubCommitRef } from "@/hooks/github/types"
 import type { Classroom } from "@/types/classroom"
 
-export function getBranchRef(client: GitHubClient, org: string) {
+export function getBranchRef(
+  client: GitHubClient,
+  org: string,
+  branch?: string,
+) {
   return client.request<GitHubBranchRef>(
-    `/repos/${org}/classroom50/git/ref/heads/main`,
+    `/repos/${org}/classroom50/git/ref/heads/${branch ?? "main"}`,
   )
 }
 

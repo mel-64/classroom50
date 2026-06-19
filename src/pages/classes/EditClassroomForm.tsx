@@ -1,9 +1,15 @@
-import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
-import useGetClasses from "@/hooks/useGetClasses"
-import useGetClassroom from "@/hooks/useGetClassroom"
+import {
+  deleteClassroom,
+  type DeleteClassroomInput,
+} from "@/api/mutations/classrooms"
+import { ConfirmModal } from "@/components/modals"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { githubKeys } from "@/hooks/github/queries"
 import { useForm } from "@tanstack/react-form"
-import { useParams } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate, useParams } from "@tanstack/react-router"
+import { Trash2 } from "lucide-react"
+import { useState } from "react"
 
 export type EditClassroomFormValues = {
   name: string
@@ -15,7 +21,58 @@ type EditClassroomFormProps = {
   onSubmit: (values: EditClassroomFormValues) => void | Promise<void>
 }
 
+const DeleteClassroomButton = ({ org, classroom, onDeleteClassroom }) => {
+  const client = useGitHubClient()
+  const [open, setOpen] = useState(false)
+  const deleteClassroomMutation = useMutation({
+    mutationFn: (input: DeleteClassroomInput) => deleteClassroom(client, input),
+    onSuccess: () => onDeleteClassroom(),
+  })
+
+  return (
+    <>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        className="btn btn-circle btn-sm btn-ghost text-error"
+      >
+        <Trash2 className="size-4" />
+      </button>
+
+      <ConfirmModal
+        open={open}
+        title="Delete classroom?"
+        description={
+          <>
+            This will remove the{" "}
+            <span className="font-semibold text-base-content">{classroom}</span>{" "}
+            classroom from the{" "}
+            <span className="font-semibold text-base-content">{org}</span>{" "}
+            organization. Student assignment repositories will not be deleted.
+          </>
+        }
+        confirmText={`${org}/${classroom}`}
+        confirmLabel="Delete classroom"
+        cancelLabel="Keep classroom"
+        dangerous
+        onConfirm={async () => {
+          await deleteClassroomMutation.mutateAsync({
+            org,
+            classroom,
+          })
+          onDeleteClassroom()
+        }}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  )
+}
+
 const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
   const [submitted, setSubmitted] = useState(false)
 
@@ -58,7 +115,19 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
       }}
     >
       <div className="card-body">
-        <h3 className="text-lg font-bold pb-4">Basic Information</h3>
+        <div className="flex justify-between">
+          <h3 className="text-lg font-bold pb-4">Basic Information</h3>
+          <DeleteClassroomButton
+            org={org}
+            classroom={classroom}
+            onDeleteClassroom={() => {
+              queryClient.invalidateQueries({
+                queryKey: githubKeys.jsonFile(org, "classroom50"),
+              })
+              navigate({ to: `/${org}` })
+            }}
+          />
+        </div>
 
         <form.Field name="name">
           {(field) => (

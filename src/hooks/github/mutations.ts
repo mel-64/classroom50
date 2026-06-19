@@ -277,66 +277,10 @@ export function updateRefForRepo(params: {
   )
 }
 
-export type CreateClassroomResult = {
-  previousCommitSha: string
-  baseTreeSha: string
-  newTreeSha: string
-  newCommitSha: string
-  updatedRef: GitHubMoveBranch
-}
-export async function createClassroomFiles(
-  client: GitHubClient,
-  input: CreateClassroomInput,
-): Promise<CreateClassroomResult> {
-  const ref = await getBranchRef(client, input.org)
-  const commit = await getCommit(client, input.org, ref.object.sha)
-  const tree = await createTree(client, {
-    ...input,
-    base_tree: commit.tree.sha,
-    term: input.term,
-  })
-  const newCommit = await createCommit(client, {
-    ...input,
-    tree_sha: tree.sha,
-    parents: [ref.object.sha],
-  })
-  const updatedRef = await updateRef(client, input.org, newCommit.sha)
-
-  return {
-    previousCommitSha: ref.object.sha,
-    baseTreeSha: commit.tree.sha,
-    newTreeSha: tree.sha,
-    newCommitSha: newCommit.sha,
-    updatedRef,
-  }
-}
-
-export async function withGitConflictRetry<T>(
-  fn: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 409) {
-      return fn()
-    }
-
-    throw err
-  }
-}
-
-export type CreateClassroomInput = {
-  org: string
-  name?: string
-  classroom: string
-  term: string
-}
-export async function createClassroomFilesWithConflictRetry(
-  client: GitHubClient,
-  input: CreateClassroomInput,
-) {
-  return withGitConflictRetry(() => createClassroomFiles(client, input))
-}
+export {
+  createClassroomFiles,
+  createClassroomFilesWithConflictRetry,
+} from "@/api/mutations/classrooms"
 
 export type GitTreeEntry = {
   path: string

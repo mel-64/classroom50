@@ -80,7 +80,7 @@ const EditClassroomPage = () => {
           <Breadcrumb endpoint="Edit Classroom" />
           <div className="flex justify-between">
             <div>
-              <h1 className="text-xl pt-8 pb-10 font-bold">Create Classroom</h1>
+              <h1 className="text-xl pt-8 pb-10 font-bold">Edit Classroom</h1>
             </div>
           </div>
           {classroomEdited ? (

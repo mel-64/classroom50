@@ -10,13 +10,12 @@ import {
   createGitCommit,
   createGitTree,
   updateRef,
-  withGitConflictRetry,
-  type CreateClassroomResult,
 } from "@/hooks/github/mutations"
 import {
   getAssignmentsFile,
   type AssignmentsFile,
 } from "../queries/assignments"
+import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 
 // contentsPathExists: 404 -> false, 200 -> true, anything else throws.
 async function contentsPathExists(

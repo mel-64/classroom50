@@ -35,8 +35,15 @@ export const githubKeys = {
   rawFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "raw-file", owner, repo, path, ref ?? null] as const,
 
-  jsonFile: (owner: string, repo: string, path: string, ref?: string) =>
-    [...githubKeys.all, "json-file", owner, repo, path, ref ?? null] as const,
+  jsonFile: (owner: string, repo: string, path?: string, ref?: string) =>
+    [
+      ...githubKeys.all,
+      "json-file",
+      owner,
+      repo,
+      path || "",
+      ref ?? null,
+    ] as const,
 
   csvFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
