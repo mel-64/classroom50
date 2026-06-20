@@ -6,6 +6,8 @@ import {
 
 import { getName, getInitials } from "@/util/students"
 import Avatar from "@/components/avatar"
+import type { SubmissionRow } from "@/hooks/useGetScores"
+import type { Student } from "@/types/classroom"
 
 // <= 50% = red
 // >= 60% = yellow
@@ -18,7 +20,13 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-const SubmissionsTable = ({ scores, students }) => {
+const SubmissionsTable = ({
+  scores,
+  students,
+}: {
+  scores: SubmissionRow[]
+  students: Student[]
+}) => {
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <table className="table">
@@ -40,10 +48,15 @@ const SubmissionsTable = ({ scores, students }) => {
             </tr>
           )}
           {scores
-            .sort((a, b) => a.datetime - b.datetime)
+            .slice()
+            .sort(
+              (a, b) =>
+                new Date(a.datetime).getTime() -
+                new Date(b.datetime).getTime(),
+            )
             .toReversed()
-            .map(({ usernames, score, datetime, ...rest }) => (
-              <tr>
+            .map(({ usernames, score, datetime, submissionCount, ...rest }) => (
+              <tr key={rest.owner}>
                 <td>
                   <Avatar
                     name={getName(usernames[0], students)}
@@ -53,7 +66,8 @@ const SubmissionsTable = ({ scores, students }) => {
                 </td>
                 <td>
                   <label className="badge max-xl:text-xs whitespace-nowrap">
-                    1 Submission
+                    {submissionCount}{" "}
+                    {submissionCount === 1 ? "Submission" : "Submissions"}
                   </label>
                 </td>
                 <td>

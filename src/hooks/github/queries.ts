@@ -586,7 +586,7 @@ type RepositorySecret = {
   created_at: string
   updated_at: string
 }
-const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_COLLECT_TOKEN"
+const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
 export type CollectTokenStatus =
   | {
       status: "present"

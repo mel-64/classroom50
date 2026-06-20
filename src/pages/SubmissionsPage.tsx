@@ -68,11 +68,15 @@ const SubmissionsPage = () => {
 
   const downloadScoresCsv = () => {
     const rows = scoresInfo
-      .toSorted((a, b) => Number(b.datetime) - Number(a.datetime))
-      .map(({ usernames, score, datetime, ...rest }) => ({
+      .toSorted(
+        (a, b) =>
+          new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+      )
+      .map(({ usernames, score, datetime, submissionCount, ...rest }) => ({
         usernames: usernames.join(", "),
         score,
         max_score: rest["max-score"],
+        submissions: submissionCount,
         submitted_at: new Date(datetime).toISOString(),
         commit: rest.commit,
         review: rest.review,

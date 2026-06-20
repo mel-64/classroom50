@@ -64,7 +64,7 @@ const createClassroomBody = (
         content: JSON.stringify(
           {
             schema: "classroom50/scores/v1",
-            submissions: "{}",
+            assignments: {},
           },
           null,
           2,
@@ -570,6 +570,10 @@ const SKELETON_PATHS = [
   // tests.json bundles during publish-pages — without it, declarative
   // autograding tests silently never grade.
   "scripts/materialize_tests.py",
+  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml
+  // fetches it from Pages. Without it, feedback_pr assignments can't
+  // open their review PR.
+  "scripts/ensure_feedback_pr.py",
 ]
 
 // gh teacher init substitutes this placeholder (publish-pages.yaml's
@@ -1360,9 +1364,110 @@ export async function ensureOrgActionsEnabled(
   }
 }
 
+export type EnsureOrgCanCreatePullRequestsResult =
+  | {
+      status: "complete"
+      org: string
+      message: string
+      settingsUrl: string
+    }
+  | {
+      status: "warning"
+      org: string
+      reason: "permission_denied" | "policy_conflict" | "readback_failed"
+      message: string
+      settingsUrl: string
+    }
+
+type OrgWorkflowPermissions = {
+  default_workflow_permissions: "read" | "write"
+  can_approve_pull_request_reviews: boolean
+}
+
+// The opt-in Feedback PR (issue #86) is opened by each student repo's
+// autograde workflow using GITHUB_TOKEN. Even when the calling workflow
+// grants `pull-requests: write`, GitHub rejects the PR creation unless the
+// org-level "Allow GitHub Actions to create and approve pull requests"
+// toggle (can_approve_pull_request_reviews) is on — and it defaults off.
+// Student repos inherit this from the org at creation time, and a
+// `maintain` collaborator can't set it per-repo, so the org is the only
+// place to enable it. Mirrors the CLI's ensureOrgCanCreatePRs
+// (cli/gh-teacher/init_repo.go); without it a GUI-initialized org hits the
+// exact "requesting 'pull-requests: write', but is only allowed
+// 'pull-requests: none'" failure students reported in discussion #33.
+//
+// Only the PR toggle is ours to change: default_workflow_permissions is
+// preserved (skeleton workflows declare their own workflow-level scopes).
+export async function ensureOrgCanCreatePullRequests(
+  client: GitHubClient,
+  org: string,
+): Promise<EnsureOrgCanCreatePullRequestsResult> {
+  const settingsUrl = orgActionsSettingsUrl(org)
+  const path = `/orgs/${org}/actions/permissions/workflow`
+
+  let current: OrgWorkflowPermissions
+  try {
+    current = await client.request<OrgWorkflowPermissions>(path)
+  } catch (err) {
+    return {
+      status: "warning",
+      org,
+      reason: "readback_failed",
+      settingsUrl,
+      message: `${org}: couldn't read organization workflow permissions (${getErrorMessage(
+        err,
+      )}); GitHub Actions may be blocked from opening Feedback PRs. Enable "Allow GitHub Actions to create and approve pull requests" at ${settingsUrl}.`,
+    }
+  }
+
+  if (current.can_approve_pull_request_reviews) {
+    return {
+      status: "complete",
+      org,
+      settingsUrl,
+      message: `${org}: GitHub Actions is already allowed to create pull requests (Feedback PRs can open).`,
+    }
+  }
+
+  try {
+    await client.request(path, {
+      method: "PUT",
+      body: {
+        default_workflow_permissions: current.default_workflow_permissions,
+        can_approve_pull_request_reviews: true,
+      },
+    })
+
+    return {
+      status: "complete",
+      org,
+      settingsUrl,
+      message: `${org}: enabled GitHub Actions to create pull requests (required for opt-in Feedback PRs).`,
+    }
+  } catch (err) {
+    if (
+      err instanceof GitHubAPIError &&
+      (err.status === 403 || err.status === 409)
+    ) {
+      return {
+        status: "warning",
+        org,
+        reason: err.status === 403 ? "permission_denied" : "policy_conflict",
+        settingsUrl,
+        message: `${org}: couldn't enable Actions-created pull requests (${getErrorMessage(
+          err,
+        )}); the opt-in Feedback PR won't open until an org admin turns on "Allow GitHub Actions to create and approve pull requests" at ${settingsUrl}.`,
+      }
+    }
+
+    throw err
+  }
+}
+
 export type InitStepId =
   | "orgDefaults"
   | "orgActions"
+  | "orgPrCreation"
   | "configRepo"
   | "skeleton"
   | "branchProtection"
@@ -1403,6 +1508,12 @@ export async function initClassroom50({
     id: "orgActions",
     onStepUpdate,
     fn: () => ensureOrgActionsEnabled(client, org),
+  })
+
+  results.orgPrCreation = await tryStep({
+    id: "orgPrCreation",
+    onStepUpdate,
+    fn: () => ensureOrgCanCreatePullRequests(client, org),
   })
 
   results.configRepo = await tryStep({

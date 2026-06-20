@@ -64,6 +64,7 @@ const InitStep = ({
 const INIT_STEP_ORDER: InitStepId[] = [
   "orgDefaults",
   "orgActions",
+  "orgPrCreation",
   "configRepo",
   "skeleton",
   "branchProtection",
@@ -178,6 +179,11 @@ const initialSteps: Record<InitStepId, InitStepUpdate> = {
     id: "orgActions",
     status: "pending",
     title: "Actions permissions",
+  },
+  orgPrCreation: {
+    id: "orgPrCreation",
+    status: "pending",
+    title: "Actions pull request creation",
   },
   configRepo: {
     id: "configRepo",
