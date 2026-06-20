@@ -292,23 +292,36 @@ const CreateAssignmentForm = ({
 
           <form.Field name="feedback_pr">
             {(field) => (
-              <div className="mt-4">
-                <label className="label cursor-pointer justify-start gap-3 w-fit">
-                  <input
-                    type="checkbox"
-                    className="toggle"
-                    name={field.name}
-                    checked={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.checked)}
-                  />
-                  <span className="font-bold">Feedback pull request</span>
-                </label>
-                <p className="label pt-1">
-                  Opens one long-lived pull request per student repo so you can
-                  leave inline review comments on the full starter→submission
-                  diff.
-                </p>
+              <div className="mt-4 flex items-start gap-3">
+                <input
+                  id={field.name}
+                  type="checkbox"
+                  className="toggle toggle-primary mt-0.5"
+                  name={field.name}
+                  checked={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.checked)}
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor={field.name} className="font-bold">
+                      Feedback pull request
+                    </label>
+                    <span
+                      className={`badge badge-sm ${
+                        field.state.value
+                          ? "badge-success badge-soft"
+                          : "badge-ghost"
+                      }`}
+                    >
+                      {field.state.value ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                  <p className="text-sm text-base-content/60">
+                    Open a pull request per repo for inline review of each
+                    submission.
+                  </p>
+                </div>
               </div>
             )}
           </form.Field>
