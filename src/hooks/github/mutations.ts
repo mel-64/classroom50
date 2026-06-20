@@ -22,12 +22,17 @@ const createClassroomMetadata = (
   classroom: string,
   name: string,
   term: string,
+  team?: ClassroomTeamRef,
 ) => ({
   schema: "classroom50/classroom/v1",
   name,
   short_name: classroom,
   term,
   org,
+  // Written only when a team was provisioned, matching the CLI's
+  // `omitempty` team field. Grants rostered students read on private,
+  // org-owned assignment templates.
+  ...(team ? { team } : {}),
 })
 
 const STUDENTS_CSV_HEADER =
@@ -38,6 +43,7 @@ const createClassroomBody = (
   classroom: string,
   name: string,
   term: string,
+  team?: ClassroomTeamRef,
 ) => {
   const mode = "100644"
   const type = "blob"
@@ -75,7 +81,7 @@ const createClassroomBody = (
         mode,
         type,
         content: JSON.stringify(
-          createClassroomMetadata(org, classroom, name, term),
+          createClassroomMetadata(org, classroom, name, term, team),
           null,
           2,
         ),
@@ -86,14 +92,18 @@ const createClassroomBody = (
 
 export function createTree(
   client: GitHubClient,
-  input: CreateClassroomInput & { base_tree: string; term: string },
+  input: CreateClassroomInput & {
+    base_tree: string
+    term: string
+    team?: ClassroomTeamRef
+  },
 ) {
-  const { base_tree, org, classroom, name, term } = input
+  const { base_tree, org, classroom, name, term, team } = input
   return client.request<GitHubCreateTree>(
     `/repos/${org}/classroom50/git/trees`,
     {
       method: "POST",
-      body: createClassroomBody(base_tree, org, classroom, name, term),
+      body: createClassroomBody(base_tree, org, classroom, name, term, team),
     },
   )
 }
@@ -346,6 +356,121 @@ export function createTeam(client: GitHubClient, input: CreateTeamInput) {
       ...body,
     },
   })
+}
+
+// The minimal team identity persisted in classroom.json. The slug is
+// authoritative for every team operation (GitHub may assign a slug that
+// differs from the name on a collision); the id is the immutable handle.
+// Mirrors the CLI's teamRef (cli/gh-teacher/team.go).
+export type ClassroomTeamRef = {
+  id: number
+  slug: string
+}
+
+// GitHub slugifies team names by collapsing hyphen runs and trimming
+// trailing hyphens, so a short-name with consecutive/trailing hyphens
+// would yield slug != `classroom50-<short>` and break later team ops that
+// re-derive the slug. The GUI's slugify already produces canonical slugs,
+// but guard defensively to match the CLI's canonicalTeamSlugShortName.
+function isCanonicalTeamShortName(shortName: string): boolean {
+  return !shortName.endsWith("-") && !shortName.includes("--")
+}
+
+// Create (or adopt) the per-classroom GitHub team — privacy `secret`,
+// least-privilege — and return its { id, slug } for classroom.json.
+// This is what later grants rostered students read on private, org-owned
+// assignment templates so `gh student accept` can generate their repo.
+// Mirrors the CLI's ensureClassroomTeam (cli/gh-teacher/team.go):
+// idempotent, adopting an existing same-named team on 422 rather than
+// failing, and reconciling its privacy to `secret`.
+export async function ensureClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<ClassroomTeamRef> {
+  if (!isCanonicalTeamShortName(classroom)) {
+    throw new Error(
+      `Classroom slug "${classroom}" can't back a GitHub team — remove consecutive or trailing hyphens (GitHub would rewrite the team slug, breaking membership and template grants).`,
+    )
+  }
+
+  const name = `classroom50-${classroom}`
+
+  try {
+    const created = await createTeam(client, { org, name, privacy: "secret" })
+    return { id: created.id, slug: created.slug }
+  } catch (err) {
+    // 422 = a team with this name already exists. Adopt it in place
+    // (read its id/slug, reconcile privacy to secret) so a re-create
+    // reconciles cleanly instead of failing.
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      return adoptClassroomTeam(client, org, classroom)
+    }
+    throw err
+  }
+}
+
+async function adoptClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<ClassroomTeamRef> {
+  const slug = `classroom50-${classroom}`
+  const existing = await client.request<GitHubTeam>(
+    `/orgs/${org}/teams/${slug}`,
+  )
+
+  if (existing.privacy !== "secret") {
+    await client.request(`/orgs/${org}/teams/${existing.slug}`, {
+      method: "PATCH",
+      body: { privacy: "secret" },
+    })
+  }
+
+  return { id: existing.id, slug: existing.slug }
+}
+
+// Delete the per-classroom team by its persisted slug, mirroring the
+// CLI's deleteClassroomTeam (cli/gh-teacher/team.go). As defense-in-depth
+// against a slug later reused by an unrelated team, the live team's id is
+// confirmed to match the persisted id before deletion (skipped when no id
+// was recorded). A 404 (already gone) is treated as success so deletion
+// is idempotent; an empty ref is a no-op.
+export async function deleteClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  team: ClassroomTeamRef | undefined | null,
+): Promise<void> {
+  if (!team?.slug) return
+
+  if (team.id) {
+    try {
+      const live = await client.request<{ id: number }>(
+        `/orgs/${org}/teams/${team.slug}`,
+      )
+      if (live.id !== team.id) {
+        throw new Error(
+          `Team "${team.slug}" in ${org} now has id ${live.id}, not the recorded ${team.id} — refusing to delete a team that isn't the one this classroom created; remove it by hand if intended.`,
+        )
+      }
+    } catch (err) {
+      if (err instanceof GitHubAPIError && err.status === 404) {
+        return
+      }
+      throw err
+    }
+  }
+
+  try {
+    await client.request(`/orgs/${org}/teams/${team.slug}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return
+    }
+    throw err
+  }
 }
 
 export function addRepositoryToTeam(

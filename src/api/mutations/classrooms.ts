@@ -1,10 +1,12 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubMoveBranch } from "@/hooks/github/types"
-import { getBranchRef, getCommit } from "../github/queries"
+import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import {
   createCommit,
   createTree,
+  deleteClassroomTeam,
+  ensureClassroomTeam,
   updateRef,
   type GitTreeEntry,
 } from "@/hooks/github/mutations"
@@ -20,12 +22,19 @@ export async function createClassroomFiles(
   client: GitHubClient,
   input: CreateClassroomInput,
 ): Promise<CreateClassroomResult> {
+  // Create (or adopt) the per-classroom GitHub team BEFORE scaffolding so
+  // its { id, slug } can be recorded in classroom.json — mirrors the CLI's
+  // addClassroom ordering. The team is what later grants rostered students
+  // read on private, org-owned assignment templates.
+  const team = await ensureClassroomTeam(client, input.org, input.classroom)
+
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
   const tree = await createTree(client, {
     ...input,
     base_tree: commit.tree.sha,
     term: input.term,
+    team,
   })
   const newCommit = await createCommit(client, {
     ...input,
@@ -81,6 +90,22 @@ export async function deleteClassroom(
 ) {
   const { org, classroom, branch = "main" } = input
   const prefix = `${classroom}/`
+
+  // Resolve the team ref from classroom.json BEFORE the deletion commit
+  // removes the file. A classroom with no team block (pre-feature) or a
+  // read failure yields no ref — the team delete below is then a no-op.
+  // Mirrors the CLI's classroom remove ordering.
+  let team: { id: number; slug: string } | undefined
+  try {
+    const classroomJson = await getClassroomJson(client, {
+      org,
+      classroom,
+      ref: branch,
+    })
+    team = classroomJson.team
+  } catch {
+    team = undefined
+  }
 
   const ref = await getBranchRef(client, org, branch)
   const commit = await getCommit(client, org, ref.object.sha)
@@ -149,6 +174,20 @@ export async function deleteClassroom(
     },
   })
 
+  // Delete the per-classroom team (idempotent; 404 = already gone). A
+  // delete failure must NOT undo the config removal that already
+  // committed — surface it as a non-fatal warning, matching the CLI.
+  let teamDeleteWarning: string | undefined
+  if (team?.slug) {
+    try {
+      await deleteClassroomTeam(client, org, team)
+    } catch (err) {
+      teamDeleteWarning = `Removed the classroom config but could not delete its team "${team.slug}" (${
+        err instanceof Error ? err.message : String(err)
+      }); delete it by hand at https://github.com/orgs/${org}/teams if it lingers.`
+    }
+  }
+
   return {
     deleted: true,
     classroom,
@@ -156,5 +195,6 @@ export async function deleteClassroom(
     previousCommitSha: commit.sha,
     newTreeSha: newTree.sha,
     newCommitSha: newCommit.sha,
+    teamDeleteWarning,
   }
 }

@@ -5,6 +5,13 @@ export type Classroom = {
   name: string
   short_name: string
   org: string
+  // Per-classroom GitHub team { id, slug } that grants rostered students
+  // read on private, org-owned assignment templates. Written by classroom
+  // creation; absent on classrooms created before this feature.
+  team?: {
+    id: number
+    slug: string
+  }
 }
 
 // Mirrors one entry of classroom50/assignments/v1 — the shape gh-teacher
