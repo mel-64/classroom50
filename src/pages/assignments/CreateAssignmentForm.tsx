@@ -32,6 +32,30 @@ const FormErrors = ({ form }) => (
   </form.Subscribe>
 )
 
+const toDatetimeLocalValue = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, "0")
+
+  const year = date.getFullYear()
+  const month = pad(date.getMonth() + 1)
+  const day = pad(date.getDate())
+  const hours = pad(date.getHours())
+  const minutes = pad(date.getMinutes())
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+const utcIsoToDatetimeLocalValue = (value?: string) => {
+  if (!value) return ""
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return ""
+  }
+
+  return toDatetimeLocalValue(date)
+}
+
 const CreateAssignmentForm = ({
   defaultValues,
   onSubmit,
@@ -45,7 +69,8 @@ const CreateAssignmentForm = ({
       mode: defaultValues?.mode || "individual",
       template_repo: defaultValues?.template_repo || "",
       due_date:
-        defaultValues?.due_date || new Date().toISOString().slice(0, 10),
+        utcIsoToDatetimeLocalValue(defaultValues?.due_date) ||
+        toDatetimeLocalValue(new Date()),
       max_group_size: defaultValues?.max_group_size || 2,
       tests: defaultValues?.tests || [],
     } satisfies CreateAssignmentFormValues,
@@ -79,6 +104,11 @@ const CreateAssignmentForm = ({
       })
     },
   })
+  const tzShort = new Intl.DateTimeFormat(undefined, {
+    timeZoneName: "short",
+  })
+    .formatToParts(new Date())
+    .find((part) => part.type === "timeZoneName")?.value
 
   return (
     <form
@@ -172,12 +202,12 @@ const CreateAssignmentForm = ({
                       htmlFor={field.name}
                       className="label font-bold mb-2"
                     >
-                      Due Date
+                      Due Date ({tzShort})
                     </label>
                     <input
                       id={field.name}
                       name={field.name}
-                      type="date"
+                      type="datetime-local"
                       className="input"
                       value={field.state.value}
                       onBlur={field.handleBlur}

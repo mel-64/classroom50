@@ -8,7 +8,6 @@ import {
   updateRef,
   type GitTreeEntry,
 } from "@/hooks/github/mutations"
-import { boolean, string } from "zod"
 
 export type CreateClassroomResult = {
   previousCommitSha: string

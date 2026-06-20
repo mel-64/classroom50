@@ -4,7 +4,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"

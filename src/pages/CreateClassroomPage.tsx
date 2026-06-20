@@ -1,11 +1,7 @@
-import { Link, useNavigate, useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
-import {
-  createClassroomFilesWithConflictRetry,
-  type CreateClassroomInput,
-  type CreateClassroomResult,
-} from "@/hooks/github/mutations"
+import { createClassroomFilesWithConflictRetry } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import Drawer, {
@@ -17,6 +13,10 @@ import Breadcrumb from "@/components/breadcrumb"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
+import type {
+  CreateClassroomInput,
+  CreateClassroomResult,
+} from "@/api/mutations/classrooms"
 
 const CreateClassroomPage = () => {
   const client = useGitHubClient()

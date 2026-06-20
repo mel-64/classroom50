@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useForm } from "@tanstack/react-form"
-import { Link, useNavigate, useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { Trash2, UsersRound, Plus } from "lucide-react"
 import Breadcrumb from "@/components/breadcrumb"
 import Drawer, {

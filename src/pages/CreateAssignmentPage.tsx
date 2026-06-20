@@ -9,15 +9,15 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import {
-  createAssignment,
-  type CreateAssignmentInput,
-  type CreateAssignmentResult,
-} from "@/hooks/github/mutations"
+import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { slugify } from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
+import type {
+  CreateAssignmentInput,
+  CreateAssignmentResult,
+} from "@/api/mutations/assignments"
 
 const CreateAssignmentPage = () => {
   const client = useGitHubClient()

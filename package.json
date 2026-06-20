@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "missing": "tsc -p tsconfig.app.json --pretty false 2>&1 | grep -E \"TS(2304|2305|2307|2503|2552)\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",

@@ -102,7 +102,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
           {assignments?.map((assignment) => (
             <tr
               key={assignment.slug}
-              className="hover:cursor-pointer hover:bg-[#fafafa] h-14"
+              className="hover:cursor-pointer hover:bg-[#fafafa]"
             >
               <td
                 onClick={() =>
@@ -110,7 +110,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                     to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
                   })
                 }
-                className="font-bold link link-info no-underline"
+                className="font-bold link link-info no-underline truncate"
               >
                 {assignment.name}
               </td>
@@ -120,16 +120,16 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                     to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
                   })
                 }
-                className="flex align-middle items-center h-14"
+                className="max-xl:text-xs"
               >
                 {assignment.mode === "individual" && (
-                  <div className="flex gap-2">
-                    <UserRound /> Individual
+                  <div className="flex gap-2 h-full">
+                    <UserRound className="max-xl:size-3" /> Individual
                   </div>
                 )}
                 {assignment.mode === "group" && (
-                  <div className="flex gap-2">
-                    <UsersRound /> Group
+                  <div className="flex gap-2 h-full">
+                    <UsersRound className="max-xl:size-3" /> Group
                   </div>
                 )}
               </td>
@@ -140,7 +140,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                   })
                 }
               >
-                <span className="badge badge-soft max-xl:text-xs xl:text-sm">
+                <span className="badge badge-soft max-xl:text-xs xl:text-sm whitespace-nowrap w-full">
                   {assignment.due
                     ? formatDueDate(assignment.due)
                     : "No due date"}

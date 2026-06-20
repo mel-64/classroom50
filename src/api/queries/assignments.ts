@@ -1,4 +1,10 @@
 import type { GitHubClient } from "@/hooks/github/client"
+import {
+  extractAssignments,
+  fetchJson,
+  pagesAssignmentUrl,
+  type AssignmentsJson,
+} from "@/hooks/github/queries"
 import type { Assignment } from "@/types/classroom"
 import { decodeBase64Utf8 } from "@/util/github"
 
@@ -32,6 +38,53 @@ export async function getAssignmentsFile(
   const json = decodeBase64Utf8(file.content)
 
   return JSON.parse(json) as AssignmentsFile
+}
+
+export async function fetchTextWithFriendlyErrors(
+  url: string,
+  label: string,
+): Promise<string> {
+  const response = await fetch(url)
+
+  if (response.status === 404) {
+    throw new Error(
+      `${label} is not published yet. Ask your instructor to confirm the file exists in the config repo and that publish-pages.yaml has been run.`,
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${label}: ${response.status}`)
+  }
+
+  const text = await response.text()
+
+  if (!text.trim()) {
+    throw new Error(
+      "Pages deployment may still be in flight. Retry in a minute.",
+    )
+  }
+
+  return text
+}
+
+export async function fetchAssignmentFromPages(
+  org: string,
+  classroom: string,
+  assignmentSlug: string,
+): Promise<Assignment> {
+  const json = await fetchJson<AssignmentsJson>(
+    pagesAssignmentUrl(org, classroom),
+  )
+
+  const assignments = extractAssignments(json)
+  console.log("assignments", assignments)
+  const assignment = assignments.find((entry) => entry.slug === assignmentSlug)
+
+  if (!assignment) {
+    throw new Error(`Assignment ${assignmentSlug} was not found.`)
+  }
+
+  return assignment
 }
 
 export async function getAssignmentsJson(
