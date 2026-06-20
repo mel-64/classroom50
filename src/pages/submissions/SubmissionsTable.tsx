@@ -12,7 +12,11 @@ import type { Student } from "@/types/classroom"
 // <= 50% = red
 // >= 60% = yellow
 // >= 70% = green
+// A vacuous/ungraded result (no autograder configured) has max === 0;
+// show it neutral rather than letting NaN% fall through to green.
 const scoreToBadgeType = (score: number, max: number) => {
+  if (!max) return "badge-ghost"
+
   const percent = (score / max) * 100
 
   if (percent <= 50) return "badge-error"
