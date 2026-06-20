@@ -27,7 +27,7 @@ const CreateClassroomForm = ({
   defaultValues,
   onSubmit,
 }: CreateClassroomFormProps) => {
-  const { org } = useParams({ strict: false })
+  const { org = "" } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
   const [submitted, setSubmitted] = useState(false)
 
@@ -96,7 +96,10 @@ const CreateClassroomForm = ({
                 placeholder="e.g., AP CS Principles"
                 value={field.state.value}
                 onBlur={field.handleBlur}
-                onChange={(e) => field.handleChange(e.target.value)}
+                onChange={(e) => {
+                  field.handleChange(e.target.value)
+                  form.setFieldValue("slug", slugify(e.target.value))
+                }}
               />
 
               {field.state.meta.errors.length > 0 && (
