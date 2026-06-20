@@ -1,5 +1,7 @@
 import { useMutation } from "@tanstack/react-query"
-import CreateAssignmentForm from "./CreateAssignmentForm"
+import CreateAssignmentForm, {
+  assignmentToFormValues,
+} from "./CreateAssignmentForm"
 import { editAssignment } from "@/api/mutations/assignments"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
@@ -28,7 +30,7 @@ const EditAssignmentForm = ({
     <CreateAssignmentForm
       edit
       loading={editAssignmentMutation.isPending}
-      defaultValues={defaultData}
+      defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {
         editAssignmentMutation.mutateAsync({
           name: values.name,
@@ -39,6 +41,10 @@ const EditAssignmentForm = ({
           due_date: values.due_date,
           max_group_size: values.max_group_size,
           feedback_pr: values.feedback_pr,
+          runs_on: values.runs_on,
+          container_image: values.container_image,
+          container_user: values.container_user,
+          setup_command: values.setup_command,
           classroom,
           tests: values.tests,
           slug: assignment,

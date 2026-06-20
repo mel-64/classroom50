@@ -150,19 +150,19 @@ export async function editAssignment(
     ref: ref.object.sha,
   })
 
-  // find the assignment if it exists already
   const targetAssignment = currentAssignments.assignments.find(
     (a) => a.slug === slug,
   )
-
   if (!targetAssignment) {
     throw new Error(`Existing assignment matching ${slug} was not found.`)
   }
 
-  // replace the body of the old assignment with new data
-  const editedAssignment = { ...targetAssignment, ...input }
+  // Build a fully normalized entry from the form input — same path as
+  // create — so editing never leaves stray non-schema keys (org, classroom,
+  // tests drafts, …) in assignments.json that the CLI would reject.
+  const { entry: editedAssignment, needsTeamGrant } =
+    await buildAssignmentEntry(client, input)
 
-  // inject the new assignment in place of the old
   const nextAssignments = {
     ...currentAssignments,
     assignments: [
@@ -191,6 +191,18 @@ export async function editAssignment(
     parents: [ref.object.sha],
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  // If the (possibly changed) template is an in-org private repo, ensure the
+  // classroom team can still read it — same grant create applies.
+  if (needsTeamGrant) {
+    await grantTeamTemplateRead(
+      client,
+      input.org,
+      input.classroom,
+      input.slug,
+      editedAssignment.template,
+    )
+  }
 
   return {
     previousCommitSha: ref.object.sha,
@@ -227,11 +239,30 @@ async function ensureDeclarativeTestsWritable(
 }
 
 export type CreateAssignmentResult = CreateClassroomResult
-export async function createAssignment(
+
+// Assemble the normalized classroom50/assignments/v1 entry from form input,
+// resolving + validating the template the way the CLI does. Shared by create
+// and edit so both write the exact same schema-valid shape (no stray keys),
+// and both apply the in-org-private-template team grant. Returns the entry
+// plus whether the resolved template needs a classroom-team read grant.
+async function buildAssignmentEntry(
   client: GitHubClient,
   input: CreateAssignmentInput,
-): Promise<CreateAssignmentResult> {
-  const tests = input.tests.map(draftToTest)
+): Promise<{ entry: Assignment; needsTeamGrant: boolean }> {
+  const userTests = input.tests.map(draftToTest)
+
+  // A setup command (e.g. compile-once) is written as a leading 0-point
+  // `run`-type test named "setup" — the CLI-blessed idiom for a
+  // pre-grading step (there is no runtime.setup field; the runner runs
+  // tests in order and a non-zero exit fails the step). Kept out of the
+  // graded point total by using points: 0.
+  const setupCommand = input.setup_command?.trim()
+  const tests = setupCommand
+    ? [
+        { name: "setup", type: "run" as const, run: setupCommand, points: 0 },
+        ...userTests,
+      ]
+    : userTests
 
   if (tests.length > 0) {
     await ensureDeclarativeTestsWritable(
@@ -252,6 +283,102 @@ export async function createAssignment(
     parsedTemplate,
   )
 
+  // The entry must match classroom50/assignments/v1 exactly — the CLI
+  // parses the file with unknown fields rejected, so stray keys would
+  // break `gh teacher` for the whole classroom. Optional fields are
+  // omitted (not written empty), the same normalized form the CLI writes.
+  const entry: Assignment = {
+    slug: input.slug,
+    name: input.name,
+    template,
+    mode: input.mode,
+    autograder: "default",
+    // Mirrors the CLI's `--feedback-pr` default of true.
+    feedback_pr: input.feedback_pr ?? true,
+  }
+  if (input.description.trim()) {
+    entry.description = input.description.trim()
+  }
+  if (input.due_date.trim()) {
+    const { due, due_meta } = buildDueFields(input.due_date.trim())
+    entry.due = due
+    if (due_meta) {
+      entry.due_meta = due_meta
+    }
+  }
+  if (input.mode === "group" && input.max_group_size > 0) {
+    entry.max_group_size = input.max_group_size
+  }
+
+  // Runtime overrides (Advanced Settings). Omit the whole block when
+  // nothing was set so the runner uses its defaults.
+  const runsOn = input.runs_on?.trim()
+  const containerImage = input.container_image?.trim()
+  const containerUser = input.container_user?.trim()
+  const runtime: NonNullable<Assignment["runtime"]> = {}
+  if (runsOn) {
+    runtime["runs-on"] = runsOn
+  }
+  if (containerImage) {
+    runtime.container = { image: containerImage }
+    if (containerUser) {
+      runtime.container.user = containerUser
+    }
+  }
+  if (Object.keys(runtime).length > 0) {
+    entry.runtime = runtime
+  }
+
+  if (tests.length > 0) {
+    entry.tests = tests
+  }
+
+  return { entry, needsTeamGrant }
+}
+
+// Grant the classroom team read on an in-org private template so rostered
+// students can generate from it (mirrors the CLI's assignment add). The
+// team slug is read from classroom.json (authoritative); a classroom with
+// no team gets an actionable error rather than a 404 against a guess.
+async function grantTeamTemplateRead(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+  slug: string,
+  template: Assignment["template"],
+) {
+  let teamSlug: string | undefined
+  try {
+    const classroomJson = await getClassroomJson(client, { org, classroom })
+    teamSlug = classroomJson.team?.slug
+  } catch {
+    teamSlug = undefined
+  }
+
+  if (!teamSlug) {
+    throw new Error(
+      `Assignment "${slug}" was saved, but classroom "${classroom}" has no team to grant read on the private template ${template.owner}/${template.repo}. Recreate the classroom so the team exists, then students can accept.`,
+    )
+  }
+
+  await addRepositoryToTeam(client, {
+    org,
+    teamSlug,
+    owner: template.owner,
+    repo: template.repo,
+    permission: "pull",
+  })
+}
+
+export async function createAssignment(
+  client: GitHubClient,
+  input: CreateAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const { entry: assignmentBody, needsTeamGrant } = await buildAssignmentEntry(
+    client,
+    input,
+  )
+
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
@@ -261,39 +388,6 @@ export async function createAssignment(
     path: assignmentsFilePath,
     ref: ref.object.sha,
   })
-
-  // The entry must match classroom50/assignments/v1 exactly — the CLI
-  // parses the file with unknown fields rejected, so stray keys would
-  // break `gh teacher` for the whole classroom. Optional fields are
-  // omitted (not written empty), the same normalized form the CLI
-  // writes. Schema: schemas/assignments-v1.schema.json in the
-  // foundation50/classroom50 repo.
-  const assignmentBody: Assignment = {
-    slug: input.slug,
-    name: input.name,
-    template,
-    mode: input.mode,
-    autograder: "default",
-    // Mirrors the CLI's `--feedback-pr` default of true. Opt the assignment
-    // into the long-lived Feedback PR per student repo unless explicitly off.
-    feedback_pr: input.feedback_pr ?? true,
-  }
-  if (input.description.trim()) {
-    assignmentBody.description = input.description.trim()
-  }
-  if (input.due_date.trim()) {
-    const { due, due_meta } = buildDueFields(input.due_date.trim())
-    assignmentBody.due = due
-    if (due_meta) {
-      assignmentBody.due_meta = due_meta
-    }
-  }
-  if (input.mode === "group" && input.max_group_size > 0) {
-    assignmentBody.max_group_size = input.max_group_size
-  }
-  if (tests.length > 0) {
-    assignmentBody.tests = tests
-  }
 
   if (
     currentAssignments.assignments.some(
@@ -328,35 +422,14 @@ export async function createAssignment(
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
-  // In-org private template: grant the classroom team read so rostered
-  // students can generate from it (mirrors the CLI's assignment add). The
-  // team slug is read from classroom.json (authoritative); a classroom with
-  // no team gets an actionable error rather than a 404 against a guess.
   if (needsTeamGrant) {
-    let teamSlug: string | undefined
-    try {
-      const classroomJson = await getClassroomJson(client, {
-        org: input.org,
-        classroom: input.classroom,
-      })
-      teamSlug = classroomJson.team?.slug
-    } catch {
-      teamSlug = undefined
-    }
-
-    if (!teamSlug) {
-      throw new Error(
-        `Assignment "${input.slug}" was created, but classroom "${input.classroom}" has no team to grant read on the private template ${template.owner}/${template.repo}. Recreate the classroom so the team exists, then students can accept.`,
-      )
-    }
-
-    await addRepositoryToTeam(client, {
-      org: input.org,
-      teamSlug,
-      owner: template.owner,
-      repo: template.repo,
-      permission: "pull",
-    })
+    await grantTeamTemplateRead(
+      client,
+      input.org,
+      input.classroom,
+      input.slug,
+      assignmentBody.template,
+    )
   }
 
   return {
@@ -587,6 +660,10 @@ export type CreateAssignmentInput = {
   org: string
   max_group_size: number
   feedback_pr?: boolean
+  runs_on?: string
+  container_image?: string
+  container_user?: string
+  setup_command?: string
   tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(
