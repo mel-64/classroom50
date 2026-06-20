@@ -25,7 +25,7 @@ Notes on each piece:
 ## Setting it up
 
 1. Create a normal repo in your classroom org with the structure above. Register it with `gh teacher assignment add ... --template <owner>/<repo>` — the **assignment slug** you choose there (e.g. `hello`, `dna`) is what students pass as `<assignment>` to `gh student accept`, and it does not have to match the template repo's name.
-2. **Make the repo public** so students can read it under the "No permission" org base setting (private templates would 404 on `gh student accept`). The GitHub Enterprise Cloud "internal" visibility works too, on plans that have it.
+2. **Set the template's visibility.** A **public** template always works. A **private** template works if it lives **in your teaching org** — `gh teacher assignment add` grants the classroom's team read access to it, so students can create from it under the "No permission" org baseline. A private template **outside** your org is rejected by `gh teacher assignment add` (students can't be granted access, so `gh student accept` would 404). The GitHub Enterprise Cloud "internal" visibility also works, on plans that have it.
 3. **Mark it as a template** in `Settings → General → Template repository`.
 
 That's it. Students can now run:

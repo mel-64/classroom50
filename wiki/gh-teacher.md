@@ -139,7 +139,7 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 
 | Path | Schema sentinel | Contents |
 | --- | --- | --- |
-| `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
+| `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org`, and a `team` block (`{id, slug}`) recording the classroom's GitHub team |
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Scaffolds with an empty `submissions: {}` object -- rows are written by the `collect-scores.yaml` workflow, keyed by assignment slug. |
@@ -151,6 +151,8 @@ Three things this scaffold does **not** include:
 - **The autograder workflow shim** is embedded in `gh-student` and dropped into each student repo at accept time. Teachers don't write or maintain it.
 
 Per-assignment autograders (an `autograder.py` entrypoint + any sibling fixtures) go under `<short-name>/autograders/<slug>/` once the classroom is in place; the runner picks them over the classroom default at `<short-name>/autograder.py`. Per-assignment runtime customization (Python version, language toolchains, apt packages, container image) lives in the `runtime:` block on each `assignments.json` entry; see [Autograders](Autograders) for the schema.
+
+**Classroom team.** Besides the config files, `classroom add` creates a GitHub team `classroom50-<short-name>` (privacy `secret`, via `POST /orgs/{org}/teams`), reconciling-and-adopting an existing team of that name rather than failing. The team's members are the classroom's rostered students (added by `gh teacher roster add`); it exists to grant those students read access to **in-org private** assignment templates (`gh teacher assignment add` grants `pull` on the template to this team). `gh teacher classroom remove` deletes the team; `gh teacher roster remove` drops a student from it. `members_can_create_teams: false` (set by `init`'s lockdown) doesn't block this — the teacher authenticates as an org owner.
 
 **Errors:**
 
@@ -391,6 +393,7 @@ See the [Autograders](Autograders) wiki page for the entrypoint contract and cop
 - `<org>/classroom50` missing → `run gh teacher init <org> first`, non-zero.
 - `<classroom>/assignments.json` missing → `run gh teacher classroom add <org> <classroom> first, or restore the file if it was deleted`.
 - Template repo 404 (private, in another org, or doesn't exist) → `template <owner>/<repo> is not visible to your account — either make it public, or copy it into your org and reference the copy`.
+- Template repo exists but is **private and outside `<org>`** → rejected: `template <owner>/<repo> is private and outside the org <org> — students can't be granted access to it … Copy it into <org> and reference the copy, or make the template public`. (A private template **inside** `<org>` is accepted, and the classroom team is granted `pull` on it so students can generate from it.)
 - Template repo exists but `is_template: false` → message naming the Settings toggle to flip.
 - `--autograder <name>` (non-default) references a file that doesn't exist in the config repo at write time → `autograder "<name>" does not exist at <org>/classroom50/<classroom>/autograders/<name>.yaml — create it (or pass --autograder default) before registering this assignment`. The default name resolves to the embedded gh-student shim and skips the file-existence probe.
 - `--runtime <path>` JSON fails the schema or allow-list (e.g. self-hosted `runs-on`, malformed apt name, raw token in container credentials) → an error naming the offending field, with the path to the JSON file.

@@ -59,7 +59,7 @@ You've already accepted this assignment; the repo exists at `<org>/<classroom>-<
 
 Three things to check, in order:
 
-1. **The template repo must be public** under most plans, because GitHub's "No permission" org base setting blocks org members from reading private repos they aren't explicit collaborators on. (GitHub Enterprise Cloud has an "internal" visibility that all enterprise members can read; on that plan, internal templates work.)
+1. **The template repo must be readable by the student.** A **public** template always works. A **private** template works if it lives **inside your org**: `gh teacher assignment add` grants the classroom's GitHub team (`classroom50-<classroom>`) read on it, and rostered students inherit that read. A private template **outside** your org can't be granted to the team, so `gh teacher assignment add` rejects it — if you registered one before this check existed, re-add the assignment with an in-org copy or a public template. (GitHub Enterprise Cloud's "internal" visibility also works.) If a student still 404s, confirm they're on the roster (so they're in the classroom team) — `gh teacher roster add` adds them.
 2. **The repo must be flagged as a template** in `Settings → General → Template repository`.
 3. **The `<assignment>` argument must match the slug your instructor registered** with `gh teacher assignment add` in `assignments.json` — case is normalized, but spelling has to be exact. It does not have to match the template repo's name.
 
