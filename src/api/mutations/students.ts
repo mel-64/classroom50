@@ -4,12 +4,35 @@ import {
   addUserToTeam,
   createGitCommit,
   createGitTree,
+  removeUserFromTeam,
   updateRef,
 } from "@/hooks/github/mutations"
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import { getRawFile, getUser } from "@/hooks/github/queries"
-import { getBranchRef, getCommit } from "../github/queries"
+import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import type { Student } from "@/types/classroom"
+
+// The classroom team slug is authoritative in classroom.json: on a name
+// collision GitHub may assign a slug that differs from `classroom50-<slug>`,
+// so re-deriving it can 404. Read the persisted slug (mirroring the CLI's
+// resolveClassroomTeam) and fall back to the derived form only when no team
+// block exists (pre-feature classrooms) or the read fails — the derived form
+// is correct for every canonically-slugged classroom the GUI creates.
+async function resolveClassroomTeamSlug(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<string> {
+  try {
+    const classroomJson = await getClassroomJson(client, { org, classroom })
+    if (classroomJson.team?.slug) {
+      return classroomJson.team.slug
+    }
+  } catch {
+    // fall through to the derived slug
+  }
+  return `classroom50-${classroom}`
+}
 
 export type AddStudentToClassroomResult = CreateClassroomResult & {
   student: StudentCsvRow
@@ -196,9 +219,11 @@ export async function enrollStudentInClassroom(
   const { org, classroom } = input
   const result = await addStudentToClassroomWithConflictRetry(client, input)
 
+  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+
   await addUserToTeam(client, {
     org,
-    teamSlug: `classroom50-${classroom}`,
+    teamSlug,
     username: result.student.username,
     role: "member",
   })
@@ -461,7 +486,11 @@ export async function bulkEnrollStudentsInClassroom(
     onProgress,
   })
 
-  const teamSlug = `classroom50-${bulkInput.classroom}`
+  const teamSlug = await resolveClassroomTeamSlug(
+    client,
+    bulkInput.org,
+    bulkInput.classroom,
+  )
 
   const teamResults: BulkImportResult["teamResults"] = []
 
@@ -588,6 +617,17 @@ export async function unenrollStudent(
   })
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
+
+  // Symmetric with enroll: drop the student from the classroom team so
+  // they lose read on the classroom's private templates. Idempotent
+  // (404 = not a member / team gone). Org membership is untouched. Uses
+  // the authoritative persisted slug. Mirrors the CLI's roster remove.
+  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+  await removeUserFromTeam(client, {
+    org,
+    teamSlug,
+    username: normalizedUsername,
+  })
 
   return {
     previousCommitSha: ref.object.sha,

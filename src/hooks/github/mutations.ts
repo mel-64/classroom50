@@ -514,6 +514,34 @@ export function addUserToTeam(
   )
 }
 
+// Remove a user from a team, mirroring the CLI's removeTeamMembership
+// (cli/gh-teacher/team.go). A 404 (not a member, or the team is gone) is
+// treated as success so roster removal is idempotent. Org membership is
+// untouched — only the team grant (and the template read it confers) is
+// dropped.
+export async function removeUserFromTeam(
+  client: GitHubClient,
+  input: {
+    org: string
+    teamSlug: string
+    username: string
+  },
+): Promise<void> {
+  const { org, teamSlug, username } = input
+
+  try {
+    await client.request(
+      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+      { method: "DELETE" },
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return
+    }
+    throw err
+  }
+}
+
 export function inviteUserToOrgTeam(
   client: GitHubClient,
   input: {
