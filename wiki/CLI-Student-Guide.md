@@ -7,7 +7,7 @@ End-to-end walkthrough for students. Install the CLI first — see [Installation
 Your instructor must have already:
 
 1. Set up a GitHub organization for the class.
-2. Created an assignment template repo in that org.
+2. Registered the assignment (optionally with a template repo).
 3. Invited you to the org (you'll get an email invitation).
 
 You don't need to accept the org invitation in the GitHub UI — `gh student accept` does it for you on first use.
@@ -39,11 +39,11 @@ gh student accept <org> <classroom> <assignment>
 What this command does:
 
 1. Auto-accepts any pending org invitation for your account.
-2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`) to find the template repo. The template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it.
+2. Looks up the assignment in the classroom's published manifest (`https://<org>.github.io/classroom50/<classroom>/assignments.json`). If the assignment has a template repo, that's used as the starter; the template may live in another org — your instructor's `gh teacher assignment add --template <owner>/<repo>` chose it. Some assignments are **template-less** (your instructor omitted `--template`) — those start from an empty repo.
 3. Resolves the autograder workflow shim. For the default autograder (the common case), the universal shim embedded in `gh-student` is used directly. For a non-default `--autograder <name>` your instructor registered, the shim is fetched from Pages (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yaml`) — if that fetch fails, no half-baked repo is left behind.
-4. Creates a **private** copy of the template at `<org>/<classroom>-<assignment>-<username>` (lowercased), with issues, projects, and wiki disabled.
+4. Creates a **private** repo at `<org>/<classroom>-<assignment>-<username>` (lowercased), with issues, projects, and wiki disabled. With a template it's a copy of that template; for a template-less assignment it's an empty repo (just the autograder shim — write your solution from scratch).
 5. Keeps you as an `admin` collaborator on the new repo (so a group founder can add teammates with `gh student invite`).
-6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the resolved shim) in a single commit. The metadata records the classroom, assignment, and template-repo identity; the runner derives everything else at workflow time.
+6. Writes `.classroom50.yaml` and `.github/workflows/autograde.yaml` (the resolved shim) in a single commit. The metadata records the classroom and assignment (plus the template-repo identity when there is one); the runner derives everything else at workflow time.
 7. Prints the `git clone` command for your new repo.
 
 If you've already accepted this assignment, the command short-circuits with `Assignment already accepted: <org>/<repo>` and leaves your existing repo (and any work in it) alone — re-running is safe.
@@ -96,7 +96,7 @@ gh student submit
 
 `gh student submit` snapshots your current branch and pushes it as a new commit on top of `main`. The autograde workflow runs automatically on the push: it tags the commit with `submit/<UTC-timestamp>-<short-sha>`, runs the autograder, and publishes a GitHub Release with your score a minute or two later.
 
-You can also `git push` directly — the result is identical. `gh student submit` exists mainly to refresh the instructor's `.gitignore` and `.github/` from the assignment template before pushing, so any teacher-side updates flow through.
+You can also `git push` directly — the result is identical. `gh student submit` exists mainly to refresh the instructor's `.gitignore` and `.github/` from the assignment template before pushing, so any teacher-side updates flow through. (For a template-less assignment there's no template to refresh from, so submit just commits and pushes.)
 
 When submit finishes, two URLs are printed:
 

@@ -47,7 +47,7 @@ The roster view for a single classroom. Add students one at a time by GitHub use
 
 ## Assignments
 
-The assignment list for a single classroom. Each row shows the assignment slug, mode (individual or group), due date, and a submission-progress bar. **+ Assignment** registers a new assignment against a template repo -- the same operation as `gh teacher assignment add`. **View >** opens the submissions detail page below.
+The assignment list for a single classroom. Each row shows the assignment slug, mode (individual or group), due date, and a submission-progress bar. **+ Assignment** registers a new assignment (optionally against a template repo) -- the same operation as `gh teacher assignment add`. **View >** opens the submissions detail page below.
 
 ![Assignments view](images/assignments_view.png)
 

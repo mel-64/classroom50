@@ -57,7 +57,7 @@ You've already accepted this assignment; the repo exists at `<org>/<classroom>-<
 
 ## "Template not found" / 404 on `gh student accept`
 
-Three things to check, in order:
+(This only applies to assignments that have a template — template-less assignments create an empty repo and never hit a template lookup.) Three things to check, in order:
 
 1. **The template repo must be readable by the student.** A **public** template always works. A **private** template works if it lives **inside your org**: `gh teacher assignment add` grants the classroom's GitHub team (`classroom50-<classroom>`) read on it, and rostered students inherit that read. A private template **outside** your org can't be granted to the team, so `gh teacher assignment add` rejects it — if you registered one before this check existed, re-add the assignment with an in-org copy or a public template. (GitHub Enterprise Cloud's "internal" visibility also works.) If a student still 404s, confirm they're on the roster (so they're in the classroom team) — `gh teacher roster add` adds them.
 2. **The repo must be flagged as a template** in `Settings → General → Template repository`.

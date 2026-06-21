@@ -31,7 +31,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
-| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (`individual` default, or `group`), `--max-group-size <N>` (required with `--mode group`, `>= 2`), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`), `--feedback-pr` (open one long-lived instructor-review PR per student repo — **on by default**; `--feedback-pr=false` to disable). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flag: `--name`. Optional: `--template <owner>/<repo>[@branch]` (starter-code repo; omit for a template-less assignment, where students get an empty repo with just the autograder shim), `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (`individual` default, or `group`), `--max-group-size <N>` (required with `--mode group`, `>= 2`), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`), `--feedback-pr` (open one long-lived instructor-review PR per student repo — **on by default**; `--feedback-pr=false` to disable). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
 | `gh teacher assignment test add <org> <classroom> <slug>` | Add or update one declarative test on an existing assignment's `tests` block. Required flags: `--name`, `--type {io,run,python}`, `--run`. Optional: `--setup`, `--input`/`--input-file`, `--expected`/`--expected-file`, `--comparison {included,exact,regex}`, `--timeout`, `--exit-code`, `--points`. Mutually exclusive with a per-assignment `autograder.py`. |
 | `gh teacher assignment test list <org> <classroom> <slug>` | Print the declarative test names on an assignment, one per line. `--json` for the full spec array, `-q` to suppress the stderr summary. Read-only. |
 | `gh teacher assignment test remove <org> <classroom> <slug> <test-name>` | Drop one declarative test by name. Idempotent. |
@@ -347,29 +347,31 @@ Duplicate usernames within the input (case-insensitive) collapse with last-wins 
 
 ## `gh teacher assignment`
 
-Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, a `mode` (`individual` or `group`), and an optional `autograder` name (defaults to `default`).
+Manage entries in `<org>/classroom50/<classroom>/assignments.json` — the authoritative manifest the autograde workflow and `gh student accept` both read. Each entry pairs a `slug` (used in student repo names like `<classroom>-<slug>-<username>`) with an optional template repo, an optional due date, a `mode` (`individual` or `group`), and an optional `autograder` name (defaults to `default`).
 
 Writes flow through the same optimistic-update-with-rebase loop the roster commands use (up to 5 attempts with exponential backoff), so concurrent edits from multiple teachers don't silently lose each other's work.
 
 ### `gh teacher assignment add`
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual|group] [--max-group-size <N>] [--runtime <path-to-json>] [--tests <path-to-json>] [--autograder <name>] [--feedback-pr]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" [--template <owner>/<repo>[@branch]] [--description <text>] [--due <ISO-8601>] [--mode individual|group] [--max-group-size <N>] [--runtime <path-to-json>] [--tests <path-to-json>] [--autograder <name>] [--feedback-pr]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
 gh teacher assignment add cs50-fall-2026 cs-principles project --name "Project" --template cs50/project-template --mode group --max-group-size 3
 gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main --runtime ./runtime-c.json
+gh teacher assignment add cs50-fall-2026 cs-principles reflection --name "Reflection"   # template-less: empty starter repo
 ```
 
-Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends. Replacement is wholesale — re-running without `--tests` drops any tests previously added via `gh teacher assignment test add` (the CLI prints a warning when that happens).
+Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends. Replacement is wholesale — re-running without `--tests` drops any tests previously added via `gh teacher assignment test add`, and re-running without `--template` drops a previously-set template (making the assignment template-less). The CLI prints a warning in both cases.
 
 **Slug rules** (same as classroom short-names): `^[a-z0-9][a-z0-9-]{1,38}$`, 2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit. The slug becomes part of the student repo name `<classroom>-<slug>-<username>`, so the constraint mirrors GitHub's repo-name rules.
 
 **Required flags:**
 
 - `--name <display name>` — written into `assignments.json`'s `name` field. Used in release titles and the published Pages site (forthcoming).
-- `--template <owner>/<repo>[@branch]` — the starter-code repo. The CLI calls `GET /repos/{owner}/{repo}` to verify it exists, is visible to your token, and has `is_template: true`. When you omit `@branch`, the template's `default_branch` from the response is used; pass `@main` (or `@master`, etc.) to pin explicitly.
 
 **Optional flags:**
+
+- `--template <owner>/<repo>[@branch]` — the starter-code repo. **Optional**: omit it for a template-less assignment, where `gh student accept` creates an *empty* private repo containing only the autograder workflow shim (no starter files). When supplied, the CLI calls `GET /repos/{owner}/{repo}` to verify it exists, is visible to your token, and has `is_template: true`. When you omit `@branch`, the template's `default_branch` from the response is used; pass `@main` (or `@master`, etc.) to pin explicitly.
 
 - `--description <text>` — short description written into the entry (omitted from the file when empty).
 - `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
