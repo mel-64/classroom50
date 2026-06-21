@@ -81,12 +81,11 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   }
 }
 
-// Resolve a template ref against GitHub, mirroring the CLI's
-// validateTemplateRepo + resolveTemplateBranch: must be a template repo, an
-// omitted @branch falls back to its default, and an out-of-org private
+// Resolve a template ref against GitHub, mirroring the CLI: must be a template
+// repo, an omitted @branch falls back to its default, and an out-of-org private
 // template is rejected (students could never be granted access). Returns the
-// resolved block plus whether it's an in-org private template needing a
-// classroom-team read grant.
+// resolved block plus whether it's an in-org private template needing a team
+// read grant.
 async function resolveTemplate(
   client: GitHubClient,
   org: string,
@@ -281,15 +280,13 @@ export type CreateAssignmentResult = CreateClassroomResult & {
 }
 
 // Assemble the normalized classroom50/assignments/v1 entry from form input,
-// resolving + validating the template the way the CLI does. Shared by create
-// and edit so both write the same schema-valid shape and apply the
-// in-org-private-template team grant.
+// resolving the template the way the CLI does. Shared by create and edit so
+// both write the same schema-valid shape and apply the team grant.
 //
-// `existingTemplate` (edit only): when the ref still points at the same
-// owner/repo (branch unchanged or omitted), the stored block is reused
-// WITHOUT a live lookup — so an unrelated-field edit doesn't hard-fail when
-// the template was since deleted/un-templated/made private-out-of-org. A
-// changed ref is always re-resolved.
+// `existingTemplate` (edit only): an unchanged ref (same owner/repo, branch
+// unchanged or omitted) reuses the stored block WITHOUT a live lookup, so an
+// unrelated-field edit still saves when the template was deleted/un-templated/
+// made private-out-of-org. A changed ref is always re-resolved.
 async function buildAssignmentEntry(
   client: GitHubClient,
   input: CreateAssignmentInput,
@@ -578,12 +575,10 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // A template was specified but generation failed. Do NOT fall back to
-      // an empty repo — that produced broken repos (no template content, no
-      // metadata/shim) that look "accepted" but can't be regenerated. For a
-      // private in-org template the usual cause is the classroom team lacking
-      // read access. Surface an actionable error instead. 403 = denied; 404 =
-      // template not visible (a private template the team can't read).
+      // Template generation failed. Do NOT fall back to an empty repo — that
+      // produced broken repos (no template content/shim) that look "accepted"
+      // but can't be regenerated. Usual cause: the team lacks read on a private
+      // in-org template. 403 = denied; 404 = template not visible.
       if (err.status === 403 || err.status === 404) {
         throw new Error(
           `Couldn't generate your repository from the template ` +

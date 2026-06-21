@@ -33,13 +33,10 @@ const formatOffset = (date: Date): string => {
 export type DueFields = { due: string; due_meta?: DueMeta }
 
 // Builds the `due`/`due_meta` pair from the form's due input, mirroring
-// gh-teacher's --due normalization: the picked local wall time becomes a UTC
-// instant (RFC3339 `Z`), with the pre-normalization local value/offset/zone
-// recorded in due_meta.
-//
-// <input type="datetime-local"> yields `YYYY-MM-DDTHH:MM`. A bare
-// `YYYY-MM-DD` is also accepted and pinned to 23:59 local. Anything else
-// (already zoned, or unparseable) is stored verbatim without provenance.
+// gh-teacher's --due: the local wall time becomes a UTC instant (RFC3339 `Z`),
+// with the pre-normalization local value/offset/zone in due_meta. Accepts
+// `YYYY-MM-DDTHH:MM` (datetime-local) and bare `YYYY-MM-DD` (pinned to 23:59
+// local); anything else (already zoned/unparseable) is stored verbatim.
 export const buildDueFields = (dueInput: string): DueFields => {
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(dueInput)
   const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(dueInput)

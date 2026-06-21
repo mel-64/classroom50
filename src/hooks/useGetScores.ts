@@ -4,13 +4,10 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { jsonFileQuery } from "./github/queries"
 
 // Canonical <classroom>/scores.json shape (classroom50/scores/v1), written by
-// the CLI's collect_scores.py. The GUI is a pure consumer — the only thing
-// that must agree is this JSON shape.
-//
-// Keyed by assignment slug under `assignments`; each value is a bucket
-// `{ type, entries[] }`. An entry is one student repo's gradebook record
-// (keyed by `owner`) with its submission history (newest first); each
-// submission is a result/v1 payload minus the bucket-key `assignment`.
+// the CLI's collect_scores.py. The GUI is a pure consumer — only this JSON
+// shape must agree. Keyed by slug → bucket `{ type, entries[] }`; an entry is
+// one repo's gradebook record (keyed by `owner`) with its submission history
+// (newest first), each a result/v1 payload minus the bucket-key `assignment`.
 type SubmissionRecord = {
   schema: string
   classroom: string

@@ -23,10 +23,9 @@ export async function createClassroomFiles(
   client: GitHubClient,
   input: CreateClassroomInput,
 ): Promise<CreateClassroomResult> {
-  // Create (or adopt) the per-classroom team BEFORE scaffolding so its
-  // { id, slug } can be recorded in classroom.json (mirrors the CLI's
-  // ordering). The team later grants rostered students read on private org
-  // templates.
+  // Create (or adopt) the team BEFORE scaffolding so its { id, slug } lands in
+  // classroom.json (mirrors the CLI's ordering); it later grants students read
+  // on private org templates.
   const { created: teamCreated, ...team } = await ensureClassroomTeam(
     client,
     input.org,

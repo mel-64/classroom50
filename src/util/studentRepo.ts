@@ -1,9 +1,8 @@
-// The student/group repo name follows the cross-binary formula
-// `<classroom>-<assignment>-<owner>` (lowercased), the same one the CLI and
-// `gh student accept` use. `owner` is the repo-name component (student for
-// individual, group owner for group), so the name is stable regardless of who
-// pushed last. Shared with the out-of-repo Go CLI — keep as the single source
-// of truth so call sites can't drift.
+// Student/group repo name: the cross-binary formula `<classroom>-<assignment>-
+// <owner>` (lowercased), same as the CLI and `gh student accept`. `owner` is
+// the repo-name component (student, or group owner), so the name is stable
+// regardless of who pushed last. Shared with the Go CLI — single source of
+// truth so call sites can't drift.
 export const studentRepoName = (
   classroom: string,
   assignment: string,

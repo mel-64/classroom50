@@ -365,19 +365,17 @@ export type ClassroomTeamRef = {
   slug: string
 }
 
-// A short-name with consecutive/trailing hyphens would slugify to something
-// other than `classroom50-<short>` and break team ops that re-derive the
-// slug. The GUI's slugify already produces canonical slugs; guard defensively
-// to match the CLI's canonicalTeamSlugShortName.
+// A short-name with consecutive/trailing hyphens slugifies to something other
+// than `classroom50-<short>` and breaks team ops that re-derive the slug. The
+// GUI's slugify produces canonical slugs; guard defensively to match the CLI.
 function isCanonicalTeamShortName(shortName: string): boolean {
   return !shortName.endsWith("-") && !shortName.includes("--")
 }
 
-// Create (or adopt) the per-classroom team (privacy `secret`) and return its
-// { id, slug } for classroom.json — this is what later grants rostered
-// students read on private org templates so `gh student accept` can generate
-// their repo. Mirrors the CLI's ensureClassroomTeam: idempotent, adopting an
-// existing same-named team on 422 and reconciling its privacy to `secret`.
+// Create (or adopt) the per-classroom team (`secret`) and return its { id, slug }
+// for classroom.json — later grants rostered students read on private org
+// templates. Mirrors the CLI: idempotent, adopting a same-named team on 422 and
+// reconciling its privacy to `secret`.
 export async function ensureClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -1529,17 +1527,13 @@ type OrgWorkflowPermissions = {
   can_approve_pull_request_reviews: boolean
 }
 
-// The opt-in Feedback PR (issue #86) is opened by each student repo's
-// autograde workflow via GITHUB_TOKEN. Even with `pull-requests: write` on the
-// workflow, GitHub rejects the PR unless the org-level "Allow GitHub Actions to
-// create and approve pull requests" toggle is on — and it defaults off. Student
-// repos inherit it at creation and a `maintain` collaborator can't set it
-// per-repo, so the org is the only place to enable it. Mirrors the CLI's
-// ensureOrgCanCreatePRs; without it a GUI-initialized org hits the
-// `pull-requests: none` failure from discussion #33.
-//
-// Only the PR toggle is ours to change; default_workflow_permissions is
-// preserved (skeleton workflows declare their own scopes).
+// The opt-in Feedback PR (issue #86) is opened by each student repo's autograde
+// workflow, but GitHub rejects it unless the org-level "Allow GitHub Actions to
+// create and approve pull requests" toggle is on — and it defaults off. It can
+// only be set at the org level (student repos inherit it at creation), so a
+// GUI-initialized org hits the `pull-requests: none` failure (discussion #33)
+// without this. Mirrors the CLI's ensureOrgCanCreatePRs. Only this toggle is
+// changed; default_workflow_permissions is preserved.
 export async function ensureOrgCanCreatePullRequests(
   client: GitHubClient,
   org: string,

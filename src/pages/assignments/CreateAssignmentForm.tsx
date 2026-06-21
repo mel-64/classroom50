@@ -94,11 +94,9 @@ export const assignmentToFormValues = (
   assignment: Assignment,
 ): Partial<CreateAssignmentFormValues> => {
   const allTests = (assignment.tests ?? []).map(testToDraft)
-  // The setup command is the LEADING run-test named "setup" with 0 points
-  // (see makeSetupTest). Only lift index 0 when it matches that full
-  // signature — never a later or graded test — so a round-trip can't swallow
-  // a user-authored test. (The name is reserved at write time; this also
-  // guards pre-reservation assignments.)
+  // Lift the setup command only from a leading setup test (isSetupTest), never
+  // a later or graded one, so a round-trip can't swallow a user-authored test.
+  // (Reserved at write time; this also guards pre-reservation assignments.)
   const head = allTests[0]
   const setupIsLeading = head !== undefined && isSetupTest(head)
   const setupCommand = setupIsLeading ? head.run : ""
