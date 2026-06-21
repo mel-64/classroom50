@@ -41,7 +41,13 @@ export const makeSetupTest = (command: string): AssignmentTest => ({
 
 // Identifies the synthesized setup test by full signature (reserved name,
 // `run` type, 0 points). Position is checked by the caller (always leading).
-export const isSetupTest = (test: AssignmentTest): boolean =>
+// Accepts the common fields so both the wire shape and the form draft can use
+// it — keeping the write and read-back from drifting.
+export const isSetupTest = (test: {
+  name: string
+  type: AssignmentTestType
+  points: number
+}): boolean =>
   test.name === SETUP_TEST_NAME && test.type === "run" && test.points === 0
 
 export const emptyTestDraft = (): AssignmentTestDraft => ({

@@ -2,7 +2,7 @@ import { useForm } from "@tanstack/react-form"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
-import { testToDraft, validateTestDrafts, SETUP_TEST_NAME } from "@/util/assignmentTests"
+import { testToDraft, validateTestDrafts, isSetupTest } from "@/util/assignmentTests"
 import type { Assignment } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
@@ -100,8 +100,7 @@ export const assignmentToFormValues = (
   // a user-authored test. (The name is reserved at write time; this also
   // guards pre-reservation assignments.)
   const head = allTests[0]
-  const setupIsLeading =
-    head?.name === SETUP_TEST_NAME && head.type === "run" && head.points === 0
+  const setupIsLeading = head !== undefined && isSetupTest(head)
   const setupCommand = setupIsLeading ? head.run : ""
   const tests = setupIsLeading ? allTests.slice(1) : allTests
 

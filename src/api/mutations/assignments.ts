@@ -13,6 +13,7 @@ import {
   createGitCommit,
   createGitTree,
   createTreeForAssignment,
+  getErrorMessage,
   updateRef,
   updateRefForRepo,
 } from "@/hooks/github/mutations"
@@ -423,7 +424,7 @@ async function tryGrantTeamTemplateRead(
     // Log the raw error so a dev-time bug isn't fully hidden behind the
     // user-facing warning string.
     console.error("grantTeamTemplateRead failed (assignment saved):", err)
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = getErrorMessage(err)
     return (
       `Assignment "${slug}" was saved, but granting the classroom team read on ` +
       `the private template ${template.owner}/${template.repo} failed (${detail}). ` +

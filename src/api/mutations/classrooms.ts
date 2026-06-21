@@ -7,6 +7,7 @@ import {
   createTree,
   deleteClassroomTeam,
   ensureClassroomTeam,
+  getErrorMessage,
   updateRef,
   type GitTreeEntry,
 } from "@/hooks/github/mutations"
@@ -206,9 +207,9 @@ export async function deleteClassroom(
     try {
       await deleteClassroomTeam(client, org, team)
     } catch (err) {
-      teamDeleteWarning = `Removed the classroom config but could not delete its team "${team.slug}" (${
-        err instanceof Error ? err.message : String(err)
-      }); delete it by hand at https://github.com/orgs/${org}/teams if it lingers.`
+      teamDeleteWarning = `Removed the classroom config but could not delete its team "${team.slug}" (${getErrorMessage(
+        err,
+      )}); delete it by hand at https://github.com/orgs/${org}/teams if it lingers.`
     }
   }
 

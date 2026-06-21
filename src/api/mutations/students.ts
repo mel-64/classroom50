@@ -4,6 +4,7 @@ import {
   addUserToTeam,
   createGitCommit,
   createGitTree,
+  getErrorMessage,
   removeUserFromTeam,
   updateRef,
 } from "@/hooks/github/mutations"
@@ -220,9 +221,12 @@ export async function enrollStudentInClassroom(
   input: AddStudentToClassroomInput,
 ) {
   const { org, classroom } = input
+  // The team slug read is independent of the roster commit, so kick it off
+  // concurrently. (resolveClassroomTeamSlug is failure-tolerant — it falls
+  // back to the derived slug — so starting it earlier changes nothing.)
+  const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
   const result = await addStudentToClassroomWithConflictRetry(client, input)
-
-  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+  const teamSlug = await teamSlugPromise
 
   // The roster commit already landed, so a team-add failure is surfaced as a
   // non-fatal warning instead of failing the enroll (matches the bulk path).
@@ -236,7 +240,7 @@ export async function enrollStudentInClassroom(
     })
   } catch (err) {
     console.error("addUserToTeam failed (student enrolled):", err)
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = getErrorMessage(err)
     teamWarning =
       `${result.student.username} was added to the roster, but adding them to ` +
       `the classroom team "${teamSlug}" failed (${detail}); they won't have ` +
@@ -576,6 +580,10 @@ export async function unenrollStudent(
     throw new Error("Student's GitHub username is required")
   }
 
+  // The team slug read is independent of the removal commit and never rejects
+  // (falls back to the derived slug), so run it concurrently with the commit.
+  const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
+
   const ref = await getBranchRef(client, org)
   const commit = await getCommit(client, org, ref.object.sha)
 
@@ -636,7 +644,7 @@ export async function unenrollStudent(
   // Symmetric with enroll: drop the student from the classroom team so they
   // lose read on its private templates. Idempotent (404 = not a member / team
   // gone); org membership is untouched. Mirrors the CLI's roster remove.
-  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+  const teamSlug = await teamSlugPromise
   await removeUserFromTeam(client, {
     org,
     teamSlug,
