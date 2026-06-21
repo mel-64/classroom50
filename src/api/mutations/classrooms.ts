@@ -33,11 +33,10 @@ export async function createClassroomFiles(
   )
 
   // If scaffolding fails after the team exists, a team we CREATED would be
-  // orphaned — best-effort delete it before re-throwing. Never delete an
-  // ADOPTED team (it pre-existed). A 409 (concurrent commit) is re-thrown
-  // untouched so withGitConflictRetry can re-run; the re-run's
-  // ensureClassroomTeam then adopts the just-created team rather than
-  // deleting it out from under the retry.
+  // orphaned — best-effort delete it before re-throwing. Never delete an ADOPTED
+  // team. A 409 (concurrent commit) is re-thrown untouched so
+  // withGitConflictRetry can re-run, whose ensureClassroomTeam then adopts the
+  // just-created team rather than deleting it out from under the retry.
   let ref, commit, tree, newCommit, updatedRef
   try {
     ref = await getBranchRef(client, input.org)

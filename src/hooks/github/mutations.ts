@@ -366,16 +366,16 @@ export type ClassroomTeamRef = {
 }
 
 // A short-name with consecutive/trailing hyphens slugifies to something other
-// than `classroom50-<short>` and breaks team ops that re-derive the slug. The
+// than `classroom50-<short>`, breaking team ops that re-derive the slug. The
 // GUI's slugify produces canonical slugs; guard defensively to match the CLI.
 function isCanonicalTeamShortName(shortName: string): boolean {
   return !shortName.endsWith("-") && !shortName.includes("--")
 }
 
-// Create (or adopt) the per-classroom team (`secret`) and return its { id, slug }
-// for classroom.json — later grants rostered students read on private org
-// templates. Mirrors the CLI: idempotent, adopting a same-named team on 422 and
-// reconciling its privacy to `secret`.
+// Create (or adopt) the per-classroom `secret` team and return its { id, slug }
+// for classroom.json (later grants rostered students read on private org
+// templates). Mirrors the CLI: idempotent, adopts a same-named team on 422 and
+// reconciles its privacy.
 export async function ensureClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -393,10 +393,9 @@ export async function ensureClassroomTeam(
     const created = await createTeam(client, { org, name, privacy: "secret" })
     return { id: created.id, slug: created.slug, created: true }
   } catch (err) {
-    // 422 = a same-named team already exists. Adopt it (read id/slug,
-    // reconcile privacy). `created: false` tells the caller it pre-existed
-    // and must NOT be deleted on a create-failure rollback (that would
-    // destroy a team and grants we never created).
+    // 422 = a same-named team already exists. Adopt it (read id/slug, reconcile
+    // privacy). `created: false` means it pre-existed and must NOT be deleted on
+    // a create-failure rollback (that would destroy a team we never created).
     if (err instanceof GitHubAPIError && err.status === 422) {
       const adopted = await adoptClassroomTeam(client, org, classroom)
       return { ...adopted, created: false }
@@ -1527,13 +1526,12 @@ type OrgWorkflowPermissions = {
   can_approve_pull_request_reviews: boolean
 }
 
-// The opt-in Feedback PR (issue #86) is opened by each student repo's autograde
-// workflow, but GitHub rejects it unless the org-level "Allow GitHub Actions to
-// create and approve pull requests" toggle is on — and it defaults off. It can
-// only be set at the org level (student repos inherit it at creation), so a
-// GUI-initialized org hits the `pull-requests: none` failure (discussion #33)
-// without this. Mirrors the CLI's ensureOrgCanCreatePRs. Only this toggle is
-// changed; default_workflow_permissions is preserved.
+// The opt-in Feedback PR (issue #86), opened by each student repo's autograde
+// workflow, is rejected by GitHub unless the org-level "Allow GitHub Actions to
+// create and approve pull requests" toggle is on (it defaults off). Set only at
+// the org level, so without it a GUI-initialized org hits the
+// `pull-requests: none` failure (discussion #33). Mirrors the CLI; preserves
+// default_workflow_permissions.
 export async function ensureOrgCanCreatePullRequests(
   client: GitHubClient,
   org: string,

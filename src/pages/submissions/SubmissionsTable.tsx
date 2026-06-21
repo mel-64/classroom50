@@ -99,9 +99,8 @@ const GroupMembers = ({
 )
 
 // Review action: links to the open Feedback PR (opened by the autograde
-// workflow) when one exists; otherwise opens an info modal explaining there's
-// no Feedback PR yet. The PR is the source of truth — the old scores.json
-// `review` compare-link is not used.
+// workflow) when one exists, else opens an info modal. The PR is the source of
+// truth — the old scores.json `review` compare-link is unused.
 const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   const { data: pr, isLoading } = useGetFeedbackPr(org, repo)
   const dialogRef = useRef<HTMLDialogElement | null>(null)

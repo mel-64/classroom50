@@ -221,9 +221,8 @@ export async function enrollStudentInClassroom(
   input: AddStudentToClassroomInput,
 ) {
   const { org, classroom } = input
-  // The team slug read is independent of the roster commit, so kick it off
-  // concurrently. (resolveClassroomTeamSlug is failure-tolerant — it falls
-  // back to the derived slug — so starting it earlier changes nothing.)
+  // The team slug read is independent of the roster commit, so run it
+  // concurrently (resolveClassroomTeamSlug is failure-tolerant).
   const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
   const result = await addStudentToClassroomWithConflictRetry(client, input)
   const teamSlug = await teamSlugPromise

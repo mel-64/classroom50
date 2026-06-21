@@ -48,8 +48,8 @@ type ParsedTemplate = { owner: string; repo: string; branch?: string }
 function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   const trimmed = raw.trim()
   if (!trimmed) {
-    // Callers must gate on a non-empty ref (the template is optional); an
-    // empty value here is an internal invariant violation, not user input.
+    // Callers gate on a non-empty ref (the template is optional), so this is
+    // an internal invariant, not user input.
     throw new Error("Template ref is empty.")
   }
 
@@ -227,10 +227,9 @@ export async function editAssignment(
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
-  // Grant the (possibly changed) in-org private template a team read. Surfaced
-  // as a non-fatal warning, never thrown — the edit already committed.
-  // needsTeamGrant is only set for a resolved private in-org template, so the
-  // template is always present here; the guard also narrows the type.
+  // Grant the (possibly changed) in-org private template a team read — a
+  // non-fatal warning, never thrown (the edit already committed). needsTeamGrant
+  // implies a resolved template, so the guard just narrows the type.
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && editedAssignment.template) {
     templateGrantWarning = await tryGrantTeamTemplateRead(
@@ -317,14 +316,10 @@ async function buildAssignmentEntry(
     )
   }
 
-  // Resolve the template like the CLI (parse, confirm template, default
-  // branch, reject out-of-org private). On edit, reuse an unchanged stored
-  // ref instead of re-resolving so non-template edits still save.
-  //
-  // The template is OPTIONAL (mirrors the CLI's `--template`): when the form
-  // leaves it blank, the assignment is template-less and the accept flow
-  // creates an empty shim-only repo. Skip the parse/resolve/grant entirely so
-  // an empty input never blocks the save.
+  // Resolve the template like the CLI (parse, confirm template, default branch,
+  // reject out-of-org private), reusing an unchanged stored ref on edit. The
+  // template is OPTIONAL (mirrors `--template`): a blank field means a
+  // template-less assignment, so skip parse/resolve/grant entirely.
   let template: Assignment["template"] | undefined
   let needsTeamGrant = false
   if (input.template_repo.trim()) {
@@ -757,10 +752,9 @@ export async function createAssignmentWithConflictRetry(
 function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
-  // The source block records the template repo so `gh student submit` can
-  // re-fetch the latest instructor .gitignore/.github on each push. Omitted
-  // for a template-less assignment (nothing to re-fetch) — matches the CLI,
-  // which writes no `source:` block in that case.
+  // The source block lets `gh student submit` re-fetch instructor
+  // .gitignore/.github on each push. Omitted for a template-less assignment,
+  // matching the CLI (which writes no `source:` block).
   sourceOwner?: string
   sourceRepo?: string
   sourceBranch?: string
@@ -932,18 +926,13 @@ export async function resolveAutograderWorkflow(
 }
 
 // Land .classroom50.yaml + the autograde workflow on a freshly-created student
-// repo as one Tree commit, retrying while the repo's git-data APIs lag behind
-// the 200 from POST .../generate. A just-generated repo briefly has no readable
-// ref/commit: reads 404 and the Tree write 409s "Git Repository is empty". The
-// single waitForBranchRefRepo poll upstream usually rides this out, but a slow
-// template copy can slip past its budget and surface the empty-repo error to
-// the student (who then has to click Accept again). This mirrors the CLI's
-// CommitWithFreshRepoRetry (gh-student internal/classroomcfg/commit.go): re-read
-// the ref + parent commit each attempt, validate the SHAs are non-empty, and
-// retry the whole read+build+commit on fresh-repo lag.
-//
-// Safe to retry: this writes to the student's own just-accepted repo, which has
-// no concurrent writers, so there's no rebase/conflict loop to worry about.
+// repo as one Tree commit, retrying while GitHub's git-data APIs lag behind the
+// 200 from POST .../generate (reads 404, the Tree write 409s "Git Repository is
+// empty"). The upstream branch-ref poll usually rides this out, but a slow
+// template copy can slip past it and force the student to retry Accept. Mirrors
+// the CLI's CommitWithFreshRepoRetry: re-read the ref + parent commit each
+// attempt, require non-empty SHAs, retry the whole sequence on fresh-repo lag.
+// Safe because the student's just-accepted repo has no concurrent writers.
 const ACCEPT_COMMIT_ATTEMPTS = 6
 const ACCEPT_COMMIT_BASE_DELAY_MS = 500
 async function commitAcceptFilesWithFreshRepoRetry(params: {
@@ -959,15 +948,15 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
   let lastError: unknown
   for (let attempt = 1; attempt <= ACCEPT_COMMIT_ATTEMPTS; attempt++) {
     try {
-      // Re-read the ref every attempt: on a retry the previous read raced ahead
-      // of GitHub seeding the repo, so the ref/commit may only now be readable.
+      // Re-read the ref each attempt: a retry means the prior read raced ahead
+      // of GitHub seeding the repo, so it may only now be readable.
       const ref = await waitForBranchRefRepo(client, owner, repo, branch)
       const parentSha = ref.object.sha
       const currentCommit = await getCommitByRepo(client, owner, repo, parentSha)
       const baseTreeSha = currentCommit.tree?.sha
 
-      // A 200 with a blank parent/tree SHA means the ref isn't fully propagated
-      // yet (the Tree write would 404 on the empty base_tree) — treat as lag.
+      // A 200 with a blank parent/tree SHA means the ref isn't propagated yet
+      // (the Tree write would 404 on the empty base_tree) — treat as lag.
       if (!parentSha || !baseTreeSha) {
         throw new GitHubAPIError({
           status: 409,
@@ -1118,8 +1107,7 @@ export async function acceptAssignment(params: {
       : repo.default_branch || sourceBranch
 
   // Land the metadata + autograde shim, retrying through GitHub's post-generate
-  // git-data lag (the "Git Repository is empty" race) instead of surfacing it to
-  // the student. Re-reads the ref/parent commit each attempt.
+  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
   console.log("committing accept files (with fresh-repo retry)...")
   await commitAcceptFilesWithFreshRepoRetry({
     client,

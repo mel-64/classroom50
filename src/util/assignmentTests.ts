@@ -26,8 +26,7 @@ export type AssignmentTestDraft = {
 // A setup command is encoded as a leading 0-point `run` test with this reserved
 // name — the CLI-blessed pre-grading idiom (no runtime.setup field; the runner
 // runs tests in order, non-zero exit fails). Reserved from user-authored tests
-// (validateTestDraft) so a graded "setup" test can't be confused with the
-// synthesized one on round-trip. Centralized so write and read-back can't drift.
+// so a graded "setup" test can't be confused with the synthesized one.
 export const SETUP_TEST_NAME = "setup"
 
 export const makeSetupTest = (command: string): AssignmentTest => ({
@@ -38,8 +37,8 @@ export const makeSetupTest = (command: string): AssignmentTest => ({
 })
 
 // Identifies the synthesized setup test by full signature (reserved name, `run`,
-// 0 points); position is checked by the caller (always leading). Takes the
-// common fields so both the wire shape and the form draft can use it.
+// 0 points); the caller checks position (always leading). Takes the common
+// fields so the wire shape and the form draft can both use it.
 export const isSetupTest = (test: {
   name: string
   type: AssignmentTestType
