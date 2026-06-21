@@ -119,6 +119,21 @@ function isNotFoundError(error: unknown) {
   )
 }
 
+// A freshly-generated/templated repo's git-data APIs lag behind the 200 from
+// POST .../generate: reads 404 and writes 409 "Git Repository is empty" for a
+// short window while GitHub seeds the initial commit. Both are transient and
+// worth retrying. Mirrors the CLI's isFreshRepoRetryable (gh-student
+// internal/classroomcfg/commit.go), which the GUI previously lacked on the
+// post-ref commit sequence.
+export function isFreshRepoLagError(error: unknown) {
+  if (error instanceof GitHubAPIError) {
+    if (error.status === 404 || error.status === 409) {
+      return true
+    }
+  }
+  return isGitRepositoryEmptyError(error) || isNotFoundError(error)
+}
+
 export async function waitForBranchRefRepo(
   client: GitHubClient,
   owner: string,

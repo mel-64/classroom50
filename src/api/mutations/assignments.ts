@@ -28,6 +28,7 @@ import type { GitHubRepo } from "@/hooks/github/types"
 import {
   getCommitByRepo,
   getRepo,
+  isFreshRepoLagError,
   sleep,
   waitForBranchRefRepo,
 } from "@/hooks/github/queries"
@@ -930,6 +931,102 @@ export async function resolveAutograderWorkflow(
   return workflow
 }
 
+// Land .classroom50.yaml + the autograde workflow on a freshly-created student
+// repo as one Tree commit, retrying while the repo's git-data APIs lag behind
+// the 200 from POST .../generate. A just-generated repo briefly has no readable
+// ref/commit: reads 404 and the Tree write 409s "Git Repository is empty". The
+// single waitForBranchRefRepo poll upstream usually rides this out, but a slow
+// template copy can slip past its budget and surface the empty-repo error to
+// the student (who then has to click Accept again). This mirrors the CLI's
+// CommitWithFreshRepoRetry (gh-student internal/classroomcfg/commit.go): re-read
+// the ref + parent commit each attempt, validate the SHAs are non-empty, and
+// retry the whole read+build+commit on fresh-repo lag.
+//
+// Safe to retry: this writes to the student's own just-accepted repo, which has
+// no concurrent writers, so there's no rebase/conflict loop to worry about.
+const ACCEPT_COMMIT_ATTEMPTS = 6
+const ACCEPT_COMMIT_BASE_DELAY_MS = 500
+async function commitAcceptFilesWithFreshRepoRetry(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  branch: string
+  metadataYaml: string
+  autogradeYaml: string
+}) {
+  const { client, owner, repo, branch, metadataYaml, autogradeYaml } = params
+
+  let lastError: unknown
+  for (let attempt = 1; attempt <= ACCEPT_COMMIT_ATTEMPTS; attempt++) {
+    try {
+      // Re-read the ref every attempt: on a retry the previous read raced ahead
+      // of GitHub seeding the repo, so the ref/commit may only now be readable.
+      const ref = await waitForBranchRefRepo(client, owner, repo, branch)
+      const parentSha = ref.object.sha
+      const currentCommit = await getCommitByRepo(client, owner, repo, parentSha)
+      const baseTreeSha = currentCommit.tree?.sha
+
+      // A 200 with a blank parent/tree SHA means the ref isn't fully propagated
+      // yet (the Tree write would 404 on the empty base_tree) — treat as lag.
+      if (!parentSha || !baseTreeSha) {
+        throw new GitHubAPIError({
+          status: 409,
+          url: `/repos/${owner}/${repo}/git/commits`,
+          message: "Git Repository is empty.",
+          body: null,
+          rateLimit: {
+            limit: null,
+            remaining: null,
+            used: null,
+            reset: null,
+            resource: null,
+            retryAfter: null,
+          },
+        })
+      }
+
+      const tree = await createTreeForAssignment({
+        client,
+        owner,
+        repo,
+        baseTreeSha,
+        metadataYaml,
+        autogradeYaml,
+      })
+
+      const commit = await createCommitForAssignment({
+        client,
+        owner,
+        repo,
+        // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find
+        // the Feedback-PR baseline (see the constant).
+        message: ACCEPT_COMMIT_SUBJECT,
+        treeSha: tree.sha,
+        parentSha,
+      })
+
+      await updateRefForRepo({
+        client,
+        owner,
+        repo,
+        branch,
+        commitSha: commit.sha,
+      })
+
+      return
+    } catch (err) {
+      lastError = err
+      if (!isFreshRepoLagError(err) || attempt === ACCEPT_COMMIT_ATTEMPTS) {
+        throw err
+      }
+      // Exponential backoff (~0.5s, 1s, 2s, ...) to ride out a slow copy.
+      await sleep(ACCEPT_COMMIT_BASE_DELAY_MS * 2 ** (attempt - 1))
+    }
+  }
+
+  throw lastError
+}
+
 type AcceptAssignmentResult = {
   status: "created" | "already-accepted"
   repo: GitHubRepo
@@ -1020,58 +1117,17 @@ export async function acceptAssignment(params: {
       ? created.branch
       : repo.default_branch || sourceBranch
 
-  console.log("getting branch ref...")
-  const ref = await waitForBranchRefRepo(client, org, repo.name, targetBranch)
-
-  console.log("get commit by repo...")
-  const currentCommit = await getCommitByRepo(
-    client,
-    org,
-    repo.name,
-    ref.object.sha,
-  )
-
-  console.log("creating assignment tree...", {
-    owner: org,
-    repo: repo.name,
-    repoFullName: repo.full_name,
-    repoDefaultBranch: repo.default_branch,
-    targetBranch,
-    refSha: ref.object.sha,
-    currentCommit,
-    baseTreeSha: currentCommit.tree?.sha,
-    metadataYaml,
-    autogradeYamlPreview: autogradeYaml.slice(0, 200),
-  })
-
-  const tree = await createTreeForAssignment({
-    client,
-    owner: org,
-    repo: repo.name,
-    baseTreeSha: currentCommit.tree.sha,
-    metadataYaml,
-    autogradeYaml,
-  })
-
-  console.log("creating commit for assignment...")
-  const commit = await createCommitForAssignment({
-    client,
-    owner: org,
-    repo: repo.name,
-    // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find the
-    // Feedback-PR baseline (see the constant).
-    message: ACCEPT_COMMIT_SUBJECT,
-    treeSha: tree.sha,
-    parentSha: ref.object.sha,
-  })
-
-  console.log("updating ref for repo...")
-  await updateRefForRepo({
+  // Land the metadata + autograde shim, retrying through GitHub's post-generate
+  // git-data lag (the "Git Repository is empty" race) instead of surfacing it to
+  // the student. Re-reads the ref/parent commit each attempt.
+  console.log("committing accept files (with fresh-repo retry)...")
+  await commitAcceptFilesWithFreshRepoRetry({
     client,
     owner: org,
     repo: repo.name,
     branch: targetBranch,
-    commitSha: commit.sha,
+    metadataYaml,
+    autogradeYaml,
   })
 
   return {
