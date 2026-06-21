@@ -3,12 +3,14 @@ import {
   MessageCircle,
   SquareArrowOutUpRight,
 } from "lucide-react"
+import { useRef } from "react"
 
 import GitHub from "@/assets/github.svg?react"
 import { getName, getInitials } from "@/util/students"
-import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
+import { studentRepoName } from "@/util/studentRepo"
 import Avatar from "@/components/avatar"
 import type { SubmissionRow } from "@/hooks/useGetScores"
+import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import type { Student } from "@/types/classroom"
 
 // <= 50% = red
@@ -25,10 +27,6 @@ const scoreToBadgeType = (score: number, max: number) => {
   if (percent < 70) return "badge-warning"
   return "badge-success"
 }
-
-// Repo name/URL follow the shared cross-binary formula — see studentRepo.ts.
-const repoName = studentRepoName
-const repoUrl = studentRepoUrl
 
 // A compact initials bubble with a tooltip naming the member — keeps a
 // multi-member group row tight, moving identity into hover.
@@ -93,6 +91,78 @@ const GroupMembers = ({
   </div>
 )
 
+// Review action: links to the open Feedback PR (opened by the autograde
+// workflow) when one exists; otherwise opens an info modal explaining there's
+// no Feedback PR yet. The PR is the source of truth — the old scores.json
+// `review` compare-link is not used.
+const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
+  const { data: pr, isLoading } = useGetFeedbackPr(org, repo)
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  if (isLoading) {
+    return (
+      <span className="flex gap-2 text-base-content/40">
+        <span className="loading loading-spinner loading-xs" />
+        <span>Review</span>
+      </span>
+    )
+  }
+
+  if (pr) {
+    return (
+      <a className="flex gap-2" href={pr.html_url} target="_blank" rel="noreferrer">
+        <MessageCircle />
+        <span>Review</span>
+      </a>
+    )
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="flex gap-2 text-base-content/50 hover:text-base-content"
+        onClick={() => dialogRef.current?.showModal()}
+      >
+        <MessageCircle />
+        <span>Review</span>
+      </button>
+      <dialog ref={dialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="text-lg font-bold">No feedback pull request yet</h3>
+          <p className="mt-2 text-sm leading-6 text-base-content/70">
+            No Feedback PR has been opened for{" "}
+            <span className="font-mono">{repo}</span> yet. It's created by the
+            assignment's autograde workflow after a graded submission — if the
+            student hasn't submitted (or the assignment has the Feedback PR
+            disabled), there's nothing to review yet.
+          </p>
+          <div className="modal-action">
+            <a
+              className="btn btn-ghost btn-sm"
+              href={`https://github.com/${org}/${repo}/pulls`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open repo PRs
+            </a>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => dialogRef.current?.close()}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button>close</button>
+        </form>
+      </dialog>
+    </>
+  )
+}
+
 const SubmissionsTable = ({
   scores,
   students,
@@ -136,15 +206,18 @@ const SubmissionsTable = ({
                 new Date(b.datetime).getTime(),
             )
             .toReversed()
-            .map(({ usernames, score, datetime, submissionCount, ...rest }) => (
+            .map(({ usernames, score, datetime, submissionCount, ...rest }) => {
+              const repo = studentRepoName(classroom, assignment, rest.owner)
+              const repoHref = `https://github.com/${org}/${repo}`
+              return (
               <tr key={rest.owner}>
                 <td>
                   {isGroup ? (
                     <GroupMembers
                       usernames={usernames}
                       students={students}
-                      repoHref={repoUrl(org, classroom, assignment, rest.owner)}
-                      repoLabel={repoName(classroom, assignment, rest.owner)}
+                      repoHref={repoHref}
+                      repoLabel={repo}
                     />
                   ) : (
                     <div className="flex flex-col gap-2">
@@ -155,15 +228,13 @@ const SubmissionsTable = ({
                       />
                       <a
                         className="flex items-center gap-1 text-sm link link-hover w-fit text-base-content/70"
-                        href={repoUrl(org, classroom, assignment, rest.owner)}
+                        href={repoHref}
                         target="_blank"
                         rel="noreferrer"
                         title="Open the student repository"
                       >
                         <GitHub className="size-4" />
-                        <span className="font-mono">
-                          {repoName(classroom, assignment, rest.owner)}
-                        </span>
+                        <span className="font-mono">{repo}</span>
                       </a>
                     </div>
                   )}
@@ -201,15 +272,7 @@ const SubmissionsTable = ({
                       </a>
                     </div>
                     <div>
-                      <a
-                        className="flex gap-2"
-                        href={rest.review}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <MessageCircle />
-                        <span>Review</span>
-                      </a>
+                      <ReviewButton org={org} repo={repo} />
                     </div>
                     <div>
                       <a
@@ -225,7 +288,8 @@ const SubmissionsTable = ({
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
         </tbody>
       </table>
     </div>

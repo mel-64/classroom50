@@ -28,6 +28,9 @@ export const githubKeys = {
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
 
+  openPulls: (owner: string, repo: string) =>
+    [...githubKeys.all, "open-pulls", owner, repo] as const,
+
   branchRef: (org: string) => [...githubKeys.all, "branchRef", org] as const,
   commitTree: (org: string, branchSha: string) =>
     [...githubKeys.all, "commitRef", org, branchSha] as const,
@@ -563,6 +566,38 @@ export async function getRepo(
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 404) {
       return null
+    }
+    throw err
+  }
+}
+
+export type GitHubPullRequest = {
+  number: number
+  html_url: string
+  state: "open" | "closed"
+  title: string
+  draft?: boolean
+  head: { ref: string }
+  base: { ref: string }
+}
+
+// Open PRs on a student/group repo. The autograde workflow opens one Feedback
+// PR per repo, so the first open PR is that PR. 404 (repo not generated yet) ->
+// []. Tolerant so a missing repo reads as "no PR" rather than throwing.
+export async function getOpenPullRequests(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  signal?: AbortSignal,
+) {
+  try {
+    return await client.request<GitHubPullRequest[]>(
+      `/repos/${owner}/${repo}/pulls?state=open&per_page=10`,
+      { method: "GET", signal },
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return []
     }
     throw err
   }
