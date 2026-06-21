@@ -120,46 +120,56 @@ function isNotFoundError(error: unknown) {
 }
 
 // A freshly-generated/templated repo's git-data APIs lag behind the 200 from
-// POST .../generate: reads 404 and writes 409 "Git Repository is empty" while
-// GitHub seeds the initial commit. Both are transient. Mirrors the CLI's
-// isFreshRepoRetryable.
+// POST .../generate: reads 404 and the first write 409s "Git Repository is
+// empty" while GitHub seeds. Both are transient. A bare 409 (no empty-repo
+// message) is a real conflict — e.g. a non-fast-forward updateRef — so the 409
+// branch is gated on the message. Mirrors the CLI's isFreshRepoRetryable.
 export function isFreshRepoLagError(error: unknown) {
   if (error instanceof GitHubAPIError) {
-    if (error.status === 404 || error.status === 409) {
+    if (error.status === 404) {
       return true
+    }
+    if (error.status === 409) {
+      return isGitRepositoryEmptyError(error)
     }
   }
   return isGitRepositoryEmptyError(error) || isNotFoundError(error)
 }
 
-export async function waitForBranchRefRepo(
-  client: GitHubClient,
-  owner: string,
-  repo: string,
-  branch: string,
-  options: {
-    attempts?: number
-    delayMs?: number
-  } = {},
-) {
-  const attempts = options.attempts ?? 8
-  const delayMs = options.delayMs ?? 750
+export type FreshRepoRetryOptions = {
+  attempts?: number
+  baseDelayMs?: number
+  // Backoff multiplier between retries. 1 = fixed delay. Default 2.
+  backoffFactor?: number
+  // Which errors count as retryable lag. Default isFreshRepoLagError.
+  shouldRetry?: (error: unknown) => boolean
+}
+
+// Retry `fn` while it hits fresh-repo lag (the window where a just-generated
+// repo's git-data APIs lag behind the 200 from POST .../generate). Single source
+// of truth for the retry/backoff policy — the branch-ref poll and the accept
+// commit sequence both use it. `fn` must re-read its own state each attempt; it
+// may throw a synthetic error to signal lag that isn't an HTTP error (e.g. a 200
+// with a blank SHA). Mirrors the CLI's CommitWithFreshRepoRetry.
+export async function withFreshRepoRetry<T>(
+  fn: () => Promise<T>,
+  options: FreshRepoRetryOptions = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 6
+  const baseDelayMs = options.baseDelayMs ?? 500
+  const backoffFactor = options.backoffFactor ?? 2
+  const shouldRetry = options.shouldRetry ?? isFreshRepoLagError
 
   let lastError: unknown
-
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      return await getBranchRefRepo(client, owner, repo, branch)
+      return await fn()
     } catch (err) {
       lastError = err
-
-      if (!isGitRepositoryEmptyError(err) && !isNotFoundError(err)) {
+      if (!shouldRetry(err) || attempt === attempts) {
         throw err
       }
-
-      if (attempt < attempts) {
-        await sleep(delayMs)
-      }
+      await sleep(baseDelayMs * backoffFactor ** (attempt - 1))
     }
   }
 

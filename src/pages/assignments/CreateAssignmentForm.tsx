@@ -155,6 +155,10 @@ const CreateAssignmentForm = ({
         }
         if (!Number(value.max_group_size)) {
           errors.max_group_size = "Max group size must be a valid number."
+        } else if (value.mode === "group" && Number(value.max_group_size) < 2) {
+          // The CLI rejects a group assignment with max_group_size < 2 (schema
+          // minimum: 2), which would make the whole assignments.json unparseable.
+          errors.max_group_size = "Group size must be at least 2."
         }
 
         // Mirrors gh-teacher's write-time validation so a bad test is
@@ -350,9 +354,9 @@ const CreateAssignmentForm = ({
                           type="number"
                           className="input validator"
                           placeholder="#"
-                          min="1"
+                          min="2"
                           max="100"
-                          title="Must be a valid number between 1 and 100"
+                          title="Must be a valid number between 2 and 100"
                           onBlur={field.handleBlur}
                           onChange={(e) =>
                             field.handleChange(e.target.valueAsNumber)

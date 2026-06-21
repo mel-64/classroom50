@@ -26,11 +26,10 @@ import {
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import type { GitHubRepo } from "@/hooks/github/types"
 import {
+  getBranchRefRepo,
   getCommitByRepo,
   getRepo,
-  isFreshRepoLagError,
-  sleep,
-  waitForBranchRefRepo,
+  withFreshRepoRetry,
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
@@ -96,9 +95,7 @@ async function resolveTemplate(
 ): Promise<{ template: Assignment["template"]; needsTeamGrant: boolean }> {
   // getRepo is 404-tolerant (returns null), so a missing/invisible template
   // surfaces as null.
-  const repo = (await getRepo(client, parsed.owner, parsed.repo)) as
-    | (GitHubRepo & { is_template?: boolean; private?: boolean })
-    | null
+  const repo = await getRepo(client, parsed.owner, parsed.repo)
   if (!repo) {
     throw new Error(
       `Template "${parsed.owner}/${parsed.repo}" is not visible to your account — make it public, or copy it into ${org} and reference the copy.`,
@@ -629,33 +626,28 @@ async function initializeEmptyRepoWithMetadata(params: {
 }) {
   const { client, owner, repo, branch, metadataYaml } = params
 
-  for (let i = 0; i < 10; i++) {
-    try {
-      return await client.request(
-        `/repos/${owner}/${repo}/contents/.classroom50.yaml`,
-        {
-          method: "PUT",
-          body: {
-            message: "Initialize classroom50 assignment",
-            content: btoa(unescape(encodeURIComponent(metadataYaml))),
-            branch,
-          },
+  // Share the centralized fresh-repo retry. The empty-repo PUT can 404/409 while
+  // GitHub provisions, so retry on both (fixed 500ms x10) rather than the
+  // default empty-repo-message-only gate.
+  return withFreshRepoRetry(
+    () =>
+      client.request(`/repos/${owner}/${repo}/contents/.classroom50.yaml`, {
+        method: "PUT",
+        body: {
+          message: "Initialize classroom50 assignment",
+          content: btoa(unescape(encodeURIComponent(metadataYaml))),
+          branch,
         },
-      )
-    } catch (err) {
-      if (
+      }),
+    {
+      attempts: 10,
+      baseDelayMs: 500,
+      backoffFactor: 1,
+      shouldRetry: (err) =>
         err instanceof GitHubAPIError &&
-        (err.status === 404 || err.status === 409)
-      ) {
-        await sleep(500)
-        continue
-      }
-
-      throw err
-    }
-  }
-
-  throw new Error(`Could not initialize empty repo ${owner}/${repo}.`)
+        (err.status === 404 || err.status === 409),
+    },
+  )
 }
 
 type AcceptRepoCreationResult =
@@ -846,7 +838,10 @@ export async function deleteAssignment(
   }
 }
 
-async function addMaintainCollaborator(params: {
+// Grant the student `admin` (not `maintain`) on their own repo. Intentional and
+// CLI-aligned (issue #112): only an admin can manage collaborators for the
+// founder-driven group-invite flow (`gh student invite`).
+async function addAdminCollaborator(params: {
   client: GitHubClient
   owner: string
   repo: string
@@ -925,16 +920,32 @@ export async function resolveAutograderWorkflow(
   return workflow
 }
 
-// Land .classroom50.yaml + the autograde workflow on a freshly-created student
-// repo as one Tree commit, retrying while GitHub's git-data APIs lag behind the
-// 200 from POST .../generate (reads 404, the Tree write 409s "Git Repository is
-// empty"). The upstream branch-ref poll usually rides this out, but a slow
-// template copy can slip past it and force the student to retry Accept. Mirrors
-// the CLI's CommitWithFreshRepoRetry: re-read the ref + parent commit each
-// attempt, require non-empty SHAs, retry the whole sequence on fresh-repo lag.
-// Safe because the student's just-accepted repo has no concurrent writers.
-const ACCEPT_COMMIT_ATTEMPTS = 6
-const ACCEPT_COMMIT_BASE_DELAY_MS = 500
+// Synthetic "repo still seeding" error for a 200 read with a blank SHA, so
+// withFreshRepoRetry retries instead of letting the blank SHA flow into a Tree
+// write that would 404 on an empty base_tree.
+function freshRepoNotReadyError(owner: string, repo: string) {
+  return new GitHubAPIError({
+    status: 409,
+    url: `/repos/${owner}/${repo}/git/commits`,
+    message: "Git Repository is empty.",
+    body: null,
+    rateLimit: {
+      limit: null,
+      remaining: null,
+      used: null,
+      reset: null,
+      resource: null,
+      retryAfter: null,
+    },
+  })
+}
+
+// Land .classroom50.yaml + the autograde workflow as one Tree commit, riding out
+// GitHub's git-data lag after POST .../generate (reads 404, the first write 409s
+// "Git Repository is empty"). The whole read→build→commit→update sequence runs
+// inside withFreshRepoRetry, re-reading the ref + parent commit each attempt and
+// requiring non-empty SHAs before writing. Safe because the student's
+// just-accepted repo has no concurrent writers.
 async function commitAcceptFilesWithFreshRepoRetry(params: {
   client: GitHubClient
   owner: string
@@ -945,75 +956,44 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
 }) {
   const { client, owner, repo, branch, metadataYaml, autogradeYaml } = params
 
-  let lastError: unknown
-  for (let attempt = 1; attempt <= ACCEPT_COMMIT_ATTEMPTS; attempt++) {
-    try {
-      // Re-read the ref each attempt: a retry means the prior read raced ahead
-      // of GitHub seeding the repo, so it may only now be readable.
-      const ref = await waitForBranchRefRepo(client, owner, repo, branch)
-      const parentSha = ref.object.sha
-      const currentCommit = await getCommitByRepo(client, owner, repo, parentSha)
-      const baseTreeSha = currentCommit.tree?.sha
+  await withFreshRepoRetry(async () => {
+    const ref = await getBranchRefRepo(client, owner, repo, branch)
+    const parentSha = ref.object.sha
+    const currentCommit = await getCommitByRepo(client, owner, repo, parentSha)
+    const baseTreeSha = currentCommit.tree?.sha
 
-      // A 200 with a blank parent/tree SHA means the ref isn't propagated yet
-      // (the Tree write would 404 on the empty base_tree) — treat as lag.
-      if (!parentSha || !baseTreeSha) {
-        throw new GitHubAPIError({
-          status: 409,
-          url: `/repos/${owner}/${repo}/git/commits`,
-          message: "Git Repository is empty.",
-          body: null,
-          rateLimit: {
-            limit: null,
-            remaining: null,
-            used: null,
-            reset: null,
-            resource: null,
-            retryAfter: null,
-          },
-        })
-      }
-
-      const tree = await createTreeForAssignment({
-        client,
-        owner,
-        repo,
-        baseTreeSha,
-        metadataYaml,
-        autogradeYaml,
-      })
-
-      const commit = await createCommitForAssignment({
-        client,
-        owner,
-        repo,
-        // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find
-        // the Feedback-PR baseline (see the constant).
-        message: ACCEPT_COMMIT_SUBJECT,
-        treeSha: tree.sha,
-        parentSha,
-      })
-
-      await updateRefForRepo({
-        client,
-        owner,
-        repo,
-        branch,
-        commitSha: commit.sha,
-      })
-
-      return
-    } catch (err) {
-      lastError = err
-      if (!isFreshRepoLagError(err) || attempt === ACCEPT_COMMIT_ATTEMPTS) {
-        throw err
-      }
-      // Exponential backoff (~0.5s, 1s, 2s, ...) to ride out a slow copy.
-      await sleep(ACCEPT_COMMIT_BASE_DELAY_MS * 2 ** (attempt - 1))
+    if (!parentSha || !baseTreeSha) {
+      throw freshRepoNotReadyError(owner, repo)
     }
-  }
 
-  throw lastError
+    const tree = await createTreeForAssignment({
+      client,
+      owner,
+      repo,
+      baseTreeSha,
+      metadataYaml,
+      autogradeYaml,
+    })
+
+    const commit = await createCommitForAssignment({
+      client,
+      owner,
+      repo,
+      // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find the
+      // Feedback-PR baseline (see the constant).
+      message: ACCEPT_COMMIT_SUBJECT,
+      treeSha: tree.sha,
+      parentSha,
+    })
+
+    await updateRefForRepo({
+      client,
+      owner,
+      repo,
+      branch,
+      commitSha: commit.sha,
+    })
+  })
 }
 
 type AcceptAssignmentResult = {
@@ -1093,8 +1073,8 @@ export async function acceptAssignment(params: {
   console.log("patching repo surface...")
   await patchRepoSurface(client, org, repo.name)
 
-  console.log("adding maintain collaborator...")
-  await addMaintainCollaborator({
+  console.log("adding admin collaborator...")
+  await addAdminCollaborator({
     client,
     owner: org,
     repo: repo.name,

@@ -18,12 +18,11 @@ type AddStudentFormValues = {
   username: string
 }
 /**
- * 1) maintain a cache of existing org members to cross-reference
- * 2) ensure the team for the classroom exists
- * 3) perform a lookup on the user by their username (required)
- * 4) if they are a valid user and in the org, simply add to CSV roster (including ID)
- * 5) if they are a valid user and not in org, send org invite and add to roster
- * 6) if they are not a valid user, display as much with an error
+ * 1) ensure the team for the classroom exists
+ * 2) perform a lookup on the user by their username (required)
+ * 3) if they are a valid user and in the org, simply add to CSV roster (including ID)
+ * 4) if they are a valid user and not in org, send org invite and add to roster
+ * 5) if they are not a valid user, display as much with an error
  */
 const AddByGithubUsername = ({
   className = "",

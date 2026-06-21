@@ -642,13 +642,25 @@ export async function unenrollStudent(
 
   // Symmetric with enroll: drop the student from the classroom team so they
   // lose read on its private templates. Idempotent (404 = not a member / team
-  // gone); org membership is untouched. Mirrors the CLI's roster remove.
+  // gone); org membership is untouched. Mirrors the CLI's roster remove. The
+  // commit already landed, so a non-404 failure is a non-fatal warning, not a
+  // thrown error (matches enrollStudentInClassroom).
   const teamSlug = await teamSlugPromise
-  await removeUserFromTeam(client, {
-    org,
-    teamSlug,
-    username: normalizedUsername,
-  })
+  let teamWarning: string | undefined
+  try {
+    await removeUserFromTeam(client, {
+      org,
+      teamSlug,
+      username: normalizedUsername,
+    })
+  } catch (err) {
+    console.error("removeUserFromTeam failed (student unenrolled):", err)
+    const detail = getErrorMessage(err)
+    teamWarning =
+      `${toRemoveStudent.username} was removed from the roster, but removing ` +
+      `them from the classroom team "${teamSlug}" failed (${detail}); they may ` +
+      `keep read on private templates until it's retried.`
+  }
 
   return {
     previousCommitSha: ref.object.sha,
@@ -656,5 +668,6 @@ export async function unenrollStudent(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
+    teamWarning,
   }
 }

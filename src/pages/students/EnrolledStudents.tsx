@@ -6,6 +6,7 @@ import type { Student } from "@/types/classroom"
 import { ConfirmModal } from "@/components/modals"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { unenrollStudent } from "@/api/mutations/students"
+import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
@@ -18,9 +19,10 @@ const UnenrollStudentButton = ({
 }) => {
   const client = useGitHubClient()
   const unenrollStudentMutation = useMutation({
-    mutationFn: (input) => unenrollStudent(client, input),
+    mutationFn: (input: UnenrollStudentInput) => unenrollStudent(client, input),
   })
   const [open, setOpen] = useState(false)
+  const [teamWarning, setTeamWarning] = useState("")
 
   return (
     <>
@@ -30,6 +32,12 @@ const UnenrollStudentButton = ({
       >
         <Trash />
       </button>
+
+      {teamWarning && (
+        <div role="alert" className="alert alert-warning alert-soft mt-2">
+          <span className="text-sm">{teamWarning}</span>
+        </div>
+      )}
 
       <ConfirmModal
         open={open}
@@ -52,11 +60,12 @@ const UnenrollStudentButton = ({
         dangerous
         needsConfirm={false}
         onConfirm={async () => {
-          await unenrollStudentMutation.mutateAsync({
+          const result = await unenrollStudentMutation.mutateAsync({
             org,
             classroom,
             student,
           })
+          setTeamWarning(result.teamWarning ?? "")
           onRemoveStudent()
         }}
         onClose={() => setOpen(false)}
