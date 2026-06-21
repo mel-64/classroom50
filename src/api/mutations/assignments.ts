@@ -34,6 +34,12 @@ import {
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
 
+// Exact subject the runner (runner.py: ACCEPT_COMMIT_SUBJECT) scans for to
+// find the trusted Feedback-PR baseline — any other message makes it skip the
+// PR. Mirrors the CLI's `gh student accept` commit; keep in lockstep.
+const ACCEPT_COMMIT_SUBJECT =
+  "Initialize .classroom50.yaml and autograde workflow (gh student accept)"
+
 // Parse a `--template` ref — `<owner>/<repo>[@<branch>]` or a bare `<repo>`
 // (owner defaults to the org). Mirrors the CLI's parseTemplateRef so the GUI
 // accepts the same inputs and writes the same template block.
@@ -1032,7 +1038,9 @@ export async function acceptAssignment(params: {
     client,
     owner: org,
     repo: repo.name,
-    message: `Accept ${classroom}/${assignment.slug}`,
+    // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find the
+    // Feedback-PR baseline (see the constant).
+    message: ACCEPT_COMMIT_SUBJECT,
     treeSha: tree.sha,
     parentSha: ref.object.sha,
   })
