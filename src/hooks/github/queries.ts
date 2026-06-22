@@ -15,6 +15,7 @@ import { GitHubAPIError } from "./errors"
 import { createTeam, getErrorMessage } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
+import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -24,6 +25,8 @@ export const githubKeys = {
 
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
+
+  orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
@@ -85,6 +88,57 @@ export function orgMembershipQuery(client: GitHubClient, org: string) {
         `/user/memberships/orgs/${encodeURIComponent(org)}`,
         { method: "GET", signal },
       ),
+    enabled: Boolean(org),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+// Self-hosted runners registered in the org (GitHub's admin:org endpoint),
+// used only to advise whether a typed label exists. Tolerant: 403/404 resolve
+// to an "unavailable" sentinel so the form degrades to "couldn't verify"
+// instead of erroring. GitHub-hosted labels are recognized separately.
+export function orgRunnersQuery(client: GitHubClient, org: string) {
+  return queryOptions<OrgRunnersResult>({
+    queryKey: githubKeys.orgRunners(org),
+    queryFn: async ({ signal }) => {
+      try {
+        const runners: OrgRunner[] = []
+        let page = 1
+
+        while (true) {
+          const data = await client.request<{
+            total_count: number
+            runners: OrgRunner[]
+          }>(
+            `/orgs/${encodeURIComponent(
+              org,
+            )}/actions/runners?per_page=100&page=${page}`,
+            { method: "GET", signal },
+          )
+
+          const batch = data.runners ?? []
+          runners.push(...batch)
+
+          if (batch.length < 100) break
+          page++
+        }
+
+        return { available: true, runners }
+      } catch (error) {
+        // Let cancellations propagate; don't cache them as a verdict.
+        if (signal?.aborted) throw error
+        // 403 (no admin:org) / 404 (no access) mean "can't read the list",
+        // not "the runner doesn't exist".
+        if (
+          error instanceof GitHubAPIError &&
+          (error.status === 403 || error.status === 404)
+        ) {
+          return { available: false, reason: "no-access" }
+        }
+        return { available: false, reason: "error" }
+      }
+    },
     enabled: Boolean(org),
     staleTime: 5 * 60 * 1000,
     retry: false,

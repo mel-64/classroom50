@@ -7,6 +7,7 @@ import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
+import { parseRunnerLabels } from "@/util/runners"
 import {
   addRepositoryToTeam,
   createCommitForAssignment,
@@ -382,14 +383,16 @@ async function buildAssignmentEntry(
     entry.max_group_size = input.max_group_size
   }
 
-  // Runtime overrides (Advanced Settings). Omit the whole block when
-  // nothing was set so the runner uses its defaults.
-  const runsOn = input.runs_on?.trim()
+  // Runtime overrides (Advanced Settings); omit the block when unset.
+  // runs-on: write a string for one label, an array for many (both valid).
+  const runnerLabels = parseRunnerLabels(input.runs_on ?? "")
   const containerImage = input.container_image?.trim()
   const containerUser = input.container_user?.trim()
   const runtime: NonNullable<Assignment["runtime"]> = {}
-  if (runsOn) {
-    runtime["runs-on"] = runsOn
+  if (runnerLabels.length === 1) {
+    runtime["runs-on"] = runnerLabels[0]
+  } else if (runnerLabels.length > 1) {
+    runtime["runs-on"] = runnerLabels
   }
   if (containerImage) {
     runtime.container = { image: containerImage }

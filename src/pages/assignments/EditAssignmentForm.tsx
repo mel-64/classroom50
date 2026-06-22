@@ -51,6 +51,7 @@ const EditAssignmentForm = ({
     <CreateAssignmentForm
       edit
       loading={editAssignmentMutation.isPending}
+      org={org}
       defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {
         editAssignmentMutation.mutate({

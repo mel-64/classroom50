@@ -36,7 +36,7 @@ export type Assignment = {
   max_group_size?: number
   feedback_pr?: boolean
   runtime?: {
-    "runs-on"?: string
+    "runs-on"?: string | string[]
     container?: {
       image: string
       user?: string

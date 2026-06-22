@@ -1,4 +1,13 @@
 import { useForm } from "@tanstack/react-form"
+import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import {
+  AlertTriangle,
+  CheckCircle2,
+  HelpCircle,
+  Loader2,
+  ServerCog,
+} from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
@@ -7,6 +16,18 @@ import {
   validateTestDrafts,
   isSetupTest,
 } from "@/util/assignmentTests"
+import {
+  containerRunnerWarning,
+  isRunnerLabelShapeValid,
+  verifyRunnerLabels,
+  parseRunnerLabels,
+  isKnownHostedRunnerLabel,
+  isStandardSelfHostedLabel,
+  type OrgRunnersResult,
+  type RunnerVerification,
+} from "@/util/runners"
+import { orgRunnersQuery } from "@/hooks/github/queries"
+import { useOptionalGitHubClient } from "@/context/github/GitHubProvider"
 import type { Assignment } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
@@ -24,33 +45,14 @@ export type CreateAssignmentFormValues = {
   tests: AssignmentTestDraft[]
 }
 
-// GitHub-hosted runner labels the CLI allow-lists for runtime.runs-on.
-// Self-hosted is intentionally unsupported. "" = omit (defaults to
-// ubuntu-latest).
-const RUNNER_LABELS = [
-  "ubuntu-latest",
-  "ubuntu-24.04",
-  "ubuntu-22.04",
-  "ubuntu-20.04",
-  "macos-latest",
-  "macos-14",
-  "macos-13",
-  "windows-latest",
-  "windows-2022",
-  "windows-2019",
-] as const
-
-// When a container is set, the host must be Ubuntu (GitHub Actions runs
-// containers on Ubuntu only — the CLI enforces this).
-const CONTAINER_RUNNER_LABELS = RUNNER_LABELS.filter((l) =>
-  l.startsWith("ubuntu-"),
-)
-
 type CreateAssignmentFormProps = {
   defaultValues?: Partial<CreateAssignmentFormValues>
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>
   edit?: boolean
   loading?: boolean
+  // Org slug for verifying a runner label against the org's self-hosted
+  // runners. When absent, verification never blocks.
+  org?: string
 }
 const FormErrors = ({ form }) => (
   <form.Subscribe selector={(state) => [state.errors]}>
@@ -65,6 +67,216 @@ const FormErrors = ({ form }) => (
     )}
   </form.Subscribe>
 )
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value)
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(id)
+  }, [value, delayMs])
+
+  return debounced
+}
+
+// Minimal subset of a TanStack form field for a string-valued input.
+type StringField = {
+  name: string
+  state: { value: string }
+  handleBlur: () => void
+  handleChange: (value: string) => void
+}
+
+// onBlur handler that normalizes the value (default: trim), writing back
+// only on change.
+const normalizeOnBlur = (
+  field: StringField,
+  normalize: (value: string) => string = (value) => value.trim(),
+) => {
+  return () => {
+    const normalized = normalize(field.state.value)
+    if (normalized !== field.state.value) field.handleChange(normalized)
+    field.handleBlur()
+  }
+}
+
+// Free-form runner input with advisory, non-blocking verification: it
+// annotates the value but never rewrites or clears what the teacher typed.
+const RunnerField = ({ field, org }: { field: StringField; org?: string }) => {
+  const client = useOptionalGitHubClient()
+  const rawValue = field.state.value
+  const debouncedValue = useDebouncedValue(rawValue.trim(), 400)
+
+  // Hit the org runners API only for a well-shaped label not already
+  // recognized client-side; everything else needs no network call.
+  const needsOrgLookup = Boolean(
+    client &&
+    org &&
+    parseRunnerLabels(debouncedValue).some(
+      (label) =>
+        isRunnerLabelShapeValid(label) &&
+        !isKnownHostedRunnerLabel(label) &&
+        !isStandardSelfHostedLabel(label),
+    ),
+  )
+
+  const orgRunnersResultQuery = useQuery({
+    ...orgRunnersQuery(client!, org ?? ""),
+    enabled: needsOrgLookup,
+  })
+
+  const orgRunners: OrgRunnersResult = needsOrgLookup
+    ? (orgRunnersResultQuery.data ?? { available: false, reason: "error" })
+    : { available: false, reason: "no-access" }
+
+  // Hold off on the "not found" verdict while the lookup is in flight.
+  const isVerifying = needsOrgLookup && orgRunnersResultQuery.isLoading
+
+  const pending = rawValue.trim() !== debouncedValue
+  const verification = verifyRunnerLabels(debouncedValue, orgRunners)
+
+  return (
+    <div>
+      <label htmlFor={field.name} className="block font-bold mb-1.5">
+        GitHub Runner
+      </label>
+      <input
+        id={field.name}
+        name={field.name}
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        className="input w-full max-w-xs"
+        placeholder="ubuntu-latest"
+        value={rawValue}
+        onBlur={normalizeOnBlur(field, (value) =>
+          parseRunnerLabels(value).join(", "),
+        )}
+        onChange={(e) => field.handleChange(e.target.value)}
+      />
+
+      <RunnerVerificationNote
+        verification={verification}
+        pending={pending || isVerifying}
+        hasValue={verification.kind !== "empty"}
+      />
+
+      {verification.kind === "self-hosted" && (
+        <p className="mt-1.5 text-xs text-base-content/50">
+          Combine comma-separated labels for a self-hosted runner (e.g.{" "}
+          <code>self-hosted, linux, x64</code>).
+        </p>
+      )}
+    </div>
+  )
+}
+
+const RunnerVerificationNote = ({
+  verification,
+  pending,
+  hasValue,
+}: {
+  verification: RunnerVerification
+  pending: boolean
+  hasValue: boolean
+}) => {
+  if (pending && hasValue) {
+    return (
+      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/60">
+        <Loader2 className="size-4 shrink-0 animate-spin" />
+        Checking…
+      </p>
+    )
+  }
+
+  switch (verification.kind) {
+    case "empty":
+      return (
+        <p className="mt-1.5 text-sm text-base-content/60">
+          Leave blank for <code>ubuntu-latest</code>.
+        </p>
+      )
+
+    case "hosted":
+      return (
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
+          <CheckCircle2 className="size-4 shrink-0" />
+          GitHub-hosted runner
+        </p>
+      )
+
+    case "self-hosted": {
+      const matched = verification.labels.filter(
+        (l) => l.kind === "self-hosted-match",
+      )
+      const matchNames = matched.flatMap((l) =>
+        l.kind === "self-hosted-match" ? l.runnerNames : [],
+      )
+      const uniqueNames = Array.from(new Set(matchNames))
+      return (
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
+          <ServerCog className="size-4 shrink-0" />
+          {verification.confirmed && uniqueNames.length > 0
+            ? `Self-hosted runner${
+                uniqueNames.length === 1 ? "" : "s"
+              } match (${uniqueNames.slice(0, 3).join(", ")}${
+                uniqueNames.length > 3 ? "…" : ""
+              })`
+            : "Self-hosted runner labels"}
+        </p>
+      )
+    }
+
+    case "problem": {
+      const badShape = verification.labels
+        .filter((l) => l.kind === "invalid-shape")
+        .map((l) => l.label)
+      const unverified = verification.labels
+        .filter((l) => l.kind === "unverified")
+        .map((l) => l.label)
+      const parts: string[] = []
+      if (badShape.length > 0) {
+        parts.push(
+          `Invalid label ${badShape
+            .map((l) => `"${l}"`)
+            .join(", ")} — letters, numbers, . - _ only.`,
+        )
+      }
+      if (unverified.length > 0) {
+        parts.push(
+          `No runner matches ${unverified
+            .map((l) => `"${l}"`)
+            .join(", ")} — check the spelling.`,
+        )
+      }
+      return (
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
+          <AlertTriangle className="size-4 shrink-0" />
+          {parts.join(" ")}
+        </p>
+      )
+    }
+
+    case "too-many":
+      return (
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
+          <AlertTriangle className="size-4 shrink-0" />
+          Too many labels ({verification.count}) — 10 max.
+        </p>
+      )
+
+    case "unknown":
+      return (
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/60">
+          <HelpCircle className="size-4 shrink-0" />
+          Can't verify — used as entered.
+        </p>
+      )
+
+    default:
+      return null
+  }
+}
 
 const toDatetimeLocalValue = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, "0")
@@ -116,7 +328,9 @@ export const assignmentToFormValues = (
     due_date: utcIsoToDatetimeLocalValue(assignment.due),
     max_group_size: assignment.max_group_size ?? 2,
     feedback_pr: assignment.feedback_pr ?? true,
-    runs_on: assignment.runtime?.["runs-on"] ?? "",
+    runs_on: parseRunnerLabels(assignment.runtime?.["runs-on"] ?? "").join(
+      ", ",
+    ),
     container_image: assignment.runtime?.container?.image ?? "",
     container_user: assignment.runtime?.container?.user ?? "",
     setup_command: setupCommand,
@@ -129,6 +343,7 @@ const CreateAssignmentForm = ({
   onSubmit,
   edit = false,
   loading = false,
+  org,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
@@ -178,7 +393,7 @@ const CreateAssignmentForm = ({
         due_date: value.due_date.trim(),
         max_group_size: value.max_group_size,
         feedback_pr: value.feedback_pr,
-        runs_on: value.runs_on,
+        runs_on: value.runs_on.trim(),
         container_image: value.container_image.trim(),
         container_user: value.container_user.trim(),
         setup_command: value.setup_command.trim(),
@@ -424,85 +639,48 @@ const CreateAssignmentForm = ({
               (ubuntu-latest + Python 3.12).
             </p>
 
-            <form.Subscribe selector={(state) => state.values.container_image}>
-              {(containerImage) => {
-                const usingContainer = Boolean(containerImage.trim())
-                const runnerOptions = usingContainer
-                  ? CONTAINER_RUNNER_LABELS
-                  : RUNNER_LABELS
-                return (
-                  <form.Field name="runs_on">
-                    {(field) => (
-                      <div className="mb-4">
-                        <div className="flex">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+              <form.Field name="runs_on">
+                {(field) => <RunnerField field={field} org={org} />}
+              </form.Field>
+
+              <form.Field name="container_image">
+                {(field) => (
+                  <div>
+                    <label
+                      htmlFor={field.name}
+                      className="block font-bold mb-1.5"
+                    >
+                      Docker Image
+                    </label>
+                    <input
+                      id={field.name}
+                      name={field.name}
+                      type="text"
+                      className="input w-full max-w-xs"
+                      placeholder="e.g. gcc:13"
+                      value={field.state.value}
+                      onBlur={normalizeOnBlur(field)}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                    <p className="mt-1.5 text-sm text-base-content/60">
+                      Run the autograder inside this public image.
+                    </p>
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Subscribe
+                selector={(state) => state.values.container_image}
+              >
+                {(containerImage) =>
+                  containerImage.trim() ? (
+                    <form.Field name="container_user">
+                      {(field) => (
+                        <div>
                           <label
                             htmlFor={field.name}
-                            className="label font-bold mb-2 mr-4"
-                          >
-                            GitHub Runner
-                          </label>
-                          <select
-                            id={field.name}
-                            name={field.name}
-                            className="select w-full max-w-xs"
-                            value={field.state.value}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                          >
-                            <option value="">Default (ubuntu-latest)</option>
-                            {runnerOptions.map((label) => (
-                              <option key={label} value={label}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        {usingContainer && (
-                          <p className="label pt-1">
-                            A container image runs on Ubuntu hosts only.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </form.Field>
-                )
-              }}
-            </form.Subscribe>
-
-            <form.Field name="container_image">
-              {(field) => (
-                <div className="mb-4">
-                  <label htmlFor={field.name} className="label font-bold mb-2">
-                    Docker Image
-                  </label>
-                  <input
-                    id={field.name}
-                    name={field.name}
-                    type="text"
-                    className="input w-full"
-                    placeholder="e.g., gcc:13 or cs50/cli"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
-                  />
-                  <p className="label pt-1">
-                    Run the autograder inside this public image. The image owns
-                    its toolchain and packages.
-                  </p>
-                </div>
-              )}
-            </form.Field>
-
-            <form.Subscribe selector={(state) => state.values.container_image}>
-              {(containerImage) =>
-                containerImage.trim() ? (
-                  <form.Field name="container_user">
-                    {(field) => (
-                      <div className="mb-4">
-                        <div className="flex">
-                          <label
-                            htmlFor={field.name}
-                            className="label font-bold mr-4"
+                            className="block font-bold mb-1.5"
                           >
                             Container User
                           </label>
@@ -511,27 +689,50 @@ const CreateAssignmentForm = ({
                             name={field.name}
                             type="text"
                             className="input w-full max-w-xs"
-                            placeholder="e.g., root"
+                            placeholder="e.g. root"
                             value={field.state.value}
-                            onBlur={field.handleBlur}
+                            onBlur={normalizeOnBlur(field)}
                             onChange={(e) => field.handleChange(e.target.value)}
                           />
+                          <p className="mt-1.5 text-sm text-base-content/60">
+                            Use <code>root</code> if checkout fails with a
+                            permission error.
+                          </p>
                         </div>
-                        <p className="label pt-1">
-                          Use <code>root</code> if checkout fails with a
-                          permission error in a non-root image.
-                        </p>
-                      </div>
-                    )}
-                  </form.Field>
+                      )}
+                    </form.Field>
+                  ) : null
+                }
+              </form.Subscribe>
+            </div>
+
+            <form.Subscribe
+              selector={(state) => [
+                state.values.runs_on,
+                state.values.container_image,
+              ]}
+            >
+              {([runsOn, containerImage]) => {
+                const warning = containerRunnerWarning(runsOn, containerImage)
+                return warning ? (
+                  <p
+                    role="alert"
+                    className="mt-3 flex items-center gap-1.5 text-sm text-error"
+                  >
+                    <AlertTriangle className="size-4 shrink-0" />
+                    {warning}
+                  </p>
                 ) : null
-              }
+              }}
             </form.Subscribe>
 
             <form.Field name="setup_command">
               {(field) => (
-                <div>
-                  <label htmlFor={field.name} className="label font-bold mb-2">
+                <div className="mt-4">
+                  <label
+                    htmlFor={field.name}
+                    className="block font-bold mb-1.5"
+                  >
                     Setup Command
                   </label>
                   <input
@@ -541,10 +742,10 @@ const CreateAssignmentForm = ({
                     className="input w-full"
                     placeholder="e.g., gcc -o hello hello.c"
                     value={field.state.value}
-                    onBlur={field.handleBlur}
+                    onBlur={normalizeOnBlur(field)}
                     onChange={(e) => field.handleChange(e.target.value)}
                   />
-                  <p className="label pt-1">
+                  <p className="mt-1.5 text-sm text-base-content/60">
                     Runs once before grading (e.g. to compile). Added as a
                     leading 0-point autograding step named “setup”.
                   </p>
