@@ -29,7 +29,8 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher classroom migrate --source <id-or-org> --target <org>` | Import an existing GitHub Classroom into `<target>/classroom50`. Discovers the source classroom (numeric ID or org login), copies each starter repo into the target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. Optional: `--short-name`, `--term`, `--template-suffix`, `--include-archived`, `--dry-run`. Roster and scores are NOT migrated. |
 | `gh teacher roster list <org> <classroom>` | List the students in `students.csv` as an aligned table (username, name, email, section, github_id). Optional: `--json` (full `{username, first_name, last_name, email, section, github_id}` objects), `--quiet` (one username per line, no table or stderr summary). Read-only. |
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
-| `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
+| `gh teacher roster update <org> <classroom> <username>` | Correct fields on an existing row (matched by username); only the flags you pass change, `github_id` and unset columns are preserved. Roster-only: no invite, no `github_id` re-resolution. Errors if the student isn't on the roster. Same four optional flags as `add`. |
+| `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership (use `gh teacher remove <org> <username>` for that). Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
 | `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flag: `--name`. Optional: `--template <owner>/<repo>[@branch]` (starter-code repo; omit for a template-less assignment, where students get an empty repo with just the autograder shim), `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (`individual` default, or `group`), `--max-group-size <N>` (required with `--mode group`, `>= 2`), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`), `--feedback-pr` (open one long-lived instructor-review PR per student repo — **on by default**; `--feedback-pr=false` to disable). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
 | `gh teacher assignment test add <org> <classroom> <slug>` | Add or update one declarative test on an existing assignment's `tests` block. Required flags: `--name`, `--type {io,run,python}`, `--run`. Optional: `--setup`, `--input`/`--input-file`, `--expected`/`--expected-file`, `--comparison {included,exact,regex}`, `--timeout`, `--exit-code`, `--points`. Mutually exclusive with a per-assignment `autograder.py`. |
@@ -310,6 +311,18 @@ gh teacher roster add cs50-fall-2026 cs-principles bob
 Appends or upserts one row by `username` (case-insensitive match). All four data flags are optional; an absent flag writes an empty value into its column. After the roster write lands, sends an org invitation if the student isn't already a member and doesn't have a pending invite — same path `gh teacher invite` uses, but quiet about already-member/already-pending cases.
 
 Safe to re-run: the row is replaced in place — every run produces a commit, but a no-change re-run yields a same-tree commit (never duplicates or removes data). The org-invite step is skipped when the student is already an active or pending member.
+
+### `gh teacher roster update`
+
+```sh
+gh teacher roster update <org> <classroom> <username> [--first-name <n>] [--last-name <n>] [--email <addr>] [--section <s>]
+gh teacher roster update cs50-fall-2026 cs-principles alice --email alice@example.edu
+gh teacher roster update cs50-fall-2026 cs-principles alice --first-name Alice --section section-2
+```
+
+Corrects fields on an **existing** row, matched by `<username>` (case-insensitive). Only the flags you pass are changed — every other column, including the immutable `github_id`, is left untouched. This is the difference from `roster add`, which rewrites the whole row and blanks any field you don't re-supply. Pass `--email ""` to clear an address.
+
+**Roster-only:** unlike `roster add`, it never sends an org invite and never re-resolves `github_id` — use it for typo fixes, not onboarding. At least one data flag is required. A patch that already matches the row is a no-op (no commit). Unlike `roster remove`, an unknown `<username>` is an **error** (you're correcting a specific person), pointing you at `gh teacher roster add`.
 
 ### `gh teacher roster remove`
 

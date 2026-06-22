@@ -192,6 +192,15 @@ gh teacher roster add cs50-fall-2026 cs-principles alice --first-name Alice --la
 
 This resolves the student's immutable `github_id` (GitHub's numeric account ID), upserts the row in `students.csv` (case-insensitive match on username), and sends an org invitation if they aren't already a member. It also adds the student to the classroom's `classroom50-<classroom>` team, so they inherit read access to the classroom's in-org private assignment templates (the membership goes active immediately for an existing org member, or pending until they accept the org invite). All four data flags are optional; values left unset become empty cells in the CSV. Re-running with the same arguments is safe — the row is replaced, the org invite is skipped if already pending or active, and the team add is idempotent. `gh teacher roster remove` symmetrically removes the student from the team (org membership is left untouched).
 
+**Correct an existing student's details:**
+
+```sh
+gh teacher roster update <org> <classroom> <username> [--first-name <name>] [--last-name <name>] [--email <addr>] [--section <id>]
+gh teacher roster update cs50-fall-2026 cs-principles alice --email alice@example.edu
+```
+
+Reach for `update` when you just need to fix a field on someone already on the roster — a misspelled name, a new email, a section move. Only the flags you pass change; every other column (including `github_id`) is preserved, so `update` won't blank fields the way re-running `add` does. Unlike `add`, it's **roster-only**: no org invite, no `github_id` re-resolution. Pass `--email ""` to clear an address. At least one data flag is required, a patch that already matches the row is a no-op, and an unknown username is an error (it points you at `roster add`).
+
 **Bulk import from a local CSV:**
 
 ```sh
@@ -218,7 +227,7 @@ gh teacher roster remove <org> <classroom> <username>
 
 Drops the row from `students.csv`. **Does NOT remove org membership** — use `gh teacher remove <org> <username>` (step 8) for that. Splitting roster removal from org removal is deliberate: an off-by-one roster edit shouldn't be able to revoke a student's access to every repo in the org.
 
-`roster list` is read-only; the three write subcommands (`add`, `import`, `remove`) go through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
+`roster list` is read-only; the four write subcommands (`add`, `update`, `import`, `remove`) go through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
 
 ## 7. Add assignments
 
