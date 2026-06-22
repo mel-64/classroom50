@@ -137,7 +137,7 @@ const RunnerField = ({ field, org }: { field: StringField; org?: string }) => {
 
   return (
     <div>
-      <label htmlFor={field.name} className="block font-bold mb-1.5">
+      <label htmlFor={field.name} className="label block font-bold mb-1.5">
         GitHub Runner
       </label>
       <input
@@ -599,7 +599,7 @@ const CreateAssignmentForm = ({
                 />
                 <div>
                   <div className="flex items-center gap-2">
-                    <label htmlFor={field.name} className="font-bold">
+                    <label htmlFor={field.name} className="label font-bold">
                       Feedback pull request
                     </label>
                     <span
@@ -649,7 +649,7 @@ const CreateAssignmentForm = ({
                   <div>
                     <label
                       htmlFor={field.name}
-                      className="block font-bold mb-1.5"
+                      className="label block font-bold mb-1.5"
                     >
                       Docker Image
                     </label>
@@ -731,7 +731,7 @@ const CreateAssignmentForm = ({
                 <div className="mt-4">
                   <label
                     htmlFor={field.name}
-                    className="block font-bold mb-1.5"
+                    className="label block font-bold mb-1.5"
                   >
                     Setup Command
                   </label>
