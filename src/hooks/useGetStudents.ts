@@ -6,7 +6,7 @@ import type { Student } from "@/types/classroom"
 
 const useGetStudents = (org: string, classroom: string) => {
   const client = useGitHubClient()
-  const { data: students } = useQuery(
+  const { data: students, isLoading } = useQuery(
     csvFileQuery<Student>(
       client,
       org,
@@ -17,6 +17,7 @@ const useGetStudents = (org: string, classroom: string) => {
 
   return {
     students: students || [],
+    isLoading,
   }
 }
 

@@ -282,6 +282,7 @@ export const MyClasses = ({
   isTeacher = false,
 }) => {
   const { org } = useParams({ strict: false })
+  const { isLoading: roleLoading } = useCourseTeacherAccess(org ?? "")
   const onSettings = settings || selected === "settings"
   return (
     <div className="py-4">
@@ -291,7 +292,15 @@ export const MyClasses = ({
             className={`flex px-2 rounded-box${onSettings ? "" : " bg-[#323b49]"}`}
           >
             <BookText />
-            <span>{isTeacher ? "My Classes" : "My Assignments"}</span>
+            <span>
+              {roleLoading ? (
+                <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
+              ) : isTeacher ? (
+                "My Classes"
+              ) : (
+                "My Assignments"
+              )}
+            </span>
           </li>
         </Link>
         {isTeacher && (

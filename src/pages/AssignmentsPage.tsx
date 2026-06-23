@@ -14,18 +14,31 @@ import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import { OrgRepos } from "./ClassesPage"
 
 const TeacherAssignmentsView = ({ org, classroom }) => {
-  const { data: classData } = useGetClassroomAssignments(org, classroom)
-  const { students } = useGetStudents(org, classroom)
-  const { data: classroomData } = useGetClassroom(org, classroom)
+  const { data: classData, isLoading: assignmentsLoading } =
+    useGetClassroomAssignments(org, classroom)
+  const { students, isLoading: studentsLoading } = useGetStudents(
+    org,
+    classroom,
+  )
+  const { data: classroomData, isLoading: classroomLoading } = useGetClassroom(
+    org,
+    classroom,
+  )
 
   return (
     <div>
       <div className="flex justify-between">
         <div>
-          <h1 className="text-lg pt-8 pb-2 font-bold">{classroomData?.name}</h1>
+          {classroomLoading ? (
+            <div className="skeleton mt-8 mb-2 h-6 w-48" />
+          ) : (
+            <h1 className="text-lg pt-8 pb-2 font-bold">
+              {classroomData?.name || classroomData?.short_name || classroom}
+            </h1>
+          )}
           <h3 className="pb-10">
             {classroomData?.term ? `${classroomData?.term} • ` : ""}
-            {students.length} Students
+            {studentsLoading ? "…" : students.length} Students
           </h3>
         </div>
         <div className="pt-10">
@@ -39,6 +52,7 @@ const TeacherAssignmentsView = ({ org, classroom }) => {
         classroom={classroom}
         assignments={classData?.assignments}
         students={students}
+        loading={assignmentsLoading}
       />
     </div>
   )
@@ -59,7 +73,8 @@ const StudentAssignmentsView = ({ org, classroom }) => {
 
 const AssignmentsPage = () => {
   const { org, classroom } = useParams({ strict: false })
-  const { isTeacher, isStudent } = useCourseTeacherAccess(org)
+  const { isTeacher, isStudent, isLoading: roleLoading } =
+    useCourseTeacherAccess(org)
 
   return (
     <div className="min-h-screen">
@@ -71,10 +86,17 @@ const AssignmentsPage = () => {
             isTeacher={isTeacher}
             classroom={classroom}
           />
-          {isTeacher && (
+          {roleLoading && (
+            <div className="mt-8 space-y-4">
+              <div className="skeleton h-6 w-48" />
+              <div className="skeleton h-4 w-32" />
+              <div className="skeleton h-64 w-full rounded-box" />
+            </div>
+          )}
+          {!roleLoading && isTeacher && (
             <TeacherAssignmentsView org={org} classroom={classroom} />
           )}
-          {isStudent && (
+          {!roleLoading && isStudent && (
             <StudentAssignmentsView org={org} classroom={classroom} />
           )}
         </DrawerContent>
