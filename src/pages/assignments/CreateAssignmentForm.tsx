@@ -48,6 +48,7 @@ export type CreateAssignmentFormValues = {
 type CreateAssignmentFormProps = {
   defaultValues?: Partial<CreateAssignmentFormValues>
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>
+  onCancel?: () => void
   edit?: boolean
   loading?: boolean
   // Org slug for verifying a runner label against the org's self-hosted
@@ -341,6 +342,7 @@ export const assignmentToFormValues = (
 const CreateAssignmentForm = ({
   defaultValues,
   onSubmit,
+  onCancel,
   edit = false,
   loading = false,
   org,
@@ -759,19 +761,40 @@ const CreateAssignmentForm = ({
       <AutogradingTestsPane form={form} />
       <div className="divider" />
       <div className="card-actions justify-end p-2">
+        {onCancel && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={onCancel}
+            disabled={loading}
+          >
+            Cancel
+          </button>
+        )}
         <form.Subscribe
-          selector={(state) => [state.canSubmit, state.isSubmitting]}
+          selector={(state) => [
+            state.canSubmit,
+            state.isSubmitting,
+            state.isDefaultValue,
+          ]}
         >
-          {([canSubmit, isSubmitting]) => (
+          {([canSubmit, isSubmitting, isDefaultValue]) => (
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={!canSubmit || isSubmitting || loading}
+              disabled={
+                !canSubmit ||
+                isSubmitting ||
+                loading ||
+                (edit && isDefaultValue)
+              }
             >
               {isSubmitting || loading ? (
                 <span className="loading loading-spinner" />
+              ) : edit ? (
+                "Save Changes"
               ) : (
-                `${edit ? "Edit" : "Create"} Assignment`
+                "Create Assignment"
               )}
             </button>
           )}
