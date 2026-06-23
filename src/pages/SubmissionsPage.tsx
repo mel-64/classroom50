@@ -84,8 +84,7 @@ const SubmissionsPage = () => {
       ? formatDistanceToNow(new Date(lastRun.created_at), { addSuffix: true })
       : null
 
-  // Refetch scores and the last-run timestamp once the manually-triggered
-  // collection run completes.
+  // Refresh scores and the last-run timestamp once a manual collection finishes.
   useEffect(() => {
     if (collectScores.phase === "completed") {
       refetchScores()

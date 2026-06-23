@@ -35,9 +35,8 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-// A group submission credits every rostered collaborator. The shared repo (the
-// real group identity) sits on top, then each member is listed with their full
-// name and GitHub handle so reviewers can identify everyone at a glance.
+// Credits every rostered collaborator on a group submission: the shared repo
+// (the group's identity) on top, then each member's full name and GitHub handle.
 const GroupMembers = ({
   usernames,
   students,

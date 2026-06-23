@@ -1344,21 +1344,15 @@ export async function encryptSecret(publicKey: string, secret: string) {
 }
 
 /**
- * Validates a fine-grained PAT before it is stored as the service token,
- * mirroring the CLI's `servicetoken.ValidateToken`: it reads the classroom50
- * config repo's contents *as the supplied token*, exercising the
- * `Contents: read` permission on at least that repo. Failures are mapped to
- * actionable messages so an invalid/expired/mis-scoped token is caught here
- * rather than surfacing later as a failed workflow run.
+ * Validates a fine-grained PAT before storing it as the service token, mirroring
+ * the CLI's `servicetoken.ValidateToken`: reads the classroom50 repo's contents
+ * *as the supplied token*, exercising `Contents: read`, and maps failures to
+ * actionable messages so a bad token is caught here, not later as a failed run.
  *
- * Scope caveat: this confirms the token is live and can read `classroom50`. It
- * does NOT prove the token can read the *student* repositories the collect
- * workflow walks — a fine-grained PAT scoped to "Only select repositories"
- * including classroom50 but not the student repos will pass here yet still fail
- * collection. Detecting that is not reliably possible from the token alone
- * (fine-grained PATs don't expose their repo selection via the API), so the UI
- * instructs the teacher to choose "All repositories" and the success copy is
- * deliberately scoped to what this check actually proves.
+ * Caveat: this proves the token can read `classroom50`, not the student repos
+ * the collect workflow walks (fine-grained PATs don't expose their repo
+ * selection via the API). Hence the UI requires "All repositories" and the
+ * success copy is scoped to what this check actually proves.
  */
 export async function validateServiceToken(
   token: string,
@@ -1372,9 +1366,9 @@ export async function validateServiceToken(
   const tokenClient = createGitHubClient({ token: trimmed })
 
   try {
-    // Probes api.github.com directly with the pasted token. Relies on
-    // GitHub's permissive CORS on authenticated REST calls; if GitHub is
-    // ever proxied through a CORS-stripping worker, route this through it too.
+    // Probes api.github.com directly with the pasted token, relying on GitHub's
+    // permissive CORS on authenticated REST calls; route through any future
+    // CORS-stripping proxy too.
     await tokenClient.request(`/repos/${org}/classroom50/contents/`)
   } catch (err) {
     if (err instanceof GitHubAPIError) {
@@ -1397,8 +1391,8 @@ export async function validateServiceToken(
         )
       }
     }
-    // A browser fetch that never reached GitHub (network down, CORS) throws a
-    // TypeError, not a GitHubAPIError — don't blame the token for that.
+    // A fetch that never reached GitHub (network/CORS) throws a TypeError, not a
+    // GitHubAPIError — don't blame the token for that.
     if (err instanceof TypeError) {
       throw new Error(
         `Couldn't reach GitHub to verify the token (network or CORS issue). Check your connection and try again. (${err.message})`,
@@ -1417,21 +1411,17 @@ export async function validateServiceToken(
 export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
 
 /**
- * Triggers the classroom50 config repo's `collect-scores.yaml` workflow via
- * workflow_dispatch. This is the same nightly job that refreshes `scores.json`;
- * dispatching it lets a teacher pull fresh submissions on demand instead of
- * waiting for the cron run. The dispatch needs a git ref, so we read the repo's
- * default branch first.
+ * Dispatches the classroom50 repo's `collect-scores.yaml` workflow — the same
+ * nightly job that refreshes `scores.json` — so a teacher can pull fresh
+ * submissions on demand. Reads the repo's default branch for the required ref.
  *
- * Returns `sinceRunId`: the id of the newest collect-scores workflow_dispatch
- * run that existed *before* this POST (or null if none). The dispatch API
- * returns no run id, so the caller identifies the run it triggered as "the
- * oldest dispatch run with an id greater than sinceRunId" — monotonic and
- * independent of browser/server clock skew, and unambiguous when several
- * dispatches race.
+ * Returns `sinceRunId`: the newest collect-scores dispatch run before this POST
+ * (null if none). Since the dispatch API returns no run id, the caller finds the
+ * triggered run as the oldest dispatch run with a larger id — monotonic, so no
+ * clock comparison and unambiguous when dispatches race.
  *
- * @param classroom optional dispatch input to scope collection to one
- *   classroom; callers currently omit it to collect org-wide.
+ * @param classroom optional dispatch input to scope collection to one classroom;
+ *   callers currently omit it to collect org-wide.
  */
 export async function triggerScoreCollection(
   client: GitHubClient,
@@ -1446,10 +1436,8 @@ export async function triggerScoreCollection(
   }
   const ref = repo.default_branch || "main"
 
-  // Snapshot the newest existing dispatch run id *before* the POST. Run ids are
-  // monotonic, so the run this POST creates is the oldest dispatch run whose id
-  // exceeds this baseline — no clock comparison, no ambiguity with concurrent
-  // dispatches.
+  // Snapshot the newest dispatch run id before the POST. Run ids are monotonic,
+  // so the run this POST creates is the oldest dispatch run whose id exceeds it.
   const baseline = await client.request<{ workflow_runs: { id: number }[] }>(
     `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
   )

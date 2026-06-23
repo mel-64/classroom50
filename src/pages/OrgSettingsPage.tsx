@@ -23,9 +23,8 @@ const DEFAULT_EXPIRY_DAYS = 120
 const MIN_EXPIRY_DAYS = 1
 const MAX_EXPIRY_DAYS = 366
 
-// One descriptor per service-token status so the banner's container style,
-// icon, and title stay in sync from a single source instead of three parallel
-// ternaries.
+// One descriptor per service-token status, keeping the banner's style, icon, and
+// title in sync from a single source.
 const TOKEN_STATUS_BANNER = {
   present: {
     className: "border-success/30 bg-success/10",
@@ -204,16 +203,14 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           rel="noreferrer"
           aria-disabled={!expiryValid}
           onClick={(e) => {
-            // The visual "disabled" state must also block keyboard/AT
-            // activation; otherwise an invalid expiry would still navigate to
-            // GitHub with the silent default fallback.
+            // aria-disabled is visual only; also block activation so an invalid
+            // expiry can't navigate to GitHub with the silent default.
             if (!expiryValid) {
               e.preventDefault()
               expiryInputRef.current?.focus()
               return
             }
-            // Focus the token field so the user can paste straight away
-            // when they return from the GitHub tab.
+            // Focus the token field so the user can paste on return.
             window.setTimeout(() => tokenInputRef.current?.focus(), 0)
           }}
         >

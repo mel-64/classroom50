@@ -824,14 +824,11 @@ async function listLatestCollectScoresRun(
   return res.workflow_runs ?? []
 }
 
-// Tracks a just-dispatched collect-scores run to completion. Run ids are
-// monotonically increasing, so the run we triggered is the *oldest* dispatch
-// run whose id is greater than `sinceRunId` (the newest id seen before our
-// POST). This binds the poll to our own run rather than "whatever ran most
-// recently", so a concurrent dispatch (another tab/teacher) can't be mistaken
-// for ours, and it doesn't depend on the browser clock. Returns null until our
-// run registers. `sinceRunId === null` means there were no prior dispatch runs,
-// so the oldest dispatch run on the first page is ours.
+// Finds the run we dispatched: run ids are monotonic, so it's the oldest
+// dispatch run with an id greater than `sinceRunId` (the newest id before our
+// POST). Binding to our own run avoids mistaking a concurrent dispatch for ours
+// and needs no clock. Returns null until our run registers; `sinceRunId === null`
+// means no prior runs, so the oldest run on the first page is ours.
 export async function getCollectScoresRunAfterId(
   client: GitHubClient,
   org: string,
@@ -851,11 +848,9 @@ export async function getCollectScoresRunAfterId(
   return newer.length > 0 ? newer[newer.length - 1] : null
 }
 
-// The most recent *completed* collect-scores run regardless of trigger (nightly
-// cron or a manual dispatch), or null if the workflow has never completed. Used
-// to show teachers when scores were last collected; filtering on status=completed
-// keeps an in-flight newer run (cron mid-run, another teacher's dispatch) from
-// hiding the prior collection's timestamp.
+// The most recent *completed* collect-scores run (cron or manual), or null if
+// the workflow has never completed. Used for the "last collected" timestamp;
+// status=completed stops an in-flight newer run from hiding the prior one.
 export async function getLastCollectScoresRun(
   client: GitHubClient,
   org: string,

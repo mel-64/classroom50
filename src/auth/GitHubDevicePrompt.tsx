@@ -48,8 +48,7 @@ export function GitHubDevicePrompt({
     try {
       await navigator.clipboard.writeText(device.userCode)
       setCopied(true)
-      // Bump a tick so the reset timer re-arms even on a repeat click while
-      // already showing "Copied!".
+      // Re-arm the reset timer on a repeat click while still showing "Copied!".
       setCopyTick((t) => t + 1)
       onCodeCopied()
     } catch {

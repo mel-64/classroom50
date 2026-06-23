@@ -14,35 +14,32 @@ export type CollectScoresPhase =
   | "failed"
   | "timeout"
 
-// Stop polling for the dispatched run after this long; a run that hasn't
-// registered or completed by now is treated as a timeout so the UI doesn't spin
-// forever (and we don't poll the runs API indefinitely).
+// Give up polling after this long so the UI doesn't spin forever on a run that
+// never registers or hangs.
 const POLL_TIMEOUT_MS = 10 * 60 * 1000
-// Poll quickly at first, then back off so a long/stuck run doesn't hammer the
-// GitHub runs API every 5s for the full timeout window.
+// Poll fast at first, then back off so a long run doesn't hammer the runs API.
 const POLL_INTERVAL_MS = 5000
 const POLL_BACKOFF_AFTER_MS = 60 * 1000
 const POLL_BACKOFF_INTERVAL_MS = 15000
 
-// A run is finished once GitHub reports a terminal conclusion (success,
-// failure, cancelled, timed_out, ...), regardless of whether `status` has
-// flipped to "completed" yet. Polling stops on either signal.
+// Terminal once GitHub reports a conclusion, even before `status` flips to
+// "completed".
 const isRunFinished = (
   run: GitHubWorkflowRun | null | undefined,
 ) => Boolean(run && (run.status === "completed" || run.conclusion !== null))
 
-// The in-flight dispatch we're tracking. `sinceRunId` is the newest dispatch
-// run id seen *before* the POST (null = none existed); the run we triggered is
-// the oldest dispatch run with a larger id. `startedAt` anchors the timeout to
-// the original dispatch so it survives a remount (rather than restarting).
+// The in-flight dispatch we're tracking. The dispatch API returns no run id, so
+// `sinceRunId` records the newest dispatch run before our POST (null = none);
+// our run is the oldest dispatch run with a larger id. `startedAt` anchors the
+// timeout so it survives a remount.
 type DispatchState = { sinceRunId: number | null; startedAt: number }
 
 const storageKey = (org: string) => `cl50:collect-scores:${org}`
 
-// Persist the dispatch across unmount/remount so navigating away and back
-// re-attaches to the in-flight run instead of going idle (which would re-enable
-// "Collect now" and invite a duplicate dispatch). sessionStorage is scoped to
-// the tab, which is the right lifetime for "a collection I started this session".
+// Persist across unmount so navigating away and back re-attaches to the running
+// dispatch instead of re-enabling "Collect now" and inviting a duplicate.
+// sessionStorage (tab-scoped) matches the "collection started this session"
+// lifetime.
 const loadDispatch = (org: string): DispatchState | null => {
   if (!org) return null
   try {
@@ -71,12 +68,11 @@ const saveDispatch = (org: string, state: DispatchState | null) => {
 }
 
 /**
- * Triggers the collect-scores workflow and tracks the resulting run to
- * completion. The dispatch API returns no run id, so we snapshot the newest
- * dispatch run id *before* the POST and then poll for the oldest run with a
- * larger id — binding the poll to our own run (clock-independent, unambiguous
- * across concurrent dispatches). The dispatch is persisted to sessionStorage so
- * a remount re-attaches to an in-flight run. `phase` latches at
+ * Triggers the collect-scores workflow and tracks the resulting run. The
+ * dispatch API returns no run id, so we snapshot the newest dispatch run before
+ * the POST and poll for the oldest run with a larger id — binding the poll to
+ * our own run, independent of clocks and concurrent dispatches. Persisted to
+ * sessionStorage so a remount re-attaches; `phase` latches at
  * completed/failed/timeout until the next dispatch.
  */
 const useTriggerScoreCollection = (org: string) => {
@@ -85,10 +81,8 @@ const useTriggerScoreCollection = (org: string) => {
     loadDispatch(org),
   )
   const [timedOut, setTimedOut] = useState(false)
-  // The org the current `dispatch`/`timedOut` state belongs to. When `org`
-  // changes we re-derive from storage during render (the React-idiomatic
-  // alternative to a setState-in-effect), so the hook never tracks one org's
-  // run against another.
+  // Reset tracking when `org` changes by re-deriving from storage during render
+  // (the React-idiomatic alternative to a setState-in-effect).
   const [trackedOrg, setTrackedOrg] = useState(org)
   if (org !== trackedOrg) {
     setTrackedOrg(org)
@@ -97,10 +91,9 @@ const useTriggerScoreCollection = (org: string) => {
   }
 
   const mutation = useMutation({
-    // Collect all classrooms (org-wide), matching the "Last collected" timestamp
-    // semantics. To narrow to a single classroom later, pass its slug as the
-    // third arg: triggerScoreCollection(client, org, classroom). The workflow
-    // already accepts a `classroom` dispatch input.
+    // Org-wide collection, matching the "Last collected" timestamp. Pass a
+    // classroom slug as the third arg to scope it: the workflow already accepts
+    // a `classroom` dispatch input.
     mutationFn: () => triggerScoreCollection(client, org),
     onSuccess: (result) => {
       setTimedOut(false)
@@ -120,17 +113,15 @@ const useTriggerScoreCollection = (org: string) => {
     enabled: Boolean(org && dispatch && !timedOut),
     refetchInterval: (query) => {
       if (isRunFinished(query.state.data)) return false
-      // Back off the cadence once the run has been pending for a while so a
-      // stuck/long run doesn't poll every 5s for the full 10 minutes. Anchored
-      // to the dispatch's wall-clock start (persisted across remounts) rather
-      // than a per-observer poll count that resets on remount/org change.
+      // Back off once the run has been pending a while. Anchored to the
+      // dispatch's wall-clock start (survives remounts) rather than a poll count.
       const elapsed = Date.now() - (dispatch?.startedAt ?? Date.now())
       return elapsed >= POLL_BACKOFF_AFTER_MS
         ? POLL_BACKOFF_INTERVAL_MS
         : POLL_INTERVAL_MS
     },
     // Surface a persistent poll failure instead of retrying invisibly until the
-    // 10-minute timeout (the app-wide QueryClient has no retry policy of its own).
+    // timeout (the app-wide QueryClient sets no retry policy).
     retry: false,
     staleTime: 0,
     gcTime: 0,
@@ -139,18 +130,17 @@ const useTriggerScoreCollection = (org: string) => {
   const run = runQuery.data
   const runCompleted = Boolean(dispatch) && isRunFinished(run)
 
-  // Clear the persisted dispatch once the run terminates so a remount doesn't
-  // re-attach to a finished run; phase stays latched within this mount because
-  // `dispatch` state is only reset on org change or a new dispatch.
+  // Clear persisted state once the run terminates so a remount doesn't re-attach
+  // to a finished run; `phase` stays latched because `dispatch` is only reset on
+  // org change or a new dispatch.
   useEffect(() => {
     if (runCompleted) saveDispatch(org, null)
   }, [runCompleted, org])
 
-  // Bound the wait so a run that never registers or hangs doesn't poll forever;
-  // on timeout we flip a flag that both stops the query (via `enabled`) and
-  // latches `phase` to "timeout". The deadline is anchored to the original
-  // dispatch time so a remount doesn't grant a fresh 10 minutes (a deadline
-  // already in the past schedules a 0ms timer rather than setting state inline).
+  // Time out the wait, flipping a flag that both stops the query and latches
+  // `phase` to "timeout". The deadline is anchored to the dispatch time so a
+  // remount doesn't grant a fresh window (a past deadline fires a 0ms timer
+  // rather than setting state during render).
   useEffect(() => {
     if (!dispatch || runCompleted || timedOut) return
     const remaining = Math.max(

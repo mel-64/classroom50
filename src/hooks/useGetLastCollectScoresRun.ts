@@ -3,8 +3,6 @@ import { useQuery } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { getLastCollectScoresRun, githubKeys } from "./github/queries"
 
-// The most recent collect-scores run (cron or manual), so teachers can see when
-// scores were last collected. Returns null if the workflow has never run.
 const useGetLastCollectScoresRun = (org: string) => {
   const client = useGitHubClient()
 
