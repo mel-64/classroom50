@@ -280,11 +280,8 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               }}
             />
             <p className="text-xs text-base-content/50">
-              Before saving, the token is checked against {org ?? "your"}
-              /classroom50 to confirm it’s live and can read that repo. This
-              catches an invalid or expired token now, but can’t confirm the
-              token reaches every student repo — make sure you chose{" "}
-              <span className="font-semibold">All repositories</span> when
+              We’ll check the token is valid before saving. Double-check you
+              chose <span className="font-semibold">All repositories</span> when
               creating it.
             </p>
             {patMutation.isError && (
