@@ -280,9 +280,12 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               }}
             />
             <p className="text-xs text-base-content/50">
-              The token is checked against {org ?? "your"}/classroom50 before
-              it’s saved, so a mis-scoped or expired token is caught now rather
-              than during the next score-collection run.
+              Before saving, the token is checked against {org ?? "your"}
+              /classroom50 to confirm it’s live and can read that repo. This
+              catches an invalid or expired token now, but can’t confirm the
+              token reaches every student repo — make sure you chose{" "}
+              <span className="font-semibold">All repositories</span> when
+              creating it.
             </p>
             {patMutation.isError && (
               <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
@@ -298,8 +301,8 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               <p className="flex items-center gap-1 text-sm text-success">
                 <CheckCircle2 className="size-4" />
                 {savedKind === "updated"
-                  ? "Service token validated and updated."
-                  : "Service token validated and saved."}
+                  ? "Service token checked and updated."
+                  : "Service token checked and saved."}
               </p>
             )}
             <button

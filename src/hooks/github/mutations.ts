@@ -1346,10 +1346,19 @@ export async function encryptSecret(publicKey: string, secret: string) {
 /**
  * Validates a fine-grained PAT before it is stored as the service token,
  * mirroring the CLI's `servicetoken.ValidateToken`: it reads the classroom50
- * config repo's contents *as the supplied token*, which exercises the exact
- * `Contents: read` permission the collect-scores workflow relies on. Failures
- * are mapped to actionable messages so a misconfigured token is caught here
+ * config repo's contents *as the supplied token*, exercising the
+ * `Contents: read` permission on at least that repo. Failures are mapped to
+ * actionable messages so an invalid/expired/mis-scoped token is caught here
  * rather than surfacing later as a failed workflow run.
+ *
+ * Scope caveat: this confirms the token is live and can read `classroom50`. It
+ * does NOT prove the token can read the *student* repositories the collect
+ * workflow walks — a fine-grained PAT scoped to "Only select repositories"
+ * including classroom50 but not the student repos will pass here yet still fail
+ * collection. Detecting that is not reliably possible from the token alone
+ * (fine-grained PATs don't expose their repo selection via the API), so the UI
+ * instructs the teacher to choose "All repositories" and the success copy is
+ * deliberately scoped to what this check actually proves.
  */
 export async function validateServiceToken(
   token: string,
@@ -1375,12 +1384,26 @@ export async function validateServiceToken(
           { cause: err },
         )
       }
-      if (err.status === 403 || err.status === 404) {
+      if (err.status === 403) {
         throw new Error(
-          `This token can't read ${org}/classroom50 contents. Create a fine-grained PAT with Resource owner = ${org}, Repository access = All repositories, and Contents: Read. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved).`,
+          `This token can't read ${org}/classroom50 contents (403). Create a fine-grained PAT with Resource owner = ${org}, Repository access = All repositories, and Contents: Read. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved).`,
           { cause: err },
         )
       }
+      if (err.status === 404) {
+        throw new Error(
+          `Couldn't find a classroom50 repository in ${org} (404). Check that the organization is correct and that setup has been run for it — this isn't necessarily a problem with the token itself.`,
+          { cause: err },
+        )
+      }
+    }
+    // A browser fetch that never reached GitHub (network down, CORS) throws a
+    // TypeError, not a GitHubAPIError — don't blame the token for that.
+    if (err instanceof TypeError) {
+      throw new Error(
+        `Couldn't reach GitHub to verify the token (network or CORS issue). Check your connection and try again. (${err.message})`,
+        { cause: err },
+      )
     }
     throw new Error(
       `Couldn't verify the token against ${org}/classroom50: ${getErrorMessage(
