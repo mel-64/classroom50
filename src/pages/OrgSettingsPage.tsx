@@ -22,6 +22,30 @@ const DEFAULT_EXPIRY_DAYS = 120
 const MIN_EXPIRY_DAYS = 1
 const MAX_EXPIRY_DAYS = 366
 
+// One descriptor per service-token status so the banner's container style,
+// icon, and title stay in sync from a single source instead of three parallel
+// ternaries.
+const TOKEN_STATUS_BANNER = {
+  present: {
+    className: "border-success/30 bg-success/10",
+    Icon: CheckCircle2,
+    iconClassName: "text-success",
+    title: "A service token is already set",
+  },
+  missing: {
+    className: "border-info/30 bg-info/10",
+    Icon: Info,
+    iconClassName: "text-info",
+    title: "No service token set yet",
+  },
+  unknown: {
+    className: "border-warning/30 bg-warning/10",
+    Icon: TriangleAlert,
+    iconClassName: "text-warning",
+    title: "Couldn’t check the service token",
+  },
+} as const
+
 export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
@@ -30,6 +54,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   const [savedKind, setSavedKind] = useState<null | "saved" | "updated">(null)
   const [expiryDays, setExpiryDays] = useState(String(DEFAULT_EXPIRY_DAYS))
   const tokenInputRef = useRef<HTMLInputElement>(null)
+  const expiryInputRef = useRef<HTMLInputElement>(null)
 
   const { data: tokenStatus, isLoading: tokenStatusLoading } =
     useGetServiceTokenStatus(org ?? "")
@@ -93,44 +118,36 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           submissions.
         </p>
 
-        {!tokenStatusLoading && tokenStatus && (
-          <div
-            className={[
-              "mt-4 flex items-start gap-3 rounded-xl border p-4 text-sm",
-              tokenStatus.status === "present"
-                ? "border-success/30 bg-success/10"
-                : tokenStatus.status === "missing"
-                  ? "border-info/30 bg-info/10"
-                  : "border-warning/30 bg-warning/10",
-            ].join(" ")}
-          >
-            {tokenStatus.status === "present" ? (
-              <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" />
-            ) : tokenStatus.status === "missing" ? (
-              <Info className="mt-0.5 size-5 shrink-0 text-info" />
-            ) : (
-              <TriangleAlert className="mt-0.5 size-5 shrink-0 text-warning" />
-            )}
-            <div className="min-w-0">
-              <p className="font-semibold text-base-content">
-                {tokenStatus.status === "present"
-                  ? "A service token is already set"
-                  : tokenStatus.status === "missing"
-                    ? "No service token set yet"
-                    : "Couldn’t check the service token"}
-              </p>
-              <p className="mt-1 text-base-content/70">
-                {tokenStatus.message}
-              </p>
-              {tokenStatus.status === "present" && (
-                <p className="mt-1 text-base-content/70">
-                  Saving below will replace the existing token (an update). The
-                  old token is overwritten in place.
+        {!tokenStatusLoading && tokenStatus && (() => {
+          const banner = TOKEN_STATUS_BANNER[tokenStatus.status]
+          const { Icon } = banner
+          return (
+            <div
+              className={[
+                "mt-4 flex items-start gap-3 rounded-xl border p-4 text-sm",
+                banner.className,
+              ].join(" ")}
+            >
+              <Icon
+                className={`mt-0.5 size-5 shrink-0 ${banner.iconClassName}`}
+              />
+              <div className="min-w-0">
+                <p className="font-semibold text-base-content">
+                  {banner.title}
                 </p>
-              )}
+                <p className="mt-1 text-base-content/70">
+                  {tokenStatus.message}
+                </p>
+                {tokenStatus.status === "present" && (
+                  <p className="mt-1 text-base-content/70">
+                    Saving below will replace the existing token (an update).
+                    The old token is overwritten in place.
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div className="mt-5">
           <label
@@ -148,6 +165,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
             >
               <input
                 id="token-expiry"
+                ref={expiryInputRef}
                 type="number"
                 min={MIN_EXPIRY_DAYS}
                 max={MAX_EXPIRY_DAYS}
@@ -184,7 +202,15 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           target="_blank"
           rel="noreferrer"
           aria-disabled={!expiryValid}
-          onClick={() => {
+          onClick={(e) => {
+            // The visual "disabled" state must also block keyboard/AT
+            // activation; otherwise an invalid expiry would still navigate to
+            // GitHub with the silent default fallback.
+            if (!expiryValid) {
+              e.preventDefault()
+              expiryInputRef.current?.focus()
+              return
+            }
             // Focus the token field so the user can paste straight away
             // when they return from the GitHub tab.
             window.setTimeout(() => tokenInputRef.current?.focus(), 0)

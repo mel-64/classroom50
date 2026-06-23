@@ -803,12 +803,13 @@ export async function getRepoPermissionForUser(params: {
 async function listLatestCollectScoresRun(
   client: GitHubClient,
   org: string,
-  filters: { event?: string; since?: string },
+  filters: { event?: string; since?: string; status?: string },
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
   const params = new URLSearchParams({ per_page: "1" })
   if (filters.event) params.set("event", filters.event)
   if (filters.since) params.set("created", `>=${filters.since}`)
+  if (filters.status) params.set("status", filters.status)
 
   const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
     `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?${params.toString()}`,
@@ -835,13 +836,15 @@ export async function getLatestCollectScoresRun(
   )
 }
 
-// The most recent collect-scores run regardless of trigger (nightly cron or a
-// manual dispatch), or null if the workflow has never run. Used to show teachers
-// when scores were last collected.
+// The most recent *completed* collect-scores run regardless of trigger (nightly
+// cron or a manual dispatch), or null if the workflow has never completed. Used
+// to show teachers when scores were last collected; filtering on status=completed
+// keeps an in-flight newer run (cron mid-run, another teacher's dispatch) from
+// hiding the prior collection's timestamp.
 export async function getLastCollectScoresRun(
   client: GitHubClient,
   org: string,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  return listLatestCollectScoresRun(client, org, {}, signal)
+  return listLatestCollectScoresRun(client, org, { status: "completed" }, signal)
 }
