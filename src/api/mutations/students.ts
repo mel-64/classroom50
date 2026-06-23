@@ -508,7 +508,10 @@ export async function bulkEnrollStudentsInClassroom(
     message: "Reading classroom roster...",
   })
 
-  const addResult = await addStudentsToClassroom(client, {
+  // Retry on conflict: a concurrent commit during the slow bulk window would
+  // 409 the roster commit and discard the whole import. Re-reading is safe —
+  // adds are append-only.
+  const addResult = await addStudentsToClassroomWithConflictRetry(client, {
     ...bulkInput,
     onProgress,
   })

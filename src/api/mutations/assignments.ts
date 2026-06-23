@@ -144,30 +144,17 @@ function templateRefUnchanged(
   return sameOwner && sameRepo && sameBranch
 }
 
-// contentsPathExists: 404 -> false, 200 -> true, anything else throws.
+// 404 -> false, 200 -> true, else throws. Wraps repoContentsPathExists for
+// the config repo (classroom50).
 async function contentsPathExists(
   client: GitHubClient,
   org: string,
   path: string,
 ): Promise<boolean> {
-  try {
-    await client.request(
-      `/repos/${org}/classroom50/contents/${path
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/")}`,
-    )
-    return true
-  } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 404) {
-      return false
-    }
-    throw err
-  }
+  return repoContentsPathExists(client, org, "classroom50", path)
 }
 
-// Like contentsPathExists, but for an arbitrary repo (to check whether an
-// existing student repo was actually provisioned). 404 -> false, 200 -> true.
+// Check whether a path exists in an arbitrary repo. 404 -> false, 200 -> true.
 async function repoContentsPathExists(
   client: GitHubClient,
   owner: string,
@@ -1066,10 +1053,8 @@ async function provisionAcceptedRepo(params: {
   const { client, org, repo, username, branch, metadataYaml, autogradeYaml } =
     params
 
-  console.log("patching repo surface...")
   await patchRepoSurface(client, org, repo.name)
 
-  console.log("adding admin collaborator...")
   await addAdminCollaborator({
     client,
     owner: org,
@@ -1079,7 +1064,6 @@ async function provisionAcceptedRepo(params: {
 
   // Land the metadata + autograde shim, retrying through GitHub's post-generate
   // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
-  console.log("committing accept files (with fresh-repo retry)...")
   await commitAcceptFilesWithFreshRepoRetry({
     client,
     owner: org,
@@ -1169,7 +1153,6 @@ export async function acceptAssignment(params: {
       }
     }
 
-    console.log("healing partially-provisioned repo...")
     await provisionAcceptedRepo({
       client,
       org,

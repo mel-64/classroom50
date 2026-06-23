@@ -101,36 +101,43 @@ const GroupMembers = ({
 // Review action: links to the open Feedback PR (opened by the autograde
 // workflow) when one exists, else opens an info modal. The PR is the source of
 // truth — the old scores.json `review` compare-link is unused.
+//
+// The /pulls lookup is deferred until Review is clicked; an eager per-row query
+// would fan out to one request per repo on table mount. On click we refetch and
+// act on the result.
 const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
-  const { data: pr, isLoading } = useGetFeedbackPr(org, repo)
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const [resolving, setResolving] = useState(false)
+  // enabled: false — driven by refetch() on click, never on mount.
+  const { refetch } = useGetFeedbackPr(org, repo, false)
 
-  if (isLoading) {
-    return (
-      <span className="flex gap-2 text-base-content/40">
-        <span className="loading loading-spinner loading-xs" />
-        <span>Review</span>
-      </span>
-    )
-  }
-
-  if (pr) {
-    return (
-      <a className="flex gap-2" href={pr.html_url} target="_blank" rel="noreferrer">
-        <MessageCircle />
-        <span>Review</span>
-      </a>
-    )
+  const handleReview = async () => {
+    setResolving(true)
+    try {
+      const { data: pr } = await refetch()
+      if (pr) {
+        window.open(pr.html_url, "_blank", "noopener,noreferrer")
+      } else {
+        dialogRef.current?.showModal()
+      }
+    } finally {
+      setResolving(false)
+    }
   }
 
   return (
     <>
       <button
         type="button"
-        className="flex gap-2 text-base-content/50 hover:text-base-content"
-        onClick={() => dialogRef.current?.showModal()}
+        className="flex gap-2 text-base-content/70 hover:text-base-content disabled:opacity-60"
+        disabled={resolving}
+        onClick={handleReview}
       >
-        <MessageCircle />
+        {resolving ? (
+          <span className="loading loading-spinner loading-xs" />
+        ) : (
+          <MessageCircle />
+        )}
         <span>Review</span>
       </button>
       <dialog ref={dialogRef} className="modal">

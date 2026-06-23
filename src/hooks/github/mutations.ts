@@ -6,6 +6,7 @@ import {
   type GitHubTeam,
   type GitHubRepo,
   type GitHubOrgMembership,
+  type GitHubUser,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
@@ -414,6 +415,16 @@ async function adoptClassroomTeam(
     `/orgs/${org}/teams/${slug}`,
   )
 
+  // A populated same-slug team is likely a stale leftover from a failed
+  // deleteClassroom; adopting it would re-grant the prior cohort read on this
+  // classroom's private templates. Refuse it — the operator must clear it first.
+  const members = await listTeamMembers(client, org, existing.slug)
+  if (members.length > 0) {
+    throw new Error(
+      `A GitHub team "${existing.slug}" already exists in ${org} with ${members.length} member(s) — it's likely left over from a classroom that wasn't fully deleted. Adopting it would give those members read access to this classroom's private templates. Delete the team at https://github.com/orgs/${org}/teams/${existing.slug} (or remove its members), or recreate the classroom with a different short name, then retry.`,
+    )
+  }
+
   if (existing.privacy !== "secret") {
     await client.request(`/orgs/${org}/teams/${existing.slug}`, {
       method: "PATCH",
@@ -422,6 +433,28 @@ async function adoptClassroomTeam(
   }
 
   return { id: existing.id, slug: existing.slug }
+}
+
+// List a team's members (paginated), to detect a stale populated team before
+// adopting it.
+async function listTeamMembers(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+): Promise<GitHubUser[]> {
+  const members: GitHubUser[] = []
+  let page = 1
+
+  while (true) {
+    const batch = await client.request<GitHubUser[]>(
+      `/orgs/${org}/teams/${teamSlug}/members?per_page=100&page=${page}`,
+    )
+    members.push(...batch)
+    if (batch.length < 100) break
+    page++
+  }
+
+  return members
 }
 
 // Delete the per-classroom team by its persisted slug (mirrors the CLI). As
@@ -1618,6 +1651,15 @@ export type InitStepUpdate = {
   data?: unknown
 }
 
+function stepFailed(result: unknown): boolean {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "status" in result &&
+    (result as { status: unknown }).status === "error"
+  )
+}
+
 export async function initClassroom50({
   client,
   org,
@@ -1656,11 +1698,36 @@ export async function initClassroom50({
     fn: () => ensureClassroom50Repo(client, org),
   })
 
+  // configRepo is a hard prerequisite for every step below. If it errored,
+  // continuing only cascades 404s and (since the mutation still resolves) would
+  // report success on a half-initialized org. Stop here.
+  if (stepFailed(results.configRepo)) {
+    return {
+      org,
+      repo: "classroom50",
+      ...results,
+      status: "error" as const,
+      pagesUrl: `https://${org}.github.io/classroom50/`,
+    }
+  }
+
   results.skeleton = await tryStep({
     id: "skeleton",
     onStepUpdate,
     fn: () => ensureSkeletonFiles(client, org),
   })
+
+  // Skeleton (workflows + scripts) is the second hard prerequisite; without it
+  // Pages/autograde can't function.
+  if (stepFailed(results.skeleton)) {
+    return {
+      org,
+      repo: "classroom50",
+      ...results,
+      status: "error" as const,
+      pagesUrl: `https://${org}.github.io/classroom50/`,
+    }
+  }
 
   results.pages = await tryStep({
     id: "pages",
@@ -1690,6 +1757,7 @@ export async function initClassroom50({
     org,
     repo: "classroom50",
     ...results,
+    status: "complete" as const,
     pagesUrl: `https://${org}.github.io/classroom50/`,
   }
 }

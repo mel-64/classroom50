@@ -2,6 +2,7 @@ import type { GitHubClient } from "@/hooks/github/client"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubMoveBranch } from "@/hooks/github/types"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
+import { sleep } from "@/hooks/github/queries"
 import {
   createCommit,
   createTree,
@@ -79,15 +80,25 @@ export async function createClassroomFiles(
 export async function withGitConflictRetry<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 409) {
-      return fn()
+  // A concurrent write to classroom50 main 409s the updateRef. fn re-reads the
+  // ref + file each attempt, so retrying is safe; jittered backoff lets the
+  // winning write land and avoids lock-step collisions between racing clients.
+  const attempts = 4
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      const isConflict = err instanceof GitHubAPIError && err.status === 409
+      if (!isConflict || attempt === attempts) {
+        throw err
+      }
+      await sleep(300 * attempt + Math.random() * 400)
     }
-
-    throw err
   }
+
+  throw lastError
 }
 
 export type CreateClassroomInput = {

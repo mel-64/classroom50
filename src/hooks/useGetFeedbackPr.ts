@@ -10,7 +10,9 @@ import {
 // The Feedback PR for a student/group repo: the open PR the autograde workflow
 // opens after an accept. Returns the first open PR (there is at most one), or
 // null when none exists yet (no submission graded, or the PR step skipped).
-const useGetFeedbackPr = (org: string, repo: string) => {
+// `enabled` defaults to true; pass false to defer the request (e.g. resolve
+// the PR on demand instead of one /pulls call per table row on mount).
+const useGetFeedbackPr = (org: string, repo: string, enabled = true) => {
   const client = useGitHubClient()
 
   return useQuery({
@@ -19,6 +21,7 @@ const useGetFeedbackPr = (org: string, repo: string) => {
     select: (pulls): GitHubPullRequest | null => pulls[0] ?? null,
     staleTime: 60 * 1000,
     retry: false,
+    enabled: enabled && Boolean(org && repo),
   })
 }
 

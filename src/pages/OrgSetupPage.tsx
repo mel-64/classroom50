@@ -262,10 +262,15 @@ const OrgSetupPage = () => {
         },
       })
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({
         queryKey: ["orgs"],
       })
+      // Don't advance the wizard if a prerequisite step failed; initClassroom50
+      // resolves with status "error" rather than throwing.
+      if (data && data.status === "error") {
+        return
+      }
       setNextStep(true)
       setCurrentStage(2)
     },

@@ -82,7 +82,11 @@ export type NormalizedScores = {
 // `member_usernames` credits the whole group; individual entries fall back to
 // `owner`. We sort defensively in case a hand-edit reordered submissions.
 function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
-  return bucket.entries
+  // A hand-edited or partial scores.json bucket can lack `entries`; degrade to
+  // no rows instead of throwing in the react-query select (which would blank
+  // the whole submissions view).
+  const entries = Array.isArray(bucket?.entries) ? bucket.entries : []
+  return entries
     .filter((entry) => entry.submissions && entry.submissions.length > 0)
     .map((entry) => {
       const sorted = entry.submissions
