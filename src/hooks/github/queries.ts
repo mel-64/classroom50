@@ -587,7 +587,7 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
-    collectToken: CollectTokenStatus | null
+    serviceToken: ServiceTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
@@ -602,7 +602,7 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  let collectToken: CollectTokenStatus | null = null
+  let serviceToken: ServiceTokenStatus | null = null
   let status: Classroom50Status = "unknown"
 
   try {
@@ -610,7 +610,7 @@ export async function getClassroom50OrgSummary(
     canAccessRepo = true
     status = "ready"
 
-    collectToken = await getCollectTokenStatus(client, org.login)
+    serviceToken = await getServiceTokenStatus(client, org.login)
   } catch (error: any) {
     if (error.status === 404) {
       canAccessRepo = false
@@ -633,7 +633,7 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
-      collectToken,
+      serviceToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
@@ -706,42 +706,42 @@ type RepositorySecret = {
   created_at: string
   updated_at: string
 }
-const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
-export type CollectTokenStatus =
+const SERVICE_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
+export type ServiceTokenStatus =
   | {
       status: "present"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       createdAt: string
       updatedAt: string
       message: string
     }
   | {
       status: "missing"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       message: string
     }
   | {
       status: "unknown"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       reason: "repo_missing_or_no_access" | "permission_denied" | "unknown"
       message: string
     }
 
-export async function getCollectTokenStatus(
+export async function getServiceTokenStatus(
   client: GitHubClient,
   org: string,
-): Promise<CollectTokenStatus> {
+): Promise<ServiceTokenStatus> {
   try {
     const secret = await client.request<RepositorySecret>(
-      `/repos/${org}/classroom50/actions/secrets/${COLLECT_TOKEN_SECRET_NAME}`,
+      `/repos/${org}/classroom50/actions/secrets/${SERVICE_TOKEN_SECRET_NAME}`,
     )
 
     return {
       status: "present",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       createdAt: secret.created_at,
       updatedAt: secret.updated_at,
-      message: `Collect token secret exists. Last updated ${new Date(
+      message: `Service token is set on the classroom50 config repo. Last updated ${new Date(
         secret.updated_at,
       ).toLocaleString()}.`,
     }
@@ -750,28 +750,30 @@ export async function getCollectTokenStatus(
       if (err.status === 404) {
         return {
           status: "missing",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           message:
-            "Collect token secret is missing. Store collection workflows will not be able to read student repositories until a token is stored.",
+            "Service token is not set on the classroom50 config repo. Score-collection workflows cannot read student repositories until a service token is set.",
         }
       }
 
       if (err.status === 403) {
         return {
           status: "unknown",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           reason: "permission_denied",
           message:
-            "Could not check the collect token secret because this GitHub authorization cannot read repository Actions secrets.",
+            "Could not check the service token on the classroom50 config repo because this GitHub authorization cannot read repository Actions secrets.",
         }
       }
     }
 
     return {
       status: "unknown",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       reason: "unknown",
-      message: `Could not check collect token secret: ${getErrorMessage(err)}`,
+      message: `Could not check the service token on the classroom50 config repo: ${getErrorMessage(
+        err,
+      )}`,
     }
   }
 }

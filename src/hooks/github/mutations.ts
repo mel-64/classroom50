@@ -1,4 +1,5 @@
 import type { GitHubClient } from "./client"
+import { createGitHubClient } from "./client"
 import {
   type GitHubCreateTree,
   type GitHubCreateCommit,
@@ -1342,6 +1343,54 @@ export async function encryptSecret(publicKey: string, secret: string) {
   return sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL)
 }
 
+/**
+ * Validates a fine-grained PAT before it is stored as the service token,
+ * mirroring the CLI's `servicetoken.ValidateToken`: it reads the classroom50
+ * config repo's contents *as the supplied token*, which exercises the exact
+ * `Contents: read` permission the collect-scores workflow relies on. Failures
+ * are mapped to actionable messages so a misconfigured token is caught here
+ * rather than surfacing later as a failed workflow run.
+ */
+export async function validateServiceToken(
+  token: string,
+  org: string | undefined,
+) {
+  if (!org) throw new Error("org must be specified to validate a service token")
+
+  const trimmed = token.trim()
+  if (!trimmed) throw new Error("Enter a token before saving.")
+
+  const tokenClient = createGitHubClient({ token: trimmed })
+
+  try {
+    // Probes api.github.com directly with the pasted token. Relies on
+    // GitHub's permissive CORS on authenticated REST calls; if GitHub is
+    // ever proxied through a CORS-stripping worker, route this through it too.
+    await tokenClient.request(`/repos/${org}/classroom50/contents/`)
+  } catch (err) {
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 401) {
+        throw new Error(
+          "This token is invalid, expired, or revoked (401). Create a fresh fine-grained PAT and try again.",
+          { cause: err },
+        )
+      }
+      if (err.status === 403 || err.status === 404) {
+        throw new Error(
+          `This token can't read ${org}/classroom50 contents. Create a fine-grained PAT with Resource owner = ${org}, Repository access = All repositories, and Contents: Read. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved).`,
+          { cause: err },
+        )
+      }
+    }
+    throw new Error(
+      `Couldn't verify the token against ${org}/classroom50: ${getErrorMessage(
+        err,
+      )}`,
+      { cause: err },
+    )
+  }
+}
+
 export async function putRepoSecret(
   client: GitHubClient,
   owner: string | undefined,
@@ -1643,7 +1692,7 @@ export async function initClassroom50({
 }: {
   client: GitHubClient
   org: string
-  collectToken?: string
+  serviceToken?: string
   serviceAccountConfirmed: boolean
   onStepUpdate: (update: InitStepUpdate) => void
 }) {

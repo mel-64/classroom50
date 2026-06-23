@@ -255,7 +255,7 @@ const OrgSetupPage = () => {
       return initClassroom50({
         client: githubClient,
         org,
-        collectToken: "",
+        serviceToken: "",
         serviceAccountConfirmed: false,
         onStepUpdate: (update) => {
           setSteps((steps) => applyStepUpdate(steps, update))
