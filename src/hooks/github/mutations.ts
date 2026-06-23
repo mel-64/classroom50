@@ -1423,6 +1423,13 @@ export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
  * waiting for the cron run. The dispatch needs a git ref, so we read the repo's
  * default branch first.
  *
+ * Returns `sinceRunId`: the id of the newest collect-scores workflow_dispatch
+ * run that existed *before* this POST (or null if none). The dispatch API
+ * returns no run id, so the caller identifies the run it triggered as "the
+ * oldest dispatch run with an id greater than sinceRunId" — monotonic and
+ * independent of browser/server clock skew, and unambiguous when several
+ * dispatches race.
+ *
  * @param classroom optional dispatch input to scope collection to one
  *   classroom; callers currently omit it to collect org-wide.
  */
@@ -1430,7 +1437,7 @@ export async function triggerScoreCollection(
   client: GitHubClient,
   org: string | undefined,
   classroom?: string,
-): Promise<{ dispatchedAt: string }> {
+): Promise<{ sinceRunId: number | null }> {
   if (!org) throw new Error("org must be specified to collect scores")
 
   const repo = await getRepo(client, org, "classroom50")
@@ -1439,9 +1446,14 @@ export async function triggerScoreCollection(
   }
   const ref = repo.default_branch || "main"
 
-  // Capture the dispatch time *before* the POST so the run-poll's `created>=`
-  // filter can't miss a run that registers between the POST and now.
-  const dispatchedAt = new Date(Date.now() - 5000).toISOString()
+  // Snapshot the newest existing dispatch run id *before* the POST. Run ids are
+  // monotonic, so the run this POST creates is the oldest dispatch run whose id
+  // exceeds this baseline — no clock comparison, no ambiguity with concurrent
+  // dispatches.
+  const baseline = await client.request<{ workflow_runs: { id: number }[] }>(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+  )
+  const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
 
   await client.request(
     `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/dispatches`,
@@ -1454,7 +1466,7 @@ export async function triggerScoreCollection(
     },
   )
 
-  return { dispatchedAt }
+  return { sinceRunId }
 }
 
 export async function putRepoSecret(

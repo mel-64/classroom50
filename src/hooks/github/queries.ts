@@ -55,8 +55,8 @@ export const githubKeys = {
   csvFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
 
-  collectScoresRun: (owner: string, since: string | null) =>
-    [...githubKeys.all, "collect-scores-run", owner, since ?? "none"] as const,
+  collectScoresRun: (owner: string, sinceRunId: number | null) =>
+    [...githubKeys.all, "collect-scores-run", owner, sinceRunId ?? "none"] as const,
 
   lastCollectScoresRun: (owner: string) =>
     [...githubKeys.all, "last-collect-scores-run", owner] as const,
@@ -803,10 +803,12 @@ export async function getRepoPermissionForUser(params: {
 async function listLatestCollectScoresRun(
   client: GitHubClient,
   org: string,
-  filters: { event?: string; since?: string; status?: string },
+  filters: { event?: string; since?: string; status?: string; perPage?: number },
   signal?: AbortSignal,
-): Promise<GitHubWorkflowRun | null> {
-  const params = new URLSearchParams({ per_page: "1" })
+): Promise<GitHubWorkflowRun[]> {
+  const params = new URLSearchParams({
+    per_page: String(filters.perPage ?? 1),
+  })
   if (filters.event) params.set("event", filters.event)
   if (filters.since) params.set("created", `>=${filters.since}`)
   if (filters.status) params.set("status", filters.status)
@@ -816,24 +818,34 @@ async function listLatestCollectScoresRun(
     { method: "GET", signal },
   )
 
-  return res.workflow_runs?.[0] ?? null
+  return res.workflow_runs ?? []
 }
 
-// The most recent collect-scores workflow_dispatch run created at/after `since`
-// (the moment we dispatched), or null if none has registered yet. Used to track
-// a manually-triggered collection to completion.
-export async function getLatestCollectScoresRun(
+// Tracks a just-dispatched collect-scores run to completion. Run ids are
+// monotonically increasing, so the run we triggered is the *oldest* dispatch
+// run whose id is greater than `sinceRunId` (the newest id seen before our
+// POST). This binds the poll to our own run rather than "whatever ran most
+// recently", so a concurrent dispatch (another tab/teacher) can't be mistaken
+// for ours, and it doesn't depend on the browser clock. Returns null until our
+// run registers. `sinceRunId === null` means there were no prior dispatch runs,
+// so the oldest dispatch run on the first page is ours.
+export async function getCollectScoresRunAfterId(
   client: GitHubClient,
   org: string,
-  since: string,
+  sinceRunId: number | null,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  return listLatestCollectScoresRun(
+  const runs = await listLatestCollectScoresRun(
     client,
     org,
-    { event: "workflow_dispatch", since },
+    { event: "workflow_dispatch", perPage: 20 },
     signal,
   )
+
+  // runs come newest-first; the run we triggered is the oldest one newer than
+  // the pre-dispatch baseline.
+  const newer = sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
+  return newer.length > 0 ? newer[newer.length - 1] : null
 }
 
 // The most recent *completed* collect-scores run regardless of trigger (nightly
@@ -846,5 +858,11 @@ export async function getLastCollectScoresRun(
   org: string,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  return listLatestCollectScoresRun(client, org, { status: "completed" }, signal)
+  const runs = await listLatestCollectScoresRun(
+    client,
+    org,
+    { status: "completed" },
+    signal,
+  )
+  return runs[0] ?? null
 }
