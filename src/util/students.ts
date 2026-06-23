@@ -16,7 +16,7 @@ export const getName = (key: string, students: Student[]) => {
   if (!first_name) return capitalize(last_name)
   if (!last_name) return capitalize(first_name)
 
-  return `${capitalize(first_name)} ${capitalize(last_name.slice(0, 1)) + "."}`
+  return `${capitalize(first_name)} ${capitalize(last_name)}`
 }
 
 export const getInitials = (key: string, students: Student[]) => {
