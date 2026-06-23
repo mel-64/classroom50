@@ -63,16 +63,21 @@ const SubmissionsPage = () => {
     }, 1500)
   }
   const assignmentInfo =
-    assignmentData?.assignments.find((a) => a.slug === assignment) || {}
+    assignmentData?.assignments.find((a) => a.slug === assignment)
+  const isGroupAssignment = assignmentInfo?.mode === "group"
   const scoresInfo = scoresData?.submissions?.[assignment] || []
 
   const downloadScoresCsv = () => {
     const rows = scoresInfo
-      .toSorted((a, b) => Number(b.datetime) - Number(a.datetime))
-      .map(({ usernames, score, datetime, ...rest }) => ({
+      .toSorted(
+        (a, b) =>
+          new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+      )
+      .map(({ usernames, score, datetime, submissionCount, ...rest }) => ({
         usernames: usernames.join(", "),
         score,
         max_score: rest["max-score"],
+        submissions: submissionCount,
         submitted_at: new Date(datetime).toISOString(),
         commit: rest.commit,
         review: rest.review,
@@ -106,11 +111,20 @@ const SubmissionsPage = () => {
           <div className="flex justify-between">
             <div>
               <h1 className="text-lg pt-8 pb-2 font-bold">
-                {assignmentInfo.name}
+                {assignmentInfo?.name}
               </h1>
               <div className="flex pb-10">
                 <label>
-                  {scoresInfo.length} of {students.length} submitted
+                  {isGroupAssignment ? (
+                    <>
+                      {scoresInfo.length}{" "}
+                      {scoresInfo.length === 1 ? "group" : "groups"} submitted
+                    </>
+                  ) : (
+                    <>
+                      {scoresInfo.length} of {students.length} submitted
+                    </>
+                  )}
                 </label>
                 <label className="px-2"> • </label>
                 <ArrowDownWideNarrow />
@@ -171,10 +185,16 @@ const SubmissionsPage = () => {
           <div className="grid grid-cols-12 gap-4 mb-6">
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">
-                <label className="uppercase">Submitted</label>
+                <label className="uppercase">
+                  {isGroupAssignment ? "Groups Submitted" : "Submitted"}
+                </label>
                 <div className="flex items-end content-end gap-1">
-                  <h2 className="text-xl font-bold">{scoresInfo.length}</h2>/
-                  <h4>{students.length}</h4>
+                  <h2 className="text-xl font-bold">{scoresInfo.length}</h2>
+                  {isGroupAssignment ? null : (
+                    <>
+                      /<h4>{students.length}</h4>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -214,7 +234,14 @@ const SubmissionsPage = () => {
               />
             </button>
           </div>
-          <SubmissionsTable scores={scoresInfo} students={students} />
+          <SubmissionsTable
+            scores={scoresInfo}
+            students={students}
+            isGroup={isGroupAssignment}
+            org={org}
+            classroom={classroom}
+            assignment={assignment}
+          />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
       </Drawer>

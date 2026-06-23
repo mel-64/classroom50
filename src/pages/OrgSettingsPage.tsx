@@ -32,7 +32,7 @@ export const OrgSettingsPane = ({ onSubmit }) => {
         client,
         org,
         "classroom50",
-        "CLASSROOM50_COLLECT_TOKEN",
+        "CLASSROOM50_SERVICE_TOKEN",
         collectToken,
       )
     },

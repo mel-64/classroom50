@@ -16,7 +16,6 @@ import useAddRepoCollaborator from "@/hooks/useAddRepoCollaborator"
 import useRemoveRepoCollaborator from "@/hooks/useRemoveRepoCollaborator"
 
 import GitHub from "@/assets/github.svg?react"
-import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import EditAssignmentForm from "./assignments/EditAssignmentForm"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
@@ -24,7 +23,6 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
 
 const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
-  const client = useGitHubClient()
   const { user } = useGithubAuth()
   const { isLoading: loadingPublic, assignment: assignmentData } =
     useGetPublicAssignment(org, classroom, assignment)
@@ -485,6 +483,8 @@ const EditAssignmentPage = () => {
   const { isTeacher, isStudent } = useCourseTeacherAccess(org)
   const { data: assignments } = useGetClassroomAssignments(org, classroom)
   const [editSuccess, setEditSuccess] = useState(false)
+  const [editWarning, setEditWarning] = useState("")
+  const [editError, setEditError] = useState("")
 
   const assignmentData = assignments?.assignments.find(
     (a) => a.slug === assignment,
@@ -500,10 +500,16 @@ const EditAssignmentPage = () => {
             isTeacher={isTeacher}
             classroom={classroom}
           />
+          {editError && (
+            <div className="alert alert-error mt-6">{editError}</div>
+          )}
           {editSuccess && (
             <div className="alert alert-success mt-6">
               Your assignment has been edited successfully!
             </div>
+          )}
+          {editWarning && (
+            <div className="alert alert-warning mt-6">{editWarning}</div>
           )}
           <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
           {isTeacher && (
@@ -512,10 +518,26 @@ const EditAssignmentPage = () => {
               classroom={classroom}
               assignment={assignment}
               defaultData={assignmentData}
-              onSuccess={() => {
-                setEditSuccess(true)
+              onMutate={() => {
+                // Clear prior banners so a re-edit never shows stale state.
+                setEditSuccess(false)
+                setEditWarning("")
+                setEditError("")
+              }}
+              onError={(error) => {
+                setEditError(error.message)
                 window.scrollTo({ top: 0, behavior: "smooth" })
-                setTimeout(() => setEditSuccess(false), 3000)
+              }}
+              onSuccess={(result) => {
+                // Surface a non-fatal template-grant warning inline if
+                // present; otherwise show the success banner.
+                if (result?.templateGrantWarning) {
+                  setEditWarning(result.templateGrantWarning)
+                } else {
+                  setEditSuccess(true)
+                  setTimeout(() => setEditSuccess(false), 3000)
+                }
+                window.scrollTo({ top: 0, behavior: "smooth" })
               }}
             />
           )}

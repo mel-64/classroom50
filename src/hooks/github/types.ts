@@ -48,6 +48,7 @@ export type GitHubRepo = {
   name: string
   full_name: string
   private: boolean
+  is_template?: boolean
   default_branch: string
   visibility?: "public" | "private" | "internal"
   permissions?: {

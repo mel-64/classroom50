@@ -153,21 +153,36 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                   })
                 }
               >
-                {/* TODO: need to grab # of submissions and # of total students here */}
-                {scoresData?.submissions?.[assignment.slug]?.length || 0} /{" "}
-                {students.length}{" "}
-                <progress
-                  className="progress progress-info w-56"
-                  value={
-                    students.length === 0
-                      ? 0
-                      : ((scoresData?.submissions?.[assignment.slug]?.length ||
-                          0) /
-                          students.length) *
-                        100
+                {(() => {
+                  const submitted =
+                    scoresData?.submissions?.[assignment.slug]?.length || 0
+
+                  // Group assignments submit per-repo, not per-student, so a
+                  // roster-size denominator is meaningless — show the count.
+                  if (assignment.mode === "group") {
+                    return (
+                      <span className="whitespace-nowrap">
+                        {submitted}{" "}
+                        {submitted === 1 ? "group" : "groups"} submitted
+                      </span>
+                    )
                   }
-                  max="100"
-                ></progress>
+
+                  return (
+                    <>
+                      {submitted} / {students.length}{" "}
+                      <progress
+                        className="progress progress-info w-56"
+                        value={
+                          students.length === 0
+                            ? 0
+                            : (submitted / students.length) * 100
+                        }
+                        max="100"
+                      ></progress>
+                    </>
+                  )
+                })()}
               </td>
               <td>
                 <Link

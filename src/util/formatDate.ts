@@ -32,25 +32,51 @@ const formatOffset = (date: Date): string => {
 
 export type DueFields = { due: string; due_meta?: DueMeta }
 
-// Builds the `due`/`due_meta` pair for assignments.json from a <input type="date">
-// value, mirroring gh-teacher's --due normalization: the picked date is pinned to
-// 23:59:00 in the browser's local zone, stored as a UTC instant, and the
-// pre-normalization local value/offset/zone are recorded in due_meta. Inputs that
-// aren't a bare YYYY-MM-DD are stored verbatim without provenance.
+// Builds the `due`/`due_meta` pair from the form's due input, mirroring
+// gh-teacher's --due: the local wall time becomes a UTC instant (RFC3339 `Z`),
+// with the pre-normalization local value/offset/zone in due_meta. Accepts
+// `YYYY-MM-DDTHH:MM` (datetime-local) and bare `YYYY-MM-DD` (pinned to 23:59
+// local); anything else (already zoned/unparseable) is stored verbatim.
 export const buildDueFields = (dueInput: string): DueFields => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueInput)) {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(dueInput)
+  const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(dueInput)
+
+  if (!dateOnly && !localDateTime) {
+    // Already carries a zone/offset, or isn't a shape we normalize.
     return { due: dueInput }
   }
 
-  const [year, month, day] = dueInput.split("-").map(Number)
-  const local = new Date(year, month - 1, day, 23, 59, 0)
-  if (Number.isNaN(local.getTime())) {
+  let year: number,
+    month: number,
+    day: number,
+    hour = 23,
+    minute = 59
+  if (dateOnly) {
+    ;[year, month, day] = dueInput.split("-").map(Number)
+  } else {
+    const [datePart, timePart] = dueInput.split("T")
+    ;[year, month, day] = datePart.split("-").map(Number)
+    ;[hour, minute] = timePart.split(":").map(Number)
+  }
+
+  const local = new Date(year, month - 1, day, hour, minute, 0)
+  // `new Date` rolls over out-of-range components (Feb 30 -> Mar 2) instead of
+  // returning NaN, so reject anything that didn't round-trip: otherwise `due`
+  // (the rolled-over instant) would silently disagree with due_meta.input
+  // (rebuilt from the original components). Store verbatim instead.
+  const rolledOver =
+    local.getFullYear() !== year ||
+    local.getMonth() !== month - 1 ||
+    local.getDate() !== day ||
+    local.getHours() !== hour ||
+    local.getMinutes() !== minute
+  if (Number.isNaN(local.getTime()) || rolledOver) {
     return { due: dueInput }
   }
 
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const due_meta: DueMeta = {
-    input: `${year}-${pad(month)}-${pad(day)}T23:59:00`,
+    input: `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:00`,
     ...(zone ? { zone } : {}),
     offset: formatOffset(local),
     source: "auto-detected",

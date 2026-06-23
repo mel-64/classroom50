@@ -22,12 +22,16 @@ const createClassroomMetadata = (
   classroom: string,
   name: string,
   term: string,
+  team?: ClassroomTeamRef,
 ) => ({
   schema: "classroom50/classroom/v1",
   name,
   short_name: classroom,
   term,
   org,
+  // Written only when a team was provisioned, matching the CLI's `omitempty`
+  // team field. Grants rostered students read on private org templates.
+  ...(team ? { team } : {}),
 })
 
 const STUDENTS_CSV_HEADER =
@@ -38,6 +42,7 @@ const createClassroomBody = (
   classroom: string,
   name: string,
   term: string,
+  team?: ClassroomTeamRef,
 ) => {
   const mode = "100644"
   const type = "blob"
@@ -64,7 +69,7 @@ const createClassroomBody = (
         content: JSON.stringify(
           {
             schema: "classroom50/scores/v1",
-            submissions: "{}",
+            assignments: {},
           },
           null,
           2,
@@ -75,7 +80,7 @@ const createClassroomBody = (
         mode,
         type,
         content: JSON.stringify(
-          createClassroomMetadata(org, classroom, name, term),
+          createClassroomMetadata(org, classroom, name, term, team),
           null,
           2,
         ),
@@ -86,14 +91,18 @@ const createClassroomBody = (
 
 export function createTree(
   client: GitHubClient,
-  input: CreateClassroomInput & { base_tree: string; term: string },
+  input: CreateClassroomInput & {
+    base_tree: string
+    term: string
+    team?: ClassroomTeamRef
+  },
 ) {
-  const { base_tree, org, classroom, name, term } = input
+  const { base_tree, org, classroom, name, term, team } = input
   return client.request<GitHubCreateTree>(
     `/repos/${org}/classroom50/git/trees`,
     {
       method: "POST",
-      body: createClassroomBody(base_tree, org, classroom, name, term),
+      body: createClassroomBody(base_tree, org, classroom, name, term, team),
     },
   )
 }
@@ -348,6 +357,123 @@ export function createTeam(client: GitHubClient, input: CreateTeamInput) {
   })
 }
 
+// Minimal team identity persisted in classroom.json. The slug is
+// authoritative for team ops (GitHub may slugify a name differently on
+// collision); the id is the immutable handle. Mirrors the CLI's teamRef.
+export type ClassroomTeamRef = {
+  id: number
+  slug: string
+}
+
+// A short-name with consecutive/trailing hyphens slugifies to something other
+// than `classroom50-<short>`, breaking team ops that re-derive the slug. The
+// GUI's slugify produces canonical slugs; guard defensively to match the CLI.
+function isCanonicalTeamShortName(shortName: string): boolean {
+  return !shortName.endsWith("-") && !shortName.includes("--")
+}
+
+// Create (or adopt) the per-classroom `secret` team and return its { id, slug }
+// for classroom.json (later grants rostered students read on private org
+// templates). Mirrors the CLI: idempotent, adopts a same-named team on 422 and
+// reconciles its privacy.
+export async function ensureClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<ClassroomTeamRef & { created: boolean }> {
+  if (!isCanonicalTeamShortName(classroom)) {
+    throw new Error(
+      `Classroom slug "${classroom}" can't back a GitHub team — remove consecutive or trailing hyphens (GitHub would rewrite the team slug, breaking membership and template grants).`,
+    )
+  }
+
+  const name = `classroom50-${classroom}`
+
+  try {
+    const created = await createTeam(client, { org, name, privacy: "secret" })
+    return { id: created.id, slug: created.slug, created: true }
+  } catch (err) {
+    // 422 = a same-named team already exists. Adopt it (read id/slug, reconcile
+    // privacy). `created: false` means it pre-existed and must NOT be deleted on
+    // a create-failure rollback (that would destroy a team we never created).
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      const adopted = await adoptClassroomTeam(client, org, classroom)
+      return { ...adopted, created: false }
+    }
+    throw err
+  }
+}
+
+async function adoptClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<ClassroomTeamRef> {
+  const slug = `classroom50-${classroom}`
+  const existing = await client.request<GitHubTeam>(
+    `/orgs/${org}/teams/${slug}`,
+  )
+
+  // NOTE: a stale same-slug team left by a failed deleteClassroom can re-grant
+  // the prior cohort read on this classroom's private templates. We do NOT
+  // refuse a populated team here: GitHub auto-adds the team creator as a
+  // maintainer, so a freshly-created team (e.g. the winner of a concurrent
+  // same-name create race) already reports members, and refusing on member
+  // count would break the benign adopt the CLI relies on. Distinguishing a
+  // stale-leftover from this classroom's own live team requires the persisted
+  // team id from classroom.json, which isn't available here — left for a
+  // follow-up that reconciles against that id.
+  if (existing.privacy !== "secret") {
+    await client.request(`/orgs/${org}/teams/${existing.slug}`, {
+      method: "PATCH",
+      body: { privacy: "secret" },
+    })
+  }
+
+  return { id: existing.id, slug: existing.slug }
+}
+
+// Delete the per-classroom team by its persisted slug (mirrors the CLI). As
+// defense against a reused slug, the live team's id is confirmed against the
+// persisted id before deletion (skipped when no id was recorded). 404 =
+// already gone (success); an empty ref is a no-op.
+export async function deleteClassroomTeam(
+  client: GitHubClient,
+  org: string,
+  team: ClassroomTeamRef | undefined | null,
+): Promise<void> {
+  if (!team?.slug) return
+
+  if (team.id) {
+    try {
+      const live = await client.request<{ id: number }>(
+        `/orgs/${org}/teams/${team.slug}`,
+      )
+      if (live.id !== team.id) {
+        throw new Error(
+          `Team "${team.slug}" in ${org} now has id ${live.id}, not the recorded ${team.id} — refusing to delete a team that isn't the one this classroom created; remove it by hand if intended.`,
+        )
+      }
+    } catch (err) {
+      if (err instanceof GitHubAPIError && err.status === 404) {
+        return
+      }
+      throw err
+    }
+  }
+
+  try {
+    await client.request(`/orgs/${org}/teams/${team.slug}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return
+    }
+    throw err
+  }
+}
+
 export function addRepositoryToTeam(
   client: GitHubClient,
   input: {
@@ -387,6 +513,32 @@ export function addUserToTeam(
       body: { role },
     },
   )
+}
+
+// Remove a user from a team (mirrors the CLI). 404 = not a member / team gone
+// (success), so removal is idempotent. Org membership is untouched — only the
+// team grant (and the template read it confers) is dropped.
+export async function removeUserFromTeam(
+  client: GitHubClient,
+  input: {
+    org: string
+    teamSlug: string
+    username: string
+  },
+): Promise<void> {
+  const { org, teamSlug, username } = input
+
+  try {
+    await client.request(
+      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+      { method: "DELETE" },
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return
+    }
+    throw err
+  }
 }
 
 export function inviteUserToOrgTeam(
@@ -570,6 +722,9 @@ const SKELETON_PATHS = [
   // tests.json bundles during publish-pages — without it, declarative
   // autograding tests silently never grade.
   "scripts/materialize_tests.py",
+  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml fetches
+  // it from Pages. Without it, feedback_pr assignments can't open their PR.
+  "scripts/ensure_feedback_pr.py",
 ]
 
 // gh teacher init substitutes this placeholder (publish-pages.yaml's
@@ -1360,9 +1515,102 @@ export async function ensureOrgActionsEnabled(
   }
 }
 
+export type EnsureOrgCanCreatePullRequestsResult =
+  | {
+      status: "complete"
+      org: string
+      message: string
+      settingsUrl: string
+    }
+  | {
+      status: "warning"
+      org: string
+      reason: "permission_denied" | "policy_conflict" | "readback_failed"
+      message: string
+      settingsUrl: string
+    }
+
+type OrgWorkflowPermissions = {
+  default_workflow_permissions: "read" | "write"
+  can_approve_pull_request_reviews: boolean
+}
+
+// The opt-in Feedback PR (issue #86), opened by each student repo's autograde
+// workflow, is rejected by GitHub unless the org-level "Allow GitHub Actions to
+// create and approve pull requests" toggle is on (it defaults off). Set only at
+// the org level, so without it a GUI-initialized org hits the
+// `pull-requests: none` failure (discussion #33). Mirrors the CLI; preserves
+// default_workflow_permissions.
+export async function ensureOrgCanCreatePullRequests(
+  client: GitHubClient,
+  org: string,
+): Promise<EnsureOrgCanCreatePullRequestsResult> {
+  const settingsUrl = orgActionsSettingsUrl(org)
+  const path = `/orgs/${org}/actions/permissions/workflow`
+
+  let current: OrgWorkflowPermissions
+  try {
+    current = await client.request<OrgWorkflowPermissions>(path)
+  } catch (err) {
+    return {
+      status: "warning",
+      org,
+      reason: "readback_failed",
+      settingsUrl,
+      message: `${org}: couldn't read organization workflow permissions (${getErrorMessage(
+        err,
+      )}); GitHub Actions may be blocked from opening Feedback PRs. Enable "Allow GitHub Actions to create and approve pull requests" at ${settingsUrl}.`,
+    }
+  }
+
+  if (current.can_approve_pull_request_reviews) {
+    return {
+      status: "complete",
+      org,
+      settingsUrl,
+      message: `${org}: GitHub Actions is already allowed to create pull requests (Feedback PRs can open).`,
+    }
+  }
+
+  try {
+    await client.request(path, {
+      method: "PUT",
+      body: {
+        default_workflow_permissions: current.default_workflow_permissions,
+        can_approve_pull_request_reviews: true,
+      },
+    })
+
+    return {
+      status: "complete",
+      org,
+      settingsUrl,
+      message: `${org}: enabled GitHub Actions to create pull requests (required for opt-in Feedback PRs).`,
+    }
+  } catch (err) {
+    if (
+      err instanceof GitHubAPIError &&
+      (err.status === 403 || err.status === 409)
+    ) {
+      return {
+        status: "warning",
+        org,
+        reason: err.status === 403 ? "permission_denied" : "policy_conflict",
+        settingsUrl,
+        message: `${org}: couldn't enable Actions-created pull requests (${getErrorMessage(
+          err,
+        )}); the opt-in Feedback PR won't open until an org admin turns on "Allow GitHub Actions to create and approve pull requests" at ${settingsUrl}.`,
+      }
+    }
+
+    throw err
+  }
+}
+
 export type InitStepId =
   | "orgDefaults"
   | "orgActions"
+  | "orgPrCreation"
   | "configRepo"
   | "skeleton"
   | "branchProtection"
@@ -1379,6 +1627,15 @@ export type InitStepUpdate = {
   data?: unknown
 }
 
+function stepFailed(result: unknown): boolean {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "status" in result &&
+    (result as { status: unknown }).status === "error"
+  )
+}
+
 export async function initClassroom50({
   client,
   org,
@@ -1391,6 +1648,14 @@ export async function initClassroom50({
   onStepUpdate: (update: InitStepUpdate) => void
 }) {
   const results: Partial<Record<InitStepId, unknown>> = {}
+
+  const buildResult = (status: "error" | "complete") => ({
+    org,
+    repo: "classroom50",
+    ...results,
+    status,
+    pagesUrl: `https://${org}.github.io/classroom50/`,
+  })
 
   results.orgDefaults = await tryStep({
     id: "orgDefaults",
@@ -1405,17 +1670,35 @@ export async function initClassroom50({
     fn: () => ensureOrgActionsEnabled(client, org),
   })
 
+  results.orgPrCreation = await tryStep({
+    id: "orgPrCreation",
+    onStepUpdate,
+    fn: () => ensureOrgCanCreatePullRequests(client, org),
+  })
+
   results.configRepo = await tryStep({
     id: "configRepo",
     onStepUpdate,
     fn: () => ensureClassroom50Repo(client, org),
   })
 
+  // configRepo is a hard prerequisite for every step below. If it errored,
+  // continuing only cascades 404s and (since the mutation still resolves) would
+  // report success on a half-initialized org. Stop here.
+  if (stepFailed(results.configRepo)) {
+    return buildResult("error")
+  }
+
   results.skeleton = await tryStep({
     id: "skeleton",
     onStepUpdate,
     fn: () => ensureSkeletonFiles(client, org),
   })
+
+  // skeleton (workflows + scripts) — same hard-prerequisite gate.
+  if (stepFailed(results.skeleton)) {
+    return buildResult("error")
+  }
 
   results.pages = await tryStep({
     id: "pages",
@@ -1441,12 +1724,7 @@ export async function initClassroom50({
     fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
   })
 
-  return {
-    org,
-    repo: "classroom50",
-    ...results,
-    pagesUrl: `https://${org}.github.io/classroom50/`,
-  }
+  return buildResult("complete")
 }
 
 export async function addRepoCollaborator(params: {

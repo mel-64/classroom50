@@ -64,6 +64,7 @@ const InitStep = ({
 const INIT_STEP_ORDER: InitStepId[] = [
   "orgDefaults",
   "orgActions",
+  "orgPrCreation",
   "configRepo",
   "skeleton",
   "branchProtection",
@@ -179,6 +180,11 @@ const initialSteps: Record<InitStepId, InitStepUpdate> = {
     status: "pending",
     title: "Actions permissions",
   },
+  orgPrCreation: {
+    id: "orgPrCreation",
+    status: "pending",
+    title: "Actions pull request creation",
+  },
   configRepo: {
     id: "configRepo",
     status: "pending",
@@ -256,10 +262,15 @@ const OrgSetupPage = () => {
         },
       })
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({
         queryKey: ["orgs"],
       })
+      // Don't advance the wizard if a prerequisite step failed; initClassroom50
+      // resolves with status "error" rather than throwing.
+      if (data && data.status === "error") {
+        return
+      }
       setNextStep(true)
       setCurrentStage(2)
     },

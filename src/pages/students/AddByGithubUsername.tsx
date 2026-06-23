@@ -1,8 +1,8 @@
 import { UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
-import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
 import { githubKeys } from "@/hooks/github/queries"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
@@ -18,22 +18,21 @@ type AddStudentFormValues = {
   username: string
 }
 /**
- * 1) maintain a cache of existing org members to cross-reference
- * 2) ensure the team for the classroom exists
- * 3) perform a lookup on the user by their username (required)
- * 4) if they are a valid user and in the org, simply add to CSV roster (including ID)
- * 5) if they are a valid user and not in org, send org invite and add to roster
- * 6) if they are not a valid user, display as much with an error
+ * 1) ensure the team for the classroom exists
+ * 2) perform a lookup on the user by their username (required)
+ * 3) if they are a valid user and in the org, simply add to CSV roster (including ID)
+ * 4) if they are a valid user and not in org, send org invite and add to roster
+ * 5) if they are not a valid user, display as much with an error
  */
 const AddByGithubUsername = ({
   className = "",
   org,
   classroom,
 }: AddByGithubUsernameProps) => {
-  const { members } = useGetOrgMembers(org)
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
+  const [teamWarning, setTeamWarning] = useState("")
 
   const addStudentMutation = useMutation({
     mutationFn: ({ username, first_name, last_name }) =>
@@ -44,7 +43,10 @@ const AddByGithubUsername = ({
         first_name,
         last_name,
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Surface a non-fatal team-add failure inline (the student is enrolled
+      // but lacks private-template read until retried).
+      setTeamWarning(result?.teamWarning ?? "")
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(
           org,
@@ -71,6 +73,7 @@ const AddByGithubUsername = ({
       },
     },
     onSubmit: async ({ value }) => {
+      setTeamWarning("")
       const nameParts = value.name.split(" ")
       const first_name = nameParts.at(0)
       const last_name = nameParts.at(-1)
@@ -89,6 +92,12 @@ const AddByGithubUsername = ({
       >
         <div className="card-body">
           <p className="font-bold mb-2">Add by GitHub Username</p>
+
+          {teamWarning && (
+            <div className="alert alert-warning alert-soft mb-2 text-sm">
+              {teamWarning}
+            </div>
+          )}
 
           <form.Field name="name">
             {(field) => (

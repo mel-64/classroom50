@@ -1,4 +1,5 @@
 import useGetOrgRepos from "./useGetMyOrgRepos"
+import { studentRepoName } from "@/util/studentRepo"
 
 const useGetAssignmentRepo = (
   org: string,
@@ -11,7 +12,7 @@ const useGetAssignmentRepo = (
   return {
     ...assignmentRepos,
     assignment: assignmentRepos.data?.find((repo) =>
-      repo.name.startsWith(`${classroom}-${assignment}-${username}`),
+      repo.name.startsWith(studentRepoName(classroom, assignment, username)),
     ),
   }
 }

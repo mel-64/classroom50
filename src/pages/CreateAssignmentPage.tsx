@@ -25,6 +25,7 @@ const CreateAssignmentPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const queryClient = useQueryClient()
   const [errorMessage, setErrorMessage] = useState("")
+  const [warningMessage, setWarningMessage] = useState("")
 
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
@@ -54,7 +55,7 @@ const CreateAssignmentPage = () => {
       setErrorMessage(err.message)
       window.scrollTo({ top: 0, behavior: "smooth" })
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
           org,
@@ -62,6 +63,13 @@ const CreateAssignmentPage = () => {
           `${classroom}/assignments.json`,
         ),
       })
+      // Assignment created. If the template team grant failed, stay on the
+      // page to show the warning instead of navigating away.
+      if (result.templateGrantWarning) {
+        setWarningMessage(result.templateGrantWarning)
+        window.scrollTo({ top: 0, behavior: "smooth" })
+        return
+      }
       navigate({ to: `/${org}/${classroom}/assignments` })
     },
   })
@@ -83,12 +91,30 @@ const CreateAssignmentPage = () => {
           ) : (
             <></>
           )}
+          {warningMessage ? (
+            <div className="alert alert-warning mb-6 flex flex-col items-start gap-2">
+              <span>{warningMessage}</span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() =>
+                  navigate({ to: `/${org}/${classroom}/assignments` })
+                }
+              >
+                Go to assignments
+              </button>
+            </div>
+          ) : (
+            <></>
+          )}
           <div className="flex flex-col">
             <div className="mb-8">
               <CreateAssignmentForm
                 loading={createClassroomMutation.isPending}
+                org={org}
                 onSubmit={(values) => {
                   setErrorMessage("")
+                  setWarningMessage("")
                   createClassroomMutation.mutateAsync({
                     name: values.name,
                     slug: slugify(values.name),
@@ -98,6 +124,11 @@ const CreateAssignmentPage = () => {
                     description: values.description,
                     due_date: values.due_date,
                     max_group_size: values.max_group_size,
+                    feedback_pr: values.feedback_pr,
+                    runs_on: values.runs_on,
+                    container_image: values.container_image,
+                    container_user: values.container_user,
+                    setup_command: values.setup_command,
                     classroom,
                     tests: values.tests,
                   })

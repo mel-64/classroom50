@@ -6,6 +6,7 @@ import type { Student } from "@/types/classroom"
 import { ConfirmModal } from "@/components/modals"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { unenrollStudent } from "@/api/mutations/students"
+import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
@@ -15,10 +16,15 @@ const UnenrollStudentButton = ({
   classroom,
   student,
   onRemoveStudent,
+}: {
+  org: string
+  classroom: string
+  student: Student
+  onRemoveStudent: (username: string, teamWarning?: string) => void
 }) => {
   const client = useGitHubClient()
   const unenrollStudentMutation = useMutation({
-    mutationFn: (input) => unenrollStudent(client, input),
+    mutationFn: (input: UnenrollStudentInput) => unenrollStudent(client, input),
   })
   const [open, setOpen] = useState(false)
 
@@ -26,6 +32,7 @@ const UnenrollStudentButton = ({
     <>
       <button
         onClick={() => setOpen(true)}
+        disabled={unenrollStudentMutation.isPending}
         className="btn btn-ghost btn-square text-error"
       >
         <Trash />
@@ -52,12 +59,15 @@ const UnenrollStudentButton = ({
         dangerous
         needsConfirm={false}
         onConfirm={async () => {
-          await unenrollStudentMutation.mutateAsync({
+          const result = await unenrollStudentMutation.mutateAsync({
             org,
             classroom,
             student,
           })
-          onRemoveStudent()
+          // Hand the warning to the list keyed by username (this button unmounts
+          // on roster refetch); keying stops a concurrent clean unenroll from
+          // clobbering an unread warning.
+          onRemoveStudent(student.username, result.teamWarning)
         }}
         onClose={() => setOpen(false)}
       />
@@ -75,6 +85,17 @@ const EnrolledStudents = ({
   classroom: string
 }) => {
   const queryClient = useQueryClient()
+  // Keyed by username so a clean unenroll can't clobber another student's
+  // unread warning.
+  const [teamWarnings, setTeamWarnings] = useState<Record<string, string>>({})
+
+  const dismissWarning = (username: string) =>
+    setTeamWarnings((prev) => {
+      const next = { ...prev }
+      delete next[username]
+      return next
+    })
+
   return (
     <div className="card card-border w-full bg-base-100 overflow-hidden shadow-sm">
       <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
@@ -84,6 +105,23 @@ const EnrolledStudents = ({
           {students.length}
         </div>
       </div>
+
+      {Object.entries(teamWarnings).map(([username, warning]) => (
+        <div
+          key={username}
+          role="alert"
+          className="alert alert-warning alert-soft mx-6 mt-4"
+        >
+          <span className="text-sm">{warning}</span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={() => dismissWarning(username)}
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
 
       <ul className="divide-y divide-base-300">
         {students?.map((student) => (
@@ -100,7 +138,11 @@ const EnrolledStudents = ({
               org={org}
               classroom={classroom}
               student={student}
-              onRemoveStudent={() =>
+              onRemoveStudent={(username: string, warning?: string) => {
+                // Record only a real warning; a clean unenroll must not wipe one.
+                if (warning) {
+                  setTeamWarnings((prev) => ({ ...prev, [username]: warning }))
+                }
                 queryClient.invalidateQueries({
                   queryKey: githubKeys.csvFile(
                     org,
@@ -108,7 +150,7 @@ const EnrolledStudents = ({
                     `${classroom}/students.csv`,
                   ),
                 })
-              }
+              }}
             />
           </li>
         ))}

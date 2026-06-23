@@ -15,6 +15,7 @@ import { GitHubAPIError } from "./errors"
 import { createTeam, getErrorMessage } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
+import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -25,8 +26,13 @@ export const githubKeys = {
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
 
+  orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
+
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
+
+  openPulls: (owner: string, repo: string) =>
+    [...githubKeys.all, "open-pulls", owner, repo] as const,
 
   branchRef: (org: string) => [...githubKeys.all, "branchRef", org] as const,
   commitTree: (org: string, branchSha: string) =>
@@ -88,6 +94,57 @@ export function orgMembershipQuery(client: GitHubClient, org: string) {
   })
 }
 
+// Self-hosted runners registered in the org (GitHub's admin:org endpoint),
+// used only to advise whether a typed label exists. Tolerant: 403/404 resolve
+// to an "unavailable" sentinel so the form degrades to "couldn't verify"
+// instead of erroring. GitHub-hosted labels are recognized separately.
+export function orgRunnersQuery(client: GitHubClient, org: string) {
+  return queryOptions<OrgRunnersResult>({
+    queryKey: githubKeys.orgRunners(org),
+    queryFn: async ({ signal }) => {
+      try {
+        const runners: OrgRunner[] = []
+        let page = 1
+
+        while (true) {
+          const data = await client.request<{
+            total_count: number
+            runners: OrgRunner[]
+          }>(
+            `/orgs/${encodeURIComponent(
+              org,
+            )}/actions/runners?per_page=100&page=${page}`,
+            { method: "GET", signal },
+          )
+
+          const batch = data.runners ?? []
+          runners.push(...batch)
+
+          if (batch.length < 100) break
+          page++
+        }
+
+        return { available: true, runners }
+      } catch (error) {
+        // Let cancellations propagate; don't cache them as a verdict.
+        if (signal?.aborted) throw error
+        // 403 (no admin:org) / 404 (no access) mean "can't read the list",
+        // not "the runner doesn't exist".
+        if (
+          error instanceof GitHubAPIError &&
+          (error.status === 403 || error.status === 404)
+        ) {
+          return { available: false, reason: "no-access" }
+        }
+        return { available: false, reason: "error" }
+      }
+    },
+    enabled: Boolean(org),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
 export function getBranchRefRepo(
   client: GitHubClient,
   owner: string,
@@ -116,34 +173,57 @@ function isNotFoundError(error: unknown) {
   )
 }
 
-export async function waitForBranchRefRepo(
-  client: GitHubClient,
-  owner: string,
-  repo: string,
-  branch: string,
-  options: {
-    attempts?: number
-    delayMs?: number
-  } = {},
-) {
-  const attempts = options.attempts ?? 8
-  const delayMs = options.delayMs ?? 750
+// A freshly-generated/templated repo's git-data APIs lag behind the 200 from
+// POST .../generate: reads 404 and the first write 409s "Git Repository is
+// empty" while GitHub seeds. Both are transient. A bare 409 (no empty-repo
+// message) is a real conflict — e.g. a non-fast-forward updateRef — so the 409
+// branch is gated on the message. Mirrors the CLI's isFreshRepoRetryable.
+export function isFreshRepoLagError(error: unknown) {
+  if (error instanceof GitHubAPIError) {
+    if (error.status === 404) {
+      return true
+    }
+    if (error.status === 409) {
+      return isGitRepositoryEmptyError(error)
+    }
+  }
+  return isGitRepositoryEmptyError(error) || isNotFoundError(error)
+}
+
+export type FreshRepoRetryOptions = {
+  attempts?: number
+  baseDelayMs?: number
+  // Backoff multiplier between retries. 1 = fixed delay. Default 2.
+  backoffFactor?: number
+  // Which errors count as retryable lag. Default isFreshRepoLagError.
+  shouldRetry?: (error: unknown) => boolean
+}
+
+// Retry `fn` while it hits fresh-repo lag (the window where a just-generated
+// repo's git-data APIs lag behind the 200 from POST .../generate). Single source
+// of truth for the retry/backoff policy — the branch-ref poll and the accept
+// commit sequence both use it. `fn` must re-read its own state each attempt; it
+// may throw a synthetic error to signal lag that isn't an HTTP error (e.g. a 200
+// with a blank SHA). Mirrors the CLI's CommitWithFreshRepoRetry.
+export async function withFreshRepoRetry<T>(
+  fn: () => Promise<T>,
+  options: FreshRepoRetryOptions = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 6
+  const baseDelayMs = options.baseDelayMs ?? 500
+  const backoffFactor = options.backoffFactor ?? 2
+  const shouldRetry = options.shouldRetry ?? isFreshRepoLagError
 
   let lastError: unknown
-
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      return await getBranchRefRepo(client, owner, repo, branch)
+      return await fn()
     } catch (err) {
       lastError = err
-
-      if (!isGitRepositoryEmptyError(err) && !isNotFoundError(err)) {
+      if (!shouldRetry(err) || attempt === attempts) {
         throw err
       }
-
-      if (attempt < attempts) {
-        await sleep(delayMs)
-      }
+      await sleep(baseDelayMs * backoffFactor ** (attempt - 1))
     }
   }
 
@@ -346,26 +426,34 @@ export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
     `/orgs/${org}/members?per_page=100&page=${page}`,
   )
 }
+
+// Walk a GitHub list endpoint to exhaustion, 100 items per page. `makePath`
+// receives the 1-based page number. Stops when a page returns fewer than 100.
+export async function paginateAll<T>(
+  client: GitHubClient,
+  makePath: (page: number) => string,
+): Promise<T[]> {
+  const all: T[] = []
+  let page = 1
+
+  while (true) {
+    const batch = await client.request<T[]>(makePath(page))
+    all.push(...batch)
+    if (batch.length < 100) break
+    page++
+  }
+
+  return all
+}
+
 export async function getOrgMembers(
   client: GitHubClient,
   org: string,
 ): Promise<GitHubUser[]> {
-  const members: GitHubUser[] = []
-  let page = 1
-
-  while (true) {
-    const batch = await client.request<GitHubUser[]>(
-      `/orgs/${org}/members?per_page=100&page=${page}`,
-    )
-
-    members.push(...batch)
-
-    if (batch.length < 100) break
-
-    page++
-  }
-
-  return members
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
 }
 
 export async function getTeam(
@@ -568,6 +656,38 @@ export async function getRepo(
   }
 }
 
+export type GitHubPullRequest = {
+  number: number
+  html_url: string
+  state: "open" | "closed"
+  title: string
+  draft?: boolean
+  head: { ref: string }
+  base: { ref: string }
+}
+
+// Open PRs on a student/group repo. The autograde workflow opens one Feedback
+// PR per repo, so the first open PR is that PR. 404 (repo not generated yet) ->
+// []. Tolerant so a missing repo reads as "no PR" rather than throwing.
+export async function getOpenPullRequests(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  signal?: AbortSignal,
+) {
+  try {
+    return await client.request<GitHubPullRequest[]>(
+      `/repos/${owner}/${repo}/pulls?state=open&per_page=10`,
+      { method: "GET", signal },
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return []
+    }
+    throw err
+  }
+}
+
 export async function getOrgRepos(client: GitHubClient, owner: string) {
   try {
     return await client.request<GitHubRepo[]>(
@@ -586,7 +706,7 @@ type RepositorySecret = {
   created_at: string
   updated_at: string
 }
-const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_COLLECT_TOKEN"
+const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
 export type CollectTokenStatus =
   | {
       status: "present"
