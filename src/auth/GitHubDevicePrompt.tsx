@@ -52,7 +52,7 @@ export function GitHubDevicePrompt({
       // already showing "Copied!".
       setCopyTick((t) => t + 1)
       onCodeCopied()
-    } catch (err) {
+    } catch {
       // nothing for now
     }
   }
