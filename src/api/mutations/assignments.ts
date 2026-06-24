@@ -70,7 +70,7 @@ export type AcceptStepId =
   | "access"
   | "setup"
 
-type AcceptStepStatus = "pending" | "running" | "complete" | "error"
+export type AcceptStepStatus = "pending" | "running" | "complete" | "error"
 
 export type AcceptStepUpdate = {
   id: AcceptStepId

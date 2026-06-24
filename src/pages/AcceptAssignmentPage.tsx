@@ -20,7 +20,7 @@ import confetti from "canvas-confetti"
 import {
   acceptAssignment,
   type AcceptStepId,
-  type AcceptStepUpdate,
+  type AcceptStepStatus,
 } from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
@@ -240,7 +240,7 @@ const ACCEPT_STEP_ORDER: { id: AcceptStepId; label: string }[] = [
 
 type StepState = Record<
   AcceptStepId,
-  { status: AcceptStepUpdate["status"]; message?: string; error?: string }
+  { status: AcceptStepStatus; message?: string; error?: string }
 >
 
 const initialStepState: StepState = ACCEPT_STEP_ORDER.reduce((acc, step) => {
@@ -248,18 +248,18 @@ const initialStepState: StepState = ACCEPT_STEP_ORDER.reduce((acc, step) => {
   return acc
 }, {} as StepState)
 
-const StatusIcon = ({
-  status,
-}: {
-  status: AcceptStepUpdate["status"]
-}) => {
+const StatusIcon = ({ status }: { status: AcceptStepStatus }) => {
   if (status === "complete")
     return <CheckCircle2 className="size-5 shrink-0 text-success" />
   if (status === "running")
     return <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
   if (status === "error")
     return <AlertTriangle className="size-5 shrink-0 text-error" />
-  return <span className="size-2.5 rounded-full bg-base-300" />
+  return (
+    <span className="flex size-5 shrink-0 items-center justify-center">
+      <span className="size-2.5 rounded-full bg-base-300" />
+    </span>
+  )
 }
 
 const StepRow = ({
@@ -273,9 +273,7 @@ const StepRow = ({
 
   return (
     <div className="flex items-center gap-3 text-sm">
-      <span className="flex size-5 shrink-0 items-center justify-center">
-        <StatusIcon status={state.status} />
-      </span>
+      <StatusIcon status={state.status} />
       <span
         className={
           state.status === "pending"
@@ -310,21 +308,20 @@ const AcceptProgress = ({
   // Force the panel open when a step fails so the failure is never hidden.
   const expanded = open || hasError
 
-  const headerStatus: AcceptStepUpdate["status"] = hasError
+  const headerStatus: AcceptStepStatus = hasError
     ? "error"
-    : isRunning
-      ? "running"
-      : allDone
-        ? "complete"
+    : allDone
+      ? "complete"
+      : isRunning
+        ? "running"
         : "pending"
 
-  const summary = hasError
-    ? "Setup failed — review the steps"
-    : allDone
-      ? "Setup complete"
-      : isRunning
-        ? "Setting up your repository…"
-        : "Setup progress"
+  const summary = {
+    error: "Setup failed — review the steps",
+    complete: "Setup complete",
+    running: "Setting up your repository…",
+    pending: "Setup progress",
+  }[headerStatus]
 
   return (
     <div className="rounded-xl border border-base-300 bg-base-200/40">
@@ -362,8 +359,7 @@ const AcceptProgress = ({
   )
 }
 
-// A simple two-burst confetti pop from the top corners, angled in toward the
-// center, to celebrate a freshly created assignment repo.
+// Celebrate a freshly created assignment repo.
 const fireConfetti = () => {
   const base = { spread: 80, startVelocity: 55, ticks: 200, zIndex: 1000 }
   confetti({ ...base, particleCount: 60, origin: { x: 0, y: 0 }, angle: -55 })
