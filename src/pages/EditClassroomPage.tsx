@@ -77,10 +77,19 @@ const EditClassroomPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <Breadcrumb endpoint="Edit Classroom" />
+          <Breadcrumb endpoint="Settings" />
           <div className="flex justify-between">
             <div>
-              <h1 className="text-xl pt-8 pb-10 font-bold">Edit Classroom</h1>
+              <h1 className="text-xl pt-8 pb-2 font-bold">
+                Classroom Settings
+              </h1>
+              <p className="pb-10 text-sm text-base-content/60">
+                Configuration for the{" "}
+                <span className="font-semibold">
+                  {cl.name || cl.short_name || classroom}
+                </span>{" "}
+                classroom.
+              </p>
             </div>
           </div>
           {classroomEdited ? (
@@ -112,7 +121,7 @@ const EditClassroomPage = () => {
             </div>
           </div>
         </DrawerContent>
-        <DrawerSidebar selected="classes" page="classes" />
+        <DrawerSidebar selected="settings" isTeacher />
       </Drawer>
     </div>
   )

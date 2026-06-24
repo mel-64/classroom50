@@ -9,10 +9,11 @@ import type {
   GitHubRepo,
   GitHubTeam,
   GitHubUser,
+  GitHubWorkflowRun,
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
-import { createTeam, getErrorMessage } from "./mutations"
+import { COLLECT_SCORES_WORKFLOW, createTeam, getErrorMessage } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
@@ -53,6 +54,15 @@ export const githubKeys = {
 
   csvFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
+
+  collectScoresRun: (owner: string, sinceRunId: number | null) =>
+    [...githubKeys.all, "collect-scores-run", owner, sinceRunId ?? "none"] as const,
+
+  lastCollectScoresRun: (owner: string) =>
+    [...githubKeys.all, "last-collect-scores-run", owner] as const,
+
+  serviceToken: (owner: string) =>
+    [...githubKeys.all, "serviceToken", owner] as const,
 }
 
 export function viewerQuery(client: GitHubClient) {
@@ -474,6 +484,29 @@ export async function getTeam(
   }
 }
 
+// Whether the classroom team already has access to a repo (the in-org private
+// template). 2xx = has access, 404 = doesn't; other errors propagate so a
+// transient failure isn't misread as "no access".
+export async function teamHasRepoAccess(
+  client: GitHubClient,
+  input: { org: string; classroom: string; owner: string; repo: string },
+): Promise<boolean> {
+  const { org, classroom, owner, repo } = input
+  const teamSlug = `classroom50-${classroom}`
+
+  try {
+    await client.request(
+      `/orgs/${org}/teams/${teamSlug}/repos/${owner}/${repo}`,
+    )
+    return true
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
+      return false
+    }
+    throw error
+  }
+}
+
 export async function ensureTeam(
   client: GitHubClient,
   org: string,
@@ -587,7 +620,7 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
-    collectToken: CollectTokenStatus | null
+    serviceToken: ServiceTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
@@ -602,7 +635,7 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  let collectToken: CollectTokenStatus | null = null
+  let serviceToken: ServiceTokenStatus | null = null
   let status: Classroom50Status = "unknown"
 
   try {
@@ -610,7 +643,7 @@ export async function getClassroom50OrgSummary(
     canAccessRepo = true
     status = "ready"
 
-    collectToken = await getCollectTokenStatus(client, org.login)
+    serviceToken = await getServiceTokenStatus(client, org.login)
   } catch (error: any) {
     if (error.status === 404) {
       canAccessRepo = false
@@ -633,7 +666,7 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
-      collectToken,
+      serviceToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
@@ -706,42 +739,42 @@ type RepositorySecret = {
   created_at: string
   updated_at: string
 }
-const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
-export type CollectTokenStatus =
+const SERVICE_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
+export type ServiceTokenStatus =
   | {
       status: "present"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       createdAt: string
       updatedAt: string
       message: string
     }
   | {
       status: "missing"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       message: string
     }
   | {
       status: "unknown"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       reason: "repo_missing_or_no_access" | "permission_denied" | "unknown"
       message: string
     }
 
-export async function getCollectTokenStatus(
+export async function getServiceTokenStatus(
   client: GitHubClient,
   org: string,
-): Promise<CollectTokenStatus> {
+): Promise<ServiceTokenStatus> {
   try {
     const secret = await client.request<RepositorySecret>(
-      `/repos/${org}/classroom50/actions/secrets/${COLLECT_TOKEN_SECRET_NAME}`,
+      `/repos/${org}/classroom50/actions/secrets/${SERVICE_TOKEN_SECRET_NAME}`,
     )
 
     return {
       status: "present",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       createdAt: secret.created_at,
       updatedAt: secret.updated_at,
-      message: `Collect token secret exists. Last updated ${new Date(
+      message: `Service token is set on the classroom50 config repo. Last updated ${new Date(
         secret.updated_at,
       ).toLocaleString()}.`,
     }
@@ -750,28 +783,30 @@ export async function getCollectTokenStatus(
       if (err.status === 404) {
         return {
           status: "missing",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           message:
-            "Collect token secret is missing. Store collection workflows will not be able to read student repositories until a token is stored.",
+            "Service token is not set on the classroom50 config repo. Score-collection workflows cannot read student repositories until a service token is set.",
         }
       }
 
       if (err.status === 403) {
         return {
           status: "unknown",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           reason: "permission_denied",
           message:
-            "Could not check the collect token secret because this GitHub authorization cannot read repository Actions secrets.",
+            "Could not check the service token on the classroom50 config repo because this GitHub authorization cannot read repository Actions secrets.",
         }
       }
     }
 
     return {
       status: "unknown",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       reason: "unknown",
-      message: `Could not check collect token secret: ${getErrorMessage(err)}`,
+      message: `Could not check the service token on the classroom50 config repo: ${getErrorMessage(
+        err,
+      )}`,
     }
   }
 }
@@ -787,4 +822,68 @@ export async function getRepoPermissionForUser(params: {
   return client.request(
     `/repos/${org}/${repo}/collaborators/${username}/permission`,
   )
+}
+
+// Fetches the most recent collect-scores run matching the given filters (or
+// null if none). Shared by the "track my dispatch" and "last collected" reads.
+async function listLatestCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  filters: { event?: string; since?: string; status?: string; perPage?: number },
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun[]> {
+  const params = new URLSearchParams({
+    per_page: String(filters.perPage ?? 1),
+  })
+  if (filters.event) params.set("event", filters.event)
+  if (filters.since) params.set("created", `>=${filters.since}`)
+  if (filters.status) params.set("status", filters.status)
+
+  const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?${params.toString()}`,
+    { method: "GET", signal },
+  )
+
+  return res.workflow_runs ?? []
+}
+
+// Finds the run we dispatched: run ids are monotonic, so it's the oldest
+// dispatch run with an id greater than `sinceRunId` (the newest id before our
+// POST). Binding to our own run avoids mistaking a concurrent dispatch for ours
+// and needs no clock. Returns null until our run registers; `sinceRunId === null`
+// means no prior runs, so the oldest run on the first page is ours.
+export async function getCollectScoresRunAfterId(
+  client: GitHubClient,
+  org: string,
+  sinceRunId: number | null,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  const runs = await listLatestCollectScoresRun(
+    client,
+    org,
+    { event: "workflow_dispatch", perPage: 20 },
+    signal,
+  )
+
+  // runs come newest-first; the run we triggered is the oldest one newer than
+  // the pre-dispatch baseline.
+  const newer = sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
+  return newer.length > 0 ? newer[newer.length - 1] : null
+}
+
+// The most recent *completed* collect-scores run (cron or manual), or null if
+// the workflow has never completed. Used for the "last collected" timestamp;
+// status=completed stops an in-flight newer run from hiding the prior one.
+export async function getLastCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  const runs = await listLatestCollectScoresRun(
+    client,
+    org,
+    { status: "completed" },
+    signal,
+  )
+  return runs[0] ?? null
 }

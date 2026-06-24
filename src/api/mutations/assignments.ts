@@ -34,6 +34,11 @@ import {
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
+import {
+  inOrgTemplateError,
+  outOfOrgTemplateError,
+} from "@/util/templateAccessError"
+import { githubOrgOAuthPolicyUrl } from "@/auth/constants"
 
 // Exact subject the runner (runner.py: ACCEPT_COMMIT_SUBJECT) scans for to
 // find the trusted Feedback-PR baseline — any other message makes it skip the
@@ -81,6 +86,130 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
     owner: parts[0],
     repo: parts[1],
     branch: trimmedBranch || undefined,
+  }
+}
+
+// Advisory pre-flight verdict for a template ref: mirrors resolveTemplate's
+// checks but returns a verdict instead of throwing. Uses the teacher's OAuth
+// token — the same one students use at accept time.
+export type TemplateAccessVerification =
+  | { kind: "empty" }
+  | { kind: "invalid"; message: string }
+  | { kind: "not-visible"; owner: string; repo: string }
+  | { kind: "not-template"; owner: string; repo: string }
+  // No usable branch: no @branch given and the repo has no default branch
+  // (e.g. a commitless template). resolveTemplate rejects this too.
+  | { kind: "no-branch"; owner: string; repo: string }
+  | { kind: "private-out-of-org"; owner: string; repo: string }
+  // Read denied (HTTP 403): the owning org likely restricts third-party apps.
+  | { kind: "restricted"; owner: string; repo: string; policyUrl: string }
+  // GitHub rate limit hit; the check is inconclusive and should be retried.
+  | { kind: "rate-limited"; owner: string; repo: string }
+  // Verification couldn't complete (network or unexpected error).
+  | { kind: "unknown"; owner: string; repo: string }
+  | {
+      kind: "ok"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      inOrg: boolean
+    }
+  // Reachable third-party org template (neither the classroom org nor the
+  // teacher's account). The org's app restriction only bites at generate time,
+  // so accept may still fail.
+  | {
+      kind: "ok-verify"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      policyUrl: string
+    }
+
+export async function verifyTemplateAccess(
+  client: GitHubClient,
+  org: string,
+  raw: string,
+  viewerLogin?: string,
+): Promise<TemplateAccessVerification> {
+  if (!raw.trim()) return { kind: "empty" }
+
+  let parsed: ParsedTemplate
+  try {
+    parsed = parseTemplateRef(raw, org)
+  } catch (err) {
+    return {
+      kind: "invalid",
+      message: err instanceof Error ? err.message : "Invalid template ref.",
+    }
+  }
+
+  let repo: GitHubRepo | null
+  try {
+    // getRepo is 404-tolerant (returns null). A rate-limit also surfaces as 403,
+    // so check it before treating a 403 as an org restriction.
+    repo = await getRepo(client, parsed.owner, parsed.repo)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isRateLimited) {
+      return { kind: "rate-limited", owner: parsed.owner, repo: parsed.repo }
+    }
+    if (err instanceof GitHubAPIError && err.isForbidden) {
+      return {
+        kind: "restricted",
+        owner: parsed.owner,
+        repo: parsed.repo,
+        policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+      }
+    }
+    return { kind: "unknown", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  if (!repo) {
+    return { kind: "not-visible", owner: parsed.owner, repo: parsed.repo }
+  }
+  if (!repo.is_template) {
+    return { kind: "not-template", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  const inOrg = parsed.owner.toLowerCase() === org.toLowerCase()
+  if (repo.private && !inOrg) {
+    return {
+      kind: "private-out-of-org",
+      owner: parsed.owner,
+      repo: parsed.repo,
+    }
+  }
+
+  const branch = parsed.branch || repo.default_branch
+  if (!branch) {
+    return { kind: "no-branch", owner: parsed.owner, repo: parsed.repo }
+  }
+  const visibility = repo.private ? "private" : "public"
+
+  // Third-party org (not the classroom org, not the teacher's account):
+  // readable, but generate may still be blocked by app restrictions.
+  const isOwnAccount =
+    viewerLogin !== undefined &&
+    parsed.owner.toLowerCase() === viewerLogin.toLowerCase()
+  if (!inOrg && !isOwnAccount) {
+    return {
+      kind: "ok-verify",
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch,
+      visibility,
+      policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+    }
+  }
+
+  return {
+    kind: "ok",
+    owner: parsed.owner,
+    repo: parsed.repo,
+    branch,
+    visibility,
+    inOrg,
   }
 }
 
@@ -604,19 +733,17 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // Template generation failed. Do NOT fall back to an empty repo — that
-      // produced broken repos (no template content/shim) that look "accepted"
-      // but can't be regenerated. Usual cause: the team lacks read on a private
-      // in-org template. 403 = denied; 404 = template not visible.
-      if (err.status === 403 || err.status === 404) {
-        throw new Error(
-          `Couldn't generate your repository from the template ` +
-            `${templateOwner}/${cleanTemplateRepo} (HTTP ${err.status}). ` +
-            `If it's a private template, the classroom team may not have read ` +
-            `access to it yet — ask your instructor to re-run the assignment ` +
-            `setup (which grants the team read on the template), then accept again.`,
-          { cause: err },
-        )
+      // Don't fall back to an empty repo — it looks "accepted" but has no
+      // template content and can't be regenerated. A rate-limit also surfaces
+      // as 403, so rethrow it before treating 403/404 as a template problem.
+      if (err.isRateLimited) {
+        throw err
+      }
+      if (err.isForbidden || err.isNotFound) {
+        const inOrg = templateOwner.toLowerCase() === owner.toLowerCase()
+        throw inOrg
+          ? inOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
+          : outOfOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
       }
 
       // Any other status is a real failure too — don't mask it with an empty

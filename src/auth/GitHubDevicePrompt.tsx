@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Check, Copy, ExternalLink } from "lucide-react"
 
 import type { DeviceAuthState } from "./types"
@@ -34,11 +35,30 @@ export function GitHubDevicePrompt({
   onCodeCopied: () => void
   onVerificationOpened: () => void
 }) {
+  const [copied, setCopied] = useState(false)
+  const [copyTick, setCopyTick] = useState(0)
+
+  // Reset stale "Copied!" when the code rotates.
+  const [copiedCode, setCopiedCode] = useState(device.userCode)
+  if (device.userCode !== copiedCode) {
+    setCopiedCode(device.userCode)
+    if (copied) setCopied(false)
+  }
+
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(id)
+  }, [copied, copyTick])
+
   async function copyCode() {
     try {
       await navigator.clipboard.writeText(device.userCode)
+      setCopied(true)
+      // Re-arm the reset timer on a repeat click while still showing "Copied!".
+      setCopyTick((t) => t + 1)
       onCodeCopied()
-    } catch (err) {
+    } catch {
       // nothing for now
     }
   }
@@ -56,11 +76,23 @@ export function GitHubDevicePrompt({
           </div>
 
           <button
-            className="btn btn-outline btn-primary btn-sm w-full"
+            className={[
+              "btn btn-sm w-full",
+              copied ? "btn-success" : "btn-outline btn-primary",
+            ].join(" ")}
             onClick={copyCode}
           >
-            <Copy className="size-4" />
-            Copy code
+            {copied ? (
+              <>
+                <Check className="size-4" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="size-4" />
+                Copy code
+              </>
+            )}
           </button>
         </div>
       </div>

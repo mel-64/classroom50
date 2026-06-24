@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useForm } from "@tanstack/react-form"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useParams, useRouter } from "@tanstack/react-router"
 import { Trash2, UsersRound, Plus } from "lucide-react"
 import Breadcrumb from "@/components/breadcrumb"
 import Drawer, {
@@ -480,6 +480,7 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
 
 const EditAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
+  const router = useRouter()
   const { isTeacher, isStudent } = useCourseTeacherAccess(org)
   const { data: assignments } = useGetClassroomAssignments(org, classroom)
   const [editSuccess, setEditSuccess] = useState(false)
@@ -518,6 +519,9 @@ const EditAssignmentPage = () => {
               classroom={classroom}
               assignment={assignment}
               defaultData={assignmentData}
+              onCancel={() => {
+                router.history.back()
+              }}
               onMutate={() => {
                 // Clear prior banners so a re-edit never shows stale state.
                 setEditSuccess(false)

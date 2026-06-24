@@ -102,3 +102,27 @@ export type GitHubOrgDetails = {
     seats: number
   }
 }
+
+export type GitHubWorkflowRun = {
+  id: number
+  status:
+    | "queued"
+    | "in_progress"
+    | "completed"
+    | "waiting"
+    | "requested"
+    | "pending"
+  conclusion:
+    | "success"
+    | "failure"
+    | "cancelled"
+    | "skipped"
+    | "timed_out"
+    | "action_required"
+    | "neutral"
+    | "stale"
+    | null
+  created_at: string
+  html_url: string
+  event: string
+}

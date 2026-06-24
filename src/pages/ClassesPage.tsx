@@ -331,7 +331,11 @@ export const OrgRepos = ({
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
-  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org)
+  const {
+    isTeacher,
+    isStudent,
+    isLoading: roleLoading,
+  } = useCourseTeacherAccess(org)
   const { data: membership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
@@ -359,16 +363,20 @@ const ClassesPage = () => {
                 </div>
 
                 <div>
-                  <h1 className="text-2xl font-bold tracking-tight">
-                    My {isTeacher ? "Classes" : "Assignments"}
-                  </h1>
+                  {roleLoading ? (
+                    <div className="skeleton h-8 w-48" />
+                  ) : (
+                    <h1 className="text-2xl font-bold tracking-tight">
+                      My {isTeacher ? "Classes" : "Assignments"}
+                    </h1>
+                  )}
                   <p className="mt-2 max-w-2xl text-sm text-base-content/60">
                     Manage your courses and assignments.
                   </p>
                 </div>
               </div>
 
-              {classes.length && isTeacher ? (
+              {isTeacher && classes.length > 0 && (
                 <div className="flex sm:self-end">
                   <Link
                     type="button"
@@ -378,27 +386,36 @@ const ClassesPage = () => {
                     + New Class
                   </Link>
                 </div>
-              ) : (
-                <></>
               )}
             </div>
-            {isStudent && !isMember && !loadingMembership ? (
+            {isStudent && !isMember && !loadingMembership && (
               <JoinOrgCard org={org} />
-            ) : (
-              <></>
             )}
           </div>
-          {classes.length === 0 && isTeacher ? (
-            <CreateClassroomPane org={org} />
-          ) : null}
-          {isTeacher && (
+          {roleLoading ? (
             <div className="grid grid-cols-12 gap-4 mb-6">
-              {classes.map((cl) => (
-                <ClassCard key={cl.path} cl={cl} org={org} />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="skeleton col-span-6 h-32 rounded-xl xl:col-span-4"
+                />
               ))}
             </div>
+          ) : (
+            <>
+              {classes.length === 0 && isTeacher && (
+                <CreateClassroomPane org={org} />
+              )}
+              {isTeacher && (
+                <div className="grid grid-cols-12 gap-4 mb-6">
+                  {classes.map((cl) => (
+                    <ClassCard key={cl.path} cl={cl} org={org} />
+                  ))}
+                </div>
+              )}
+              {isStudent && isMember && <OrgRepos org={org} />}
+            </>
           )}
-          {isStudent && isMember && <OrgRepos org={org} />}
         </DrawerContent>
         <DrawerSidebar
           page="classes"

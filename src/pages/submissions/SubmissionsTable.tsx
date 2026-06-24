@@ -35,33 +35,8 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-// A compact initials bubble with a tooltip naming the member — keeps a
-// multi-member group row tight, moving identity into hover.
-const MiniAvatar = ({
-  username,
-  students,
-}: {
-  username: string
-  students: Student[]
-}) => {
-  const name = getName(username, students)
-  const label = name ? `${name} · ${username}` : username
-  return (
-    <div className="tooltip" data-tip={label}>
-      <div className="avatar avatar-placeholder">
-        <div className="bg-base-200 text-primary rounded-full w-7 ring-2 ring-base-100">
-          <span className="text-xs">
-            {getInitials(username, students) || username.at(0)?.toUpperCase()}
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// A group submission credits every rostered collaborator. Compact layout: the
-// shared repo (the real group identity) on top, then an overlapping avatar
-// stack with member names in per-avatar tooltips.
+// Credits every rostered collaborator on a group submission: the shared repo
+// (the group's identity) on top, then each member's full name and GitHub handle.
 const GroupMembers = ({
   usernames,
   students,
@@ -73,7 +48,7 @@ const GroupMembers = ({
   repoHref: string
   repoLabel: string
 }) => (
-  <div className="flex flex-col gap-1.5">
+  <div className="flex flex-col gap-2">
     <a
       className="flex items-center gap-1.5 link link-hover w-fit font-medium"
       href={repoHref}
@@ -85,16 +60,33 @@ const GroupMembers = ({
       <span className="font-mono text-sm">{repoLabel}</span>
     </a>
 
-    <div className="flex items-center gap-2">
-      <div className="flex -space-x-2">
-        {usernames.map((username) => (
-          <MiniAvatar key={username} username={username} students={students} />
-        ))}
-      </div>
-      <span className="text-xs text-base-content/60">
-        {usernames.length} {usernames.length === 1 ? "member" : "members"}
-      </span>
-    </div>
+    <ul className="flex flex-col gap-1.5">
+      {usernames.map((username) => {
+        const name = getName(username, students)
+        return (
+          <li key={username} className="flex items-center gap-2">
+            <div className="avatar avatar-placeholder">
+              <div className="bg-base-200 text-primary rounded-full w-7 ring-2 ring-base-100">
+                <span className="text-xs">
+                  {getInitials(username, students) ||
+                    username.at(0)?.toUpperCase()}
+                </span>
+              </div>
+            </div>
+            <div className="min-w-0 leading-tight">
+              <div className="text-sm font-medium text-base-content">
+                {name || username}
+              </div>
+              {name && (
+                <div className="font-mono text-xs text-base-content/60">
+                  {username}
+                </div>
+              )}
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   </div>
 )
 

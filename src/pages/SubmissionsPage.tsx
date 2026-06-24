@@ -5,7 +5,9 @@ import {
   ArrowDownWideNarrow,
   Check,
   Copy,
+  ExternalLink,
   HardDriveDownload,
+  Info,
   LinkIcon,
   RefreshCw,
 } from "lucide-react"
@@ -21,11 +23,14 @@ import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
+import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
+import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
+import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
 import { formatDistanceToNow } from "date-fns"
 
-// utility hook for forcing a component refresh; just grabs current time every X interval
-const useNow = (intervalMs = 30_000) => {
-  const [now, setNow] = useState(() => Date.now())
+// Re-renders on an interval to keep relative timestamps fresh; returns nothing.
+const usePeriodicRerender = (intervalMs = 30_000) => {
+  const [, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), intervalMs)
@@ -51,8 +56,8 @@ const SubmissionsPage = () => {
 
   const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
 
-  // simply having this here will trigger a re-render every 30s by default for the refresh label
-  const now = useNow()
+  // Re-render every 30s so the relative "last collected"/"last updated" labels stay fresh.
+  usePeriodicRerender()
 
   const copySubmitLink = async () => {
     await navigator.clipboard.writeText(assignmentSubmitUrl)
@@ -66,6 +71,26 @@ const SubmissionsPage = () => {
     assignmentData?.assignments.find((a) => a.slug === assignment)
   const isGroupAssignment = assignmentInfo?.mode === "group"
   const scoresInfo = scoresData?.submissions?.[assignment] || []
+
+  const collectScores = useTriggerScoreCollection(org)
+  const { data: lastRun, refetch: refetchLastRun } =
+    useGetLastCollectScoresRun(org)
+  const workflowUrl = `https://github.com/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}`
+  const collecting =
+    collectScores.phase === "dispatching" || collectScores.phase === "running"
+
+  const lastCollectedLabel =
+    lastRun?.status === "completed" && lastRun.created_at
+      ? formatDistanceToNow(new Date(lastRun.created_at), { addSuffix: true })
+      : null
+
+  // Refresh scores and the last-run timestamp once a manual collection finishes.
+  useEffect(() => {
+    if (collectScores.phase === "completed") {
+      refetchScores()
+      refetchLastRun()
+    }
+  }, [collectScores.phase, refetchScores, refetchLastRun])
 
   const downloadScoresCsv = () => {
     const rows = scoresInfo
@@ -113,8 +138,8 @@ const SubmissionsPage = () => {
               <h1 className="text-lg pt-8 pb-2 font-bold">
                 {assignmentInfo?.name}
               </h1>
-              <div className="flex pb-10">
-                <label>
+              <div className="flex items-center gap-2 pb-10 text-sm text-base-content/70">
+                <span>
                   {isGroupAssignment ? (
                     <>
                       {scoresInfo.length}{" "}
@@ -125,10 +150,10 @@ const SubmissionsPage = () => {
                       {scoresInfo.length} of {students.length} submitted
                     </>
                   )}
-                </label>
-                <label className="px-2"> • </label>
-                <ArrowDownWideNarrow />
-                <label>Sorted by most recent</label>
+                </span>
+                <span>•</span>
+                <ArrowDownWideNarrow className="size-4" />
+                <span>Sorted by most recent</span>
               </div>
             </div>
             <div className="pt-10">
@@ -140,6 +165,75 @@ const SubmissionsPage = () => {
               >
                 <HardDriveDownload /> Download Scores (CSV)
               </button>
+            </div>
+          </div>
+          <div className="mb-4 flex flex-col gap-4 rounded-box border border-info/20 bg-info/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Info className="mt-0.5 size-5 shrink-0 text-info" />
+              <div>
+                <p className="text-sm">
+                  Submissions are collected automatically, but it can take up to
+                  24 hours for new submissions to appear here.
+                </p>
+                {!collecting && lastCollectedLabel && (
+                  <p className="mt-1 text-sm text-base-content/60">
+                    Scores last collected (org-wide) {lastCollectedLabel}.
+                  </p>
+                )}
+                {collectScores.phase === "dispatching" && (
+                  <p className="mt-1 text-sm text-base-content/70">
+                    Starting collection…
+                  </p>
+                )}
+                {collectScores.phase === "running" && (
+                  <p className="mt-1 flex items-center gap-1.5 text-sm text-base-content/70">
+                    <span className="loading loading-spinner loading-xs" />
+                    Collection in progress. This page will refresh automatically
+                    when it finishes.
+                  </p>
+                )}
+                {collectScores.phase === "completed" && (
+                  <p className="mt-1 text-sm text-success">
+                    Collection finished. Submissions below are up to date.
+                  </p>
+                )}
+                {collectScores.phase === "failed" && (
+                  <p className="mt-1 text-sm text-error">
+                    {collectScores.error instanceof Error
+                      ? `Could not start collection: ${collectScores.error.message}`
+                      : "The collection run did not complete successfully."}{" "}
+                    You can check or trigger it manually on GitHub.
+                  </p>
+                )}
+                {collectScores.phase === "timeout" && (
+                  <p className="mt-1 text-sm text-base-content/70">
+                    Still running after a while. Check its progress on GitHub, or
+                    refresh this page once it finishes.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={collecting}
+                onClick={() => collectScores.collect()}
+              >
+                {collecting && (
+                  <span className="loading loading-spinner loading-xs" />
+                )}
+                {collecting ? "Collecting…" : "Collect now"}
+              </button>
+              <a
+                className="btn btn-sm btn-ghost"
+                href={collectScores.run?.html_url || workflowUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink className="size-4" />
+                {collectScores.run ? "View run" : "View workflow"}
+              </a>
             </div>
           </div>
           <div className="card bg-base-100 rounded-xl border border-[#eee] mb-4">

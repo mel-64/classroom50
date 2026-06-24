@@ -18,6 +18,7 @@ const EditAssignmentForm = ({
   onSuccess,
   onError,
   onMutate,
+  onCancel,
 }: {
   org: string
   classroom: string
@@ -26,6 +27,7 @@ const EditAssignmentForm = ({
   onSuccess: (result: CreateAssignmentResult) => void
   onError?: (error: GitHubAPIError) => void
   onMutate?: () => void
+  onCancel?: () => void
 }) => {
   const client = useGitHubClient()
   const editAssignmentMutation = useMutation<
@@ -52,6 +54,8 @@ const EditAssignmentForm = ({
       edit
       loading={editAssignmentMutation.isPending}
       org={org}
+      classroom={classroom}
+      onCancel={onCancel}
       defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {
         editAssignmentMutation.mutate({

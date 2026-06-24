@@ -4,6 +4,7 @@ import {
   UsersRound,
   LogOut,
   MessageCircleQuestionMark,
+  Settings,
 } from "lucide-react"
 import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
@@ -121,6 +122,16 @@ export const TeacherSidebarMenu = ({
             >
               <UsersRound />
               <span>Students</span>
+            </li>
+          </Link>
+        )}
+        {isTeacher && (
+          <Link to={`/${org}/${classroom}/edit`}>
+            <li
+              className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
+            >
+              <Settings />
+              <span>Settings</span>
             </li>
           </Link>
         )}
@@ -281,17 +292,37 @@ export const MyClasses = ({
   isTeacher = false,
 }) => {
   const { org } = useParams({ strict: false })
+  const { isLoading: roleLoading } = useCourseTeacherAccess(org ?? "")
+  const onSettings = settings || selected === "settings"
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
         <Link to={`/${org}`}>
           <li
-            className={`flex${settings || selected === "settings" ? "" : " bg-[#323b49]"} px-2 rounded-box`}
+            className={`flex px-2 rounded-box${onSettings ? "" : " bg-[#323b49]"}`}
           >
             <BookText />
-            <span>{isTeacher ? "My Classes" : "My Assignments"}</span>
+            <span>
+              {roleLoading ? (
+                <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
+              ) : isTeacher ? (
+                "My Classes"
+              ) : (
+                "My Assignments"
+              )}
+            </span>
           </li>
         </Link>
+        {isTeacher && (
+          <Link to={`/${org}/settings`}>
+            <li
+              className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
+            >
+              <Settings />
+              <span>Settings</span>
+            </li>
+          </Link>
+        )}
       </ul>
     </div>
   )

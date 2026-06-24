@@ -1,4 +1,5 @@
 import type { GitHubClient } from "./client"
+import { createGitHubClient } from "./client"
 import {
   type GitHubCreateTree,
   type GitHubCreateCommit,
@@ -1342,6 +1343,120 @@ export async function encryptSecret(publicKey: string, secret: string) {
   return sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL)
 }
 
+/**
+ * Validates a fine-grained PAT before storing it as the service token, mirroring
+ * the CLI's `servicetoken.ValidateToken`: reads the classroom50 repo's contents
+ * *as the supplied token*, exercising `Contents: read`, and maps failures to
+ * actionable messages so a bad token is caught here, not later as a failed run.
+ *
+ * Caveat: this proves the token can read `classroom50`, not the student repos
+ * the collect workflow walks (fine-grained PATs don't expose their repo
+ * selection via the API). Hence the UI requires "All repositories" and the
+ * success copy is scoped to what this check actually proves.
+ */
+export async function validateServiceToken(
+  token: string,
+  org: string | undefined,
+) {
+  if (!org) throw new Error("org must be specified to validate a service token")
+
+  const trimmed = token.trim()
+  if (!trimmed) throw new Error("Enter a token before saving.")
+
+  const tokenClient = createGitHubClient({ token: trimmed })
+
+  try {
+    // Probes api.github.com directly with the pasted token, relying on GitHub's
+    // permissive CORS on authenticated REST calls; route through any future
+    // CORS-stripping proxy too.
+    await tokenClient.request(`/repos/${org}/classroom50/contents/`)
+  } catch (err) {
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 401) {
+        throw new Error(
+          "This token is invalid, expired, or revoked (401). Create a fresh fine-grained PAT and try again.",
+          { cause: err },
+        )
+      }
+      if (err.status === 403) {
+        throw new Error(
+          `This token can't read ${org}/classroom50 contents (403). Create a fine-grained PAT with Resource owner = ${org}, Repository access = All repositories, and Contents: Read. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved).`,
+          { cause: err },
+        )
+      }
+      if (err.status === 404) {
+        throw new Error(
+          `Couldn't find a classroom50 repository in ${org} (404). Check that the organization is correct and that setup has been run for it — this isn't necessarily a problem with the token itself.`,
+          { cause: err },
+        )
+      }
+    }
+    // A fetch that never reached GitHub (network/CORS) throws a TypeError, not a
+    // GitHubAPIError — don't blame the token for that.
+    if (err instanceof TypeError) {
+      throw new Error(
+        `Couldn't reach GitHub to verify the token (network or CORS issue). Check your connection and try again. (${err.message})`,
+        { cause: err },
+      )
+    }
+    throw new Error(
+      `Couldn't verify the token against ${org}/classroom50: ${getErrorMessage(
+        err,
+      )}`,
+      { cause: err },
+    )
+  }
+}
+
+export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
+
+/**
+ * Dispatches the classroom50 repo's `collect-scores.yaml` workflow — the same
+ * nightly job that refreshes `scores.json` — so a teacher can pull fresh
+ * submissions on demand. Reads the repo's default branch for the required ref.
+ *
+ * Returns `sinceRunId`: the newest collect-scores dispatch run before this POST
+ * (null if none). Since the dispatch API returns no run id, the caller finds the
+ * triggered run as the oldest dispatch run with a larger id — monotonic, so no
+ * clock comparison and unambiguous when dispatches race.
+ *
+ * @param classroom optional dispatch input to scope collection to one classroom;
+ *   callers currently omit it to collect org-wide.
+ */
+export async function triggerScoreCollection(
+  client: GitHubClient,
+  org: string | undefined,
+  classroom?: string,
+): Promise<{ sinceRunId: number | null }> {
+  if (!org) throw new Error("org must be specified to collect scores")
+
+  const repo = await getRepo(client, org, "classroom50")
+  if (!repo) {
+    throw new Error(`${org}/classroom50 not found; run setup for this org first`)
+  }
+  const ref = repo.default_branch || "main"
+
+  // Snapshot the newest dispatch run id before the POST. Run ids are monotonic,
+  // so the run this POST creates is the oldest dispatch run whose id exceeds it.
+  const baseline = await client.request<{ workflow_runs: { id: number }[] }>(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+  )
+  const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
+
+  await client.request(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/dispatches`,
+    {
+      method: "POST",
+      body: {
+        ref,
+        inputs: classroom ? { classroom } : {},
+      },
+    },
+  )
+
+  return { sinceRunId }
+}
+
 export async function putRepoSecret(
   client: GitHubClient,
   owner: string | undefined,
@@ -1643,7 +1758,7 @@ export async function initClassroom50({
 }: {
   client: GitHubClient
   org: string
-  collectToken?: string
+  serviceToken?: string
   serviceAccountConfirmed: boolean
   onStepUpdate: (update: InitStepUpdate) => void
 }) {
