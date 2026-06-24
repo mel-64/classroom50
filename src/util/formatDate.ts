@@ -54,7 +54,12 @@ export const formatDueDateTime = (dateString: string): string => {
 }
 
 export const isPastDue = (dateString: string): boolean => {
-  const date = parseDueDate(dateString)
+  // A bare YYYY-MM-DD has no time. buildDueFields pins such a deadline to 23:59
+  // local, so treat the whole day as "not past due" until local end-of-day —
+  // otherwise we'd flag it past-due ~24h early (at local midnight).
+  const date = isBareDate(dateString)
+    ? new Date(`${dateString}T23:59:59.999`)
+    : parseDueDate(dateString)
   if (Number.isNaN(date.getTime())) {
     return false
   }

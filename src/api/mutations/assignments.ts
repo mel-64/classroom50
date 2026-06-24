@@ -72,7 +72,7 @@ export type AcceptStepId =
 
 export type AcceptStepStatus = "pending" | "running" | "complete" | "error"
 
-export type AcceptStepUpdate = {
+type AcceptStepUpdate = {
   id: AcceptStepId
   status: AcceptStepStatus
   // The label shown for the step; on resolution it can override the default
@@ -1386,15 +1386,21 @@ export async function acceptAssignment(params: {
   if (created.kind === "already-accepted") {
     // The repo exists, but a prior accept may have failed AFTER creating it but
     // BEFORE committing the metadata/workflow (seeding lag, transient 5xx),
-    // leaving a repo that looks accepted but never autogrades. Heal it: if
-    // .classroom50.yaml is missing, re-run the idempotent provisioning;
-    // otherwise it's genuinely already accepted — leave it untouched.
-    const provisioned = await repoContentsPathExists(
-      client,
-      org,
-      created.repo.name,
-      ".classroom50.yaml",
-    )
+    // leaving a repo that looks accepted but never autogrades. Heal it: a repo
+    // is only "genuinely accepted" when BOTH the metadata and the autograde
+    // workflow landed (they're written in one commit, so a missing workflow
+    // means the prior accept failed mid-flow). If either is missing, re-run the
+    // idempotent provisioning.
+    const [hasMetadata, hasWorkflow] = await Promise.all([
+      repoContentsPathExists(client, org, created.repo.name, ".classroom50.yaml"),
+      repoContentsPathExists(
+        client,
+        org,
+        created.repo.name,
+        ".github/workflows/autograde.yaml",
+      ),
+    ])
+    const provisioned = hasMetadata && hasWorkflow
 
     if (provisioned) {
       // Genuinely already accepted — mark the remaining steps complete so the

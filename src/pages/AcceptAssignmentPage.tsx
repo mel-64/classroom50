@@ -566,8 +566,9 @@ const AcceptAssignmentPage = () => {
                       : "Something went wrong while accepting the assignment."}
                   </div>
                   <div className="mt-2 text-xs opacity-80">
-                    This is safe to retry — use the button below once you've
-                    addressed the issue above.
+                    This is safe to retry — address anything noted above if you
+                    can, then use the button below. Some errors (rate limits,
+                    GitHub hiccups) just need a moment before retrying.
                   </div>
                 </div>
               </div>
@@ -619,7 +620,7 @@ const AcceptAssignmentPage = () => {
                 <button
                   type="button"
                   className="btn btn-primary w-full text-xl p-8"
-                  disabled={!username}
+                  disabled={!username || acceptMutation.isPending}
                   onClick={() => acceptMutation.mutate()}
                 >
                   <GitHubWhite className="size-6" />
@@ -631,7 +632,7 @@ const AcceptAssignmentPage = () => {
               !acceptMutation.data &&
               !acceptMutation.isPending && (
                 <RepairToggle
-                  disabled={!username}
+                  disabled={!username || acceptMutation.isPending}
                   onRerun={() => acceptMutation.mutate()}
                 />
               )}
