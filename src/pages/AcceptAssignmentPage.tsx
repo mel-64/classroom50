@@ -289,27 +289,18 @@ const StepRow = ({
   )
 }
 
-const AcceptProgress = ({
-  steps,
-  active = false,
-}: {
-  steps: StepState
-  active?: boolean
-}) => {
+const AcceptProgress = ({ steps }: { steps: StepState }) => {
   const stepStates = ACCEPT_STEP_ORDER.map((step) => steps[step.id])
   const completed = stepStates.filter((s) => s.status === "complete").length
   const hasError = stepStates.some((s) => s.status === "error")
   const isRunning = stepStates.some((s) => s.status === "running")
   const allDone = completed === ACCEPT_STEP_ORDER.length
 
-  // Open while the accept is in flight (`active`) or has an error to review;
-  // collapse once it has settled successfully. Driven by the mutation's
-  // lifecycle, not per-step `isRunning`, so the panel doesn't flicker shut in
-  // the gap between one step completing and the next starting. A student's
-  // explicit toggle takes precedence.
+  // Start collapsed — the header summary + count carries enough signal — and
+  // let the student expand the per-step detail on demand. Force open only on
+  // an error so a failure is never hidden. An explicit toggle takes precedence.
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
-  const lifecycleOpen = active || hasError
-  const expanded = userOpen ?? lifecycleOpen
+  const expanded = userOpen ?? hasError
 
   const headerStatus: AcceptStepStatus = hasError
     ? "error"
@@ -554,7 +545,7 @@ const AcceptAssignmentPage = () => {
             {(acceptMutation.isPending ||
               acceptMutation.isError ||
               acceptMutation.isSuccess) && (
-              <AcceptProgress steps={steps} active={acceptMutation.isPending} />
+              <AcceptProgress steps={steps} />
             )}
 
             {acceptMutation.isError && (
