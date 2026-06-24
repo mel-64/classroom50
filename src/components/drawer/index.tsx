@@ -138,22 +138,10 @@ export const TeacherSidebarMenu = ({
   )
 }
 
-// keep first name as-is, truncate all others with a period
-const truncateName = (name: string) => {
-  if (!name) return ""
-
-  const truncatedName = name
-    .split(" ")
-    .map((n, i) => (i === 0 ? n : n.slice(0, 1) + "."))
-    .join(" ")
-
-  return truncatedName
-}
-
 export const SidebarFooter = () => {
   const { signOut, user } = useGithubAuth()
   const avatar_img = user?.avatar_url || duck
-  const name = truncateName(user?.name || "") || user?.login || "User"
+  const name = user?.name || user?.login || "User"
   const { org } = useParams({ strict: false })
   const { isTeacher, isStudent, isLoading: roleLoading } =
     useCourseTeacherAccess(org)
