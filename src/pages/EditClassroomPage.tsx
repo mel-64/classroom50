@@ -121,7 +121,7 @@ const EditClassroomPage = () => {
             </div>
           </div>
         </DrawerContent>
-        <DrawerSidebar selected="settings" isTeacher />
+        <DrawerSidebar selected="settings" />
       </Drawer>
     </div>
   )

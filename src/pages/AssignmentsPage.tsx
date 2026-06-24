@@ -100,7 +100,7 @@ const AssignmentsPage = () => {
             <StudentAssignmentsView org={org} classroom={classroom} />
           )}
         </DrawerContent>
-        <DrawerSidebar selected="assignments" isTeacher={isTeacher} />
+        <DrawerSidebar selected="assignments" />
       </Drawer>
     </div>
   )

@@ -417,11 +417,7 @@ const ClassesPage = () => {
             </>
           )}
         </DrawerContent>
-        <DrawerSidebar
-          page="classes"
-          selected="assignments"
-          isTeacher={isTeacher}
-        />
+        <DrawerSidebar page="classes" selected="assignments" />
       </Drawer>
     </div>
   )

@@ -553,7 +553,7 @@ const EditAssignmentPage = () => {
             />
           )}
         </DrawerContent>
-        <DrawerSidebar selected="assignments" isTeacher={isTeacher} />
+        <DrawerSidebar selected="assignments" />
       </Drawer>
     </div>
   )

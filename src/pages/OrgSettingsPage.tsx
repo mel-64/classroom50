@@ -10,7 +10,6 @@ import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
 import { githubKeys } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
-import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import {
   CalendarClock,
   CheckCircle2,
@@ -325,7 +324,6 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
 
 const OrgSettingsPage = () => {
   const { org } = useParams({ strict: false })
-  const { isTeacher } = useCourseTeacherAccess(org ?? "")
 
   return (
     <div className="min-h-screen">
@@ -341,12 +339,7 @@ const OrgSettingsPage = () => {
           </div>
           <OrgSettingsPane />
         </DrawerContent>
-        <DrawerSidebar
-          page="classes"
-          settings
-          selected="settings"
-          isTeacher={isTeacher}
-        />
+        <DrawerSidebar page="classes" settings selected="settings" />
       </Drawer>
     </div>
   )

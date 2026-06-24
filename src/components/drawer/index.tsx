@@ -27,29 +27,16 @@ export const DrawerSidebar = ({
   selected = "",
   page = "",
   settings = false,
-  isTeacher = false,
 }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
         {page === "classes" ? (
-          <SidebarContentClasses
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContentClasses selected={selected} settings={settings} />
         ) : page === "orgs" ? (
-          <SidebarContentOrgs
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContentOrgs selected={selected} />
         ) : (
-          <SidebarContent
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContent selected={selected} />
         )}
       </div>
     </div>
@@ -97,13 +84,20 @@ export const TeacherSidebarMenu = ({
   org,
   classroom,
   selected,
-  isTeacher,
 }: {
   org: string
   classroom: string
   selected: string
-  isTeacher?: boolean
 }) => {
+  // Derive the role here rather than relying on a prop: callers routinely
+  // forgot to pass `isTeacher`, which silently hid these items. We also keep
+  // the items visible while the role is still resolving and only hide them on
+  // a definitive non-teacher result, so a transient loading/error state can't
+  // make "Students"/"Settings" flicker out.
+  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org ?? "")
+  const roleResolvedAsNonTeacher = isStudent || isBlocked
+  const showTeacherItems = isTeacher || !roleResolvedAsNonTeacher
+
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -115,7 +109,7 @@ export const TeacherSidebarMenu = ({
             <span>Assignments</span>
           </li>
         </Link>
-        {isTeacher && (
+        {showTeacherItems && (
           <Link to={`/${org}/${classroom}/students`}>
             <li
               className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
@@ -125,7 +119,7 @@ export const TeacherSidebarMenu = ({
             </li>
           </Link>
         )}
-        {isTeacher && (
+        {showTeacherItems && (
           <Link to={`/${org}/${classroom}/edit`}>
             <li
               className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
@@ -260,13 +254,7 @@ export const SidebarFooter = () => {
   )
 }
 
-export const SidebarContent = ({
-  selected,
-  isTeacher,
-}: {
-  selected: string
-  isTeacher?: boolean
-}) => {
+export const SidebarContent = ({ selected }: { selected: string }) => {
   const { org, classroom } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
 
@@ -275,24 +263,17 @@ export const SidebarContent = ({
       <ClassroomLogo />
       <AllClasses org={org} />
       <SidebarClassInfo classInfo={classData} />
-      <TeacherSidebarMenu
-        selected={selected}
-        org={org}
-        classroom={classroom}
-        isTeacher={isTeacher}
-      />
+      <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
       <SidebarFooter />
     </>
   )
 }
 
-export const MyClasses = ({
-  settings = false,
-  selected = "",
-  isTeacher = false,
-}) => {
+export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
-  const { isLoading: roleLoading } = useCourseTeacherAccess(org ?? "")
+  const { isTeacher, isLoading: roleLoading } = useCourseTeacherAccess(
+    org ?? "",
+  )
   const onSettings = settings || selected === "settings"
   return (
     <div className="py-4">
@@ -329,8 +310,6 @@ export const MyClasses = ({
 }
 
 export const MyOrgs = ({ settings = false }) => {
-  const { org } = useParams({ strict: false })
-
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -347,25 +326,17 @@ export const MyOrgs = ({ settings = false }) => {
   )
 }
 
-export const SidebarContentClasses = ({
-  selected,
-  settings = false,
-  isTeacher = false,
-}) => {
+export const SidebarContentClasses = ({ selected, settings = false }) => {
   return (
     <>
       <ClassroomLogo />
-      <MyClasses
-        selected={selected}
-        settings={settings}
-        isTeacher={isTeacher}
-      />
+      <MyClasses selected={selected} settings={settings} />
       <SidebarFooter />
     </>
   )
 }
 
-export const SidebarContentOrgs = ({ selected, isTeacher }) => {
+export const SidebarContentOrgs = ({ selected }) => {
   return (
     <>
       <ClassroomLogo />
