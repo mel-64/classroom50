@@ -89,10 +89,8 @@ export const TeacherSidebarMenu = ({
   classroom: string
   selected: string
 }) => {
-  // Hide teacher items only on a definitive non-teacher result; stay visible
-  // while the role is loading or errored so transient states don't flicker.
-  const { isStudent, isBlocked } = useCourseTeacherAccess(org ?? "")
-  const showTeacherItems = !(isStudent || isBlocked)
+  // Placeholder while pending so items never flash in then out.
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
 
   return (
     <div className="py-4">
@@ -105,25 +103,36 @@ export const TeacherSidebarMenu = ({
             <span>Assignments</span>
           </li>
         </Link>
-        {showTeacherItems && (
-          <Link to={`/${org}/${classroom}/students`}>
-            <li
-              className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
-            >
-              <UsersRound />
-              <span>Students</span>
+        {!roleResolved ? (
+          <>
+            <li className="flex px-2 py-2">
+              <span className="skeleton h-4 w-24 bg-white/10" />
             </li>
-          </Link>
-        )}
-        {showTeacherItems && (
-          <Link to={`/${org}/${classroom}/edit`}>
-            <li
-              className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
-            >
-              <Settings />
-              <span>Settings</span>
+            <li className="flex px-2 py-2">
+              <span className="skeleton h-4 w-24 bg-white/10" />
             </li>
-          </Link>
+          </>
+        ) : (
+          showTeacherUi && (
+            <>
+              <Link to={`/${org}/${classroom}/students`}>
+                <li
+                  className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
+                >
+                  <UsersRound />
+                  <span>Students</span>
+                </li>
+              </Link>
+              <Link to={`/${org}/${classroom}/edit`}>
+                <li
+                  className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
+                >
+                  <Settings />
+                  <span>Settings</span>
+                </li>
+              </Link>
+            </>
+          )
         )}
       </ul>
     </div>
@@ -147,7 +156,16 @@ export const SidebarFooter = () => {
   const avatar_img = user?.avatar_url || duck
   const name = truncateName(user?.name || "") || user?.login || "User"
   const { org } = useParams({ strict: false })
-  const { isTeacher } = useCourseTeacherAccess(org)
+  const { isTeacher, isStudent, isLoading: roleLoading } =
+    useCourseTeacherAccess(org)
+  // Identity claim: only assert a role once resolved; placeholder while pending.
+  const roleLabel = roleLoading
+    ? null
+    : isTeacher
+      ? "Teacher"
+      : isStudent
+        ? "Student"
+        : null
 
   const [menuOpen, setMenuOpen] = useState(false)
   const footerRef = useRef<HTMLDivElement | null>(null)
@@ -240,7 +258,11 @@ export const SidebarFooter = () => {
           {org ? (
             <div>
               <span className="text-[#aaa]">
-                {isTeacher ? "Teacher" : "Student"}
+                {roleLoading ? (
+                  <span className="skeleton inline-block h-3 w-16 align-middle bg-white/10" />
+                ) : (
+                  roleLabel
+                )}
               </span>
             </div>
           ) : null}
@@ -267,9 +289,7 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
 
 export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
-  const { isTeacher, isLoading: roleLoading } = useCourseTeacherAccess(
-    org ?? "",
-  )
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
   const onSettings = settings || selected === "settings"
   return (
     <div className="py-4">
@@ -280,9 +300,9 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
           >
             <BookText />
             <span>
-              {roleLoading ? (
+              {!roleResolved ? (
                 <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
-              ) : isTeacher ? (
+              ) : showTeacherUi ? (
                 "My Classes"
               ) : (
                 "My Assignments"
@@ -290,7 +310,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             </span>
           </li>
         </Link>
-        {isTeacher && (
+        {roleResolved && showTeacherUi && (
           <Link to={`/${org}/settings`}>
             <li
               className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
