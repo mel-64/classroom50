@@ -370,6 +370,41 @@ const fireConfetti = () => {
   confetti({ ...base, particleCount: 60, origin: { x: 1, y: 0 }, angle: -125 })
 }
 
+// Collapsed-by-default repair section for an already-accepted repo. Tucks the
+// "Re-run setup" affordance behind a toggle so it doesn't compete with the
+// primary "Open Repository" action.
+const RepairToggle = ({
+  disabled,
+  onRerun,
+}: {
+  disabled: boolean
+  onRerun: () => void
+}) => {
+  return (
+    <details className="group rounded-xl border border-base-300 bg-base-200/40">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium">
+        <span>Having trouble?</span>
+        <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+      </summary>
+
+      <div className="border-t border-base-300 p-4">
+        <p className="text-sm text-base-content/70">
+          Autograding not running, or setup files missing? Re-run setup to
+          repair your repository.
+        </p>
+        <button
+          type="button"
+          className="btn btn-outline btn-sm mt-3 w-full"
+          disabled={disabled}
+          onClick={onRerun}
+        >
+          Re-run setup
+        </button>
+      </div>
+    </details>
+  )
+}
+
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const client = useGitHubClient()
@@ -470,23 +505,10 @@ const AcceptAssignmentPage = () => {
             {assignmentData?.name}
           </h1>
           <h2 className="text-lg">
-            Accept this assignment to get your own copy of the starter code
-            repository.
+            {repoExistsAlready
+              ? "You've already accepted this assignment. Open your repository to keep working on it."
+              : "Accept this assignment to get your own copy of the starter code repository."}
           </h2>
-
-          {repoExistsAlready && !acceptMutation.data && (
-            <div className="alert alert-warning items-start">
-              <AlertTriangle className="size-5 shrink-0" />
-              <div>
-                <div className="font-bold">Assignment already accepted</div>
-                <div className="text-sm">
-                  Your repository already exists. You can open it below. If
-                  autograding isn't running or the setup files are missing, use
-                  "Re-run setup" to repair it.
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="divider mt-0" />
 
@@ -559,28 +581,6 @@ const AcceptAssignmentPage = () => {
               </div>
             )}
 
-            {!acceptMutation.data && !acceptMutation.isPending && (
-              <button
-                type="button"
-                className={
-                  repoExistsAlready
-                    ? "btn btn-outline w-full text-lg p-6"
-                    : "btn btn-primary w-full text-xl p-8"
-                }
-                disabled={!username}
-                onClick={() => acceptMutation.mutate()}
-              >
-                {repoExistsAlready ? (
-                  "Re-run setup"
-                ) : (
-                  <>
-                    <GitHubWhite className="size-6" />
-                    Accept Assignment & Create Repository
-                  </>
-                )}
-              </button>
-            )}
-
             {(acceptMutation.data || repoExistsAlready) && (
               <a
                 className="btn btn-primary w-full text-xl p-8"
@@ -595,6 +595,29 @@ const AcceptAssignmentPage = () => {
                 Open Repository
               </a>
             )}
+
+            {!acceptMutation.data &&
+              !repoExistsAlready &&
+              !acceptMutation.isPending && (
+                <button
+                  type="button"
+                  className="btn btn-primary w-full text-xl p-8"
+                  disabled={!username}
+                  onClick={() => acceptMutation.mutate()}
+                >
+                  <GitHubWhite className="size-6" />
+                  Accept Assignment & Create Repository
+                </button>
+              )}
+
+            {repoExistsAlready &&
+              !acceptMutation.data &&
+              !acceptMutation.isPending && (
+                <RepairToggle
+                  disabled={!username}
+                  onRerun={() => acceptMutation.mutate()}
+                />
+              )}
           </div>
         </div>
       </AcceptCard>
