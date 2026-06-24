@@ -42,6 +42,9 @@ export type Assignment = {
       user?: string
     }
   }
+  // Ordered .gitignore-style allowlist (last match wins, `!` re-includes).
+  // Empty/absent = all files allowed. Authored here; enforced server-side.
+  allowed_files?: string[]
   tests?: AssignmentTest[]
 }
 
