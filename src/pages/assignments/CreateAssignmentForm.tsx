@@ -1,6 +1,5 @@
 import { useForm } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,7 +7,6 @@ import {
   Loader2,
   ServerCog,
 } from "lucide-react"
-import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import {
@@ -28,6 +26,12 @@ import {
 } from "@/util/runners"
 import { orgRunnersQuery } from "@/hooks/github/queries"
 import { useOptionalGitHubClient } from "@/context/github/GitHubProvider"
+import { TemplateField } from "./TemplateField"
+import {
+  useDebouncedValue,
+  normalizeOnBlur,
+  type StringField,
+} from "./formFieldHelpers"
 import type { Assignment } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
@@ -54,6 +58,9 @@ type CreateAssignmentFormProps = {
   // Org slug for verifying a runner label against the org's self-hosted
   // runners. When absent, verification never blocks.
   org?: string
+  // Classroom slug, used by the template pre-flight to check whether the
+  // classroom team already has read on an in-org private template.
+  classroom?: string
 }
 const FormErrors = ({ form }) => (
   <form.Subscribe selector={(state) => [state.errors]}>
@@ -68,38 +75,6 @@ const FormErrors = ({ form }) => (
     )}
   </form.Subscribe>
 )
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value)
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs)
-    return () => clearTimeout(id)
-  }, [value, delayMs])
-
-  return debounced
-}
-
-// Minimal subset of a TanStack form field for a string-valued input.
-type StringField = {
-  name: string
-  state: { value: string }
-  handleBlur: () => void
-  handleChange: (value: string) => void
-}
-
-// onBlur handler that normalizes the value (default: trim), writing back
-// only on change.
-const normalizeOnBlur = (
-  field: StringField,
-  normalize: (value: string) => string = (value) => value.trim(),
-) => {
-  return () => {
-    const normalized = normalize(field.state.value)
-    if (normalized !== field.state.value) field.handleChange(normalized)
-    field.handleBlur()
-  }
-}
 
 // Free-form runner input with advisory, non-blocking verification: it
 // annotates the value but never rewrites or clears what the teacher typed.
@@ -346,6 +321,7 @@ const CreateAssignmentForm = ({
   edit = false,
   loading = false,
   org,
+  classroom,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
@@ -464,33 +440,7 @@ const CreateAssignmentForm = ({
             <div>
               <form.Field name="template_repo">
                 {(field) => (
-                  <>
-                    <div>
-                      <label
-                        htmlFor={field.name}
-                        className="label font-bold mb-2"
-                      >
-                        Template Repository
-                      </label>
-                    </div>
-                    <div className="flex items-center">
-                      <GitHub className="size-6 mr-2 text-[#ddd] opacity-50" />
-                      <input
-                        id={field.name}
-                        name={field.name}
-                        type="text"
-                        placeholder="org-name/repo-name"
-                        className="input w-full"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                      />
-                    </div>
-                    <p className="label pt-2">
-                      Optional. Students receive a copy of this repository.
-                      Leave blank for an empty repo with just the autograder.
-                    </p>
-                  </>
+                  <TemplateField field={field} org={org} classroom={classroom} />
                 )}
               </form.Field>
             </div>

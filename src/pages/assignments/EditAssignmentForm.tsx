@@ -54,6 +54,7 @@ const EditAssignmentForm = ({
       edit
       loading={editAssignmentMutation.isPending}
       org={org}
+      classroom={classroom}
       onCancel={onCancel}
       defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {

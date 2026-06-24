@@ -13,6 +13,11 @@ export const GITHUB_AUTH_SESSION = {
 
 export const DEFAULT_GITHUB_SCOPE = "read:user read:org repo workflow admin:org"
 
+// An org's OAuth app policy page, where owners approve apps or relax the
+// restriction.
+export const githubOrgOAuthPolicyUrl = (org: string) =>
+  `https://github.com/organizations/${org}/settings/oauth_application_policy`
+
 // Public OAuth app identifier (not a secret); injected at build time.
 export const GITHUB_OAUTH_CLIENT_ID: string =
   import.meta.env.VITE_GITHUB_CLIENT_ID ?? ""

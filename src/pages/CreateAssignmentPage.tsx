@@ -112,6 +112,7 @@ const CreateAssignmentPage = () => {
               <CreateAssignmentForm
                 loading={createClassroomMutation.isPending}
                 org={org}
+                classroom={classroom}
                 onSubmit={(values) => {
                   setErrorMessage("")
                   setWarningMessage("")
