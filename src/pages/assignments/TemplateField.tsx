@@ -20,7 +20,7 @@ import {
   normalizeOnBlur,
   type StringField,
 } from "./formFieldHelpers"
-import { InlineNote, InlineCode } from "@/components/InlineNote"
+import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
 
 // Advisory, non-blocking pre-flight for the Template Repository field: verifies
 // the OAuth token can reach the typed repo and annotates the field (never
@@ -52,8 +52,11 @@ export const TemplateField = ({
     retry: false,
   })
 
+  // Don't show "Checking…" while the debounce drains on a cleared field —
+  // there's nothing to verify once the live value is empty.
   const pending =
     enabled &&
+    trimmedValue !== "" &&
     (trimmedValue !== debouncedValue || verificationQuery.isFetching)
 
   return (
@@ -118,6 +121,19 @@ const TemplateVerificationNote = ({
 
   switch (verification.kind) {
     case "ok": {
+      // In-org private template: students can't read it directly, but creating
+      // the assignment grants the classroom team read on it (see
+      // tryGrantTeamTemplateRead), so say that rather than implying instant
+      // access.
+      if (verification.inOrg && verification.visibility === "private") {
+        return (
+          <Note tone="success" icon={CheckCircle2}>
+            Private template in {verification.owner} (branch{" "}
+            <Code>{verification.branch}</Code>). Creating the assignment grants
+            the classroom team read access so students can copy it.
+          </Note>
+        )
+      }
       const where = verification.inOrg ? "" : ` in ${verification.owner}`
       return (
         <Note tone="success" icon={CheckCircle2}>
@@ -215,8 +231,6 @@ const TemplateVerificationNote = ({
     }
   }
 }
-
-const Code = InlineCode
 
 // Adds the optional OAuth-policy link to an InlineNote; the verdict switch
 // passes a `policy` for the cases where an org owner must approve the app.

@@ -43,7 +43,8 @@ export class GitHubAPIError extends Error {
   get isRateLimited() {
     return (
       this.status === 429 ||
-      (this.status === 403 && this.rateLimit.remaining === 0)
+      (this.status === 403 &&
+        (this.rateLimit.remaining === 0 || this.rateLimit.retryAfter !== null))
     )
   }
 }
