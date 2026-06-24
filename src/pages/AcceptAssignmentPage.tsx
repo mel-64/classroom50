@@ -23,7 +23,7 @@ import {
   type AcceptStepUpdate,
 } from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
-import { formatDueDateTime } from "@/util/formatDate"
+import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
@@ -419,6 +419,8 @@ const AcceptAssignmentPage = () => {
 
   const assignmentData = assignmentsData?.find((a) => a.slug === assignment)
 
+  const pastDue = Boolean(assignmentData?.due && isPastDue(assignmentData.due))
+
   const expectedRepoName = username
     ? studentRepoName(classroom, assignment, username)
     : studentRepoName(classroom, assignment, "{your-github-username}")
@@ -495,7 +497,9 @@ const AcceptAssignmentPage = () => {
               <UserRound className="size-4" />
               {modeMap[assignmentData?.mode ?? ""] ?? ""}
             </span>
-            <span className="badge">
+            <span
+              className={`badge ${pastDue ? "badge-error badge-soft" : ""}`}
+            >
               {assignmentData?.due
                 ? `Due ${formatDueDateTime(assignmentData.due)}`
                 : "No due date"}
@@ -509,6 +513,16 @@ const AcceptAssignmentPage = () => {
               ? "You've already accepted this assignment. Open your repository to keep working on it."
               : "Accept this assignment to get your own copy of the starter code repository."}
           </h2>
+
+          {pastDue && (
+            <div className="alert alert-warning items-start">
+              <AlertTriangle className="size-5 shrink-0" />
+              <div className="text-sm">
+                This assignment is past due. You can still accept it, but check
+                with your instructor about late submissions.
+              </div>
+            </div>
+          )}
 
           <div className="divider mt-0" />
 

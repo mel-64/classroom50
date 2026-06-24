@@ -53,6 +53,15 @@ export const formatDueDateTime = (dateString: string): string => {
   return dueDateTimeFormatter.format(date)
 }
 
+export const isPastDue = (dateString: string): boolean => {
+  const date = parseDueDate(dateString)
+  if (Number.isNaN(date.getTime())) {
+    return false
+  }
+
+  return date.getTime() < Date.now()
+}
+
 const pad = (n: number) => String(n).padStart(2, "0")
 
 const formatOffset = (date: Date): string => {
