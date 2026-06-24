@@ -89,11 +89,8 @@ export const TeacherSidebarMenu = ({
   classroom: string
   selected: string
 }) => {
-  // Derive the role here rather than relying on a prop: callers routinely
-  // forgot to pass `isTeacher`, which silently hid these items. We also keep
-  // the items visible while the role is still resolving and only hide them on
-  // a definitive non-teacher result, so a transient loading/error state can't
-  // make "Students"/"Settings" flicker out.
+  // Hide teacher items only on a definitive non-teacher result; stay visible
+  // while the role is loading or errored so transient states don't flicker.
   const { isStudent, isBlocked } = useCourseTeacherAccess(org ?? "")
   const showTeacherItems = !(isStudent || isBlocked)
 
