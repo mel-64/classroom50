@@ -23,7 +23,7 @@ import {
   type AcceptStepUpdate,
 } from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
-import { formatDueDate } from "@/util/formatDate"
+import { formatDueDateTime } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
@@ -497,7 +497,7 @@ const AcceptAssignmentPage = () => {
             </span>
             <span className="badge">
               {assignmentData?.due
-                ? `Due ${formatDueDate(assignmentData.due)}`
+                ? `Due ${formatDueDateTime(assignmentData.due)}`
                 : "No due date"}
             </span>
           </div>
