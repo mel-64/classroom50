@@ -36,13 +36,15 @@ export function useCourseTeacherAccess(org: string) {
   const isBlocked =
     repoQuery.error instanceof GitHubAPIError && repoQuery.error.status === 403
 
-  // Resolved once the query returns any verdict for a real org; lets callers
-  // show a placeholder while pending instead of guessing.
-  const roleResolved = Boolean(org) && (repoQuery.isSuccess || repoQuery.isError)
+  // Resolved once the query returns a verdict; an absent org has no role to
+  // resolve, so treat it as resolved (non-teacher) instead of a forever-pending
+  // skeleton on org-less routes.
+  const roleResolved = !org || repoQuery.isSuccess || repoQuery.isError
 
-  // Show teacher UI unless definitively non-teacher (student 404 / blocked 403);
-  // stays visible on transient errors so real teachers don't flicker out.
-  const showTeacherUi = roleResolved && !(isStudent || isBlocked)
+  // Show teacher UI only for a real org that isn't a definitive non-teacher
+  // (student 404 / blocked 403); stays visible on transient errors so real
+  // teachers don't flicker out.
+  const showTeacherUi = Boolean(org) && roleResolved && !(isStudent || isBlocked)
 
   return {
     ...repoQuery,

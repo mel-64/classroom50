@@ -105,12 +105,11 @@ export const TeacherSidebarMenu = ({
         </Link>
         {!roleResolved ? (
           <>
-            <li className="flex px-2 py-2">
-              <span className="skeleton h-4 w-24 bg-white/10" />
-            </li>
-            <li className="flex px-2 py-2">
-              <span className="skeleton h-4 w-24 bg-white/10" />
-            </li>
+            {[0, 1].map((i) => (
+              <li key={i} className="flex px-2 py-2">
+                <span className="skeleton h-4 w-24 bg-white/10" />
+              </li>
+            ))}
           </>
         ) : (
           showTeacherUi && (
@@ -159,6 +158,8 @@ export const SidebarFooter = () => {
   const { isTeacher, isStudent, isLoading: roleLoading } =
     useCourseTeacherAccess(org)
   // Identity claim: only assert a role once resolved; placeholder while pending.
+  // Stays conservative (blank) on transient errors while nav stays optimistic —
+  // a deliberate split, not a bug.
   const roleLabel = roleLoading
     ? null
     : isTeacher
@@ -310,7 +311,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             </span>
           </li>
         </Link>
-        {roleResolved && showTeacherUi && (
+        {showTeacherUi && (
           <Link to={`/${org}/settings`}>
             <li
               className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
