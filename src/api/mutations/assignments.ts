@@ -34,6 +34,11 @@ import {
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
+import {
+  inOrgTemplateError,
+  outOfOrgTemplateError,
+} from "@/util/templateAccessError"
+import { githubOrgOAuthPolicyUrl } from "@/auth/constants"
 
 // Exact subject the runner (runner.py: ACCEPT_COMMIT_SUBJECT) scans for to
 // find the trusted Feedback-PR baseline — any other message makes it skip the
@@ -81,6 +86,120 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
     owner: parts[0],
     repo: parts[1],
     branch: trimmedBranch || undefined,
+  }
+}
+
+// Advisory pre-flight verdict for a template ref the teacher is typing. Mirrors
+// the checks in resolveTemplate but never throws, powering the live note under
+// the Template Repository field. Uses the same OAuth token students use at
+// accept time.
+export type TemplateAccessVerification =
+  | { kind: "empty" }
+  | { kind: "invalid"; message: string }
+  | { kind: "not-visible"; owner: string; repo: string }
+  | { kind: "not-template"; owner: string; repo: string }
+  | { kind: "private-out-of-org"; owner: string; repo: string }
+  // Read denied (HTTP 403): the owning org likely restricts third-party apps.
+  | { kind: "restricted"; owner: string; repo: string; policyUrl: string }
+  // Verification couldn't complete (network or unexpected error).
+  | { kind: "unknown"; owner: string; repo: string }
+  | {
+      kind: "ok"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      inOrg: boolean
+    }
+  // Reachable, but in a third-party org (not the classroom org, not the
+  // teacher's account). GitHub only enforces the org's app restriction at
+  // generate time, so we can't prove accept will work. Advise verifying.
+  | {
+      kind: "ok-verify"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      policyUrl: string
+    }
+
+export async function verifyTemplateAccess(
+  client: GitHubClient,
+  org: string,
+  raw: string,
+  viewerLogin?: string,
+): Promise<TemplateAccessVerification> {
+  if (!raw.trim()) return { kind: "empty" }
+
+  let parsed: ParsedTemplate
+  try {
+    parsed = parseTemplateRef(raw, org)
+  } catch (err) {
+    return {
+      kind: "invalid",
+      message: err instanceof Error ? err.message : "Invalid template ref.",
+    }
+  }
+
+  let repo: GitHubRepo | null
+  try {
+    // getRepo is 404-tolerant (returns null). A 403 means the owning org
+    // denied the read, so report it as restricted instead of erroring out.
+    repo = await getRepo(client, parsed.owner, parsed.repo)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isForbidden) {
+      return {
+        kind: "restricted",
+        owner: parsed.owner,
+        repo: parsed.repo,
+        policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+      }
+    }
+    return { kind: "unknown", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  if (!repo) {
+    return { kind: "not-visible", owner: parsed.owner, repo: parsed.repo }
+  }
+  if (!repo.is_template) {
+    return { kind: "not-template", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  const inOrg = parsed.owner.toLowerCase() === org.toLowerCase()
+  if (repo.private && !inOrg) {
+    return {
+      kind: "private-out-of-org",
+      owner: parsed.owner,
+      repo: parsed.repo,
+    }
+  }
+
+  const branch = parsed.branch || repo.default_branch
+  const visibility = repo.private ? "private" : "public"
+
+  // Third-party org (not the classroom org, not the teacher's account):
+  // readable, but the org may still block generate via app restrictions.
+  const isOwnAccount =
+    viewerLogin !== undefined &&
+    parsed.owner.toLowerCase() === viewerLogin.toLowerCase()
+  if (!inOrg && !isOwnAccount) {
+    return {
+      kind: "ok-verify",
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch,
+      visibility,
+      policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+    }
+  }
+
+  return {
+    kind: "ok",
+    owner: parsed.owner,
+    repo: parsed.repo,
+    branch,
+    visibility,
+    inOrg,
   }
 }
 
@@ -604,19 +723,14 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // Template generation failed. Do NOT fall back to an empty repo — that
-      // produced broken repos (no template content/shim) that look "accepted"
-      // but can't be regenerated. Usual cause: the team lacks read on a private
-      // in-org template. 403 = denied; 404 = template not visible.
-      if (err.status === 403 || err.status === 404) {
-        throw new Error(
-          `Couldn't generate your repository from the template ` +
-            `${templateOwner}/${cleanTemplateRepo} (HTTP ${err.status}). ` +
-            `If it's a private template, the classroom team may not have read ` +
-            `access to it yet — ask your instructor to re-run the assignment ` +
-            `setup (which grants the team read on the template), then accept again.`,
-          { cause: err },
-        )
+      // Template generation failed. Do NOT fall back to an empty repo: that
+      // produced broken repos (no template content or shim) that look
+      // "accepted" but can't be regenerated. 403 = denied; 404 = not visible.
+      if (err.isForbidden || err.isNotFound) {
+        const inOrg = templateOwner.toLowerCase() === owner.toLowerCase()
+        throw inOrg
+          ? inOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
+          : outOfOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
       }
 
       // Any other status is a real failure too — don't mask it with an empty

@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   GraduationCap,
   UserPlus,
   UserRound,
@@ -14,6 +15,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
 import { acceptAssignment } from "@/api/mutations/assignments"
+import { TemplateAccessError } from "@/util/templateAccessError"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDate } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
@@ -353,6 +355,23 @@ const AcceptAssignmentPage = () => {
                       ? acceptMutation.error.message
                       : "Something went wrong while accepting the assignment."}
                   </div>
+                  {acceptMutation.error instanceof TemplateAccessError &&
+                    acceptMutation.error.links.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {acceptMutation.error.links.map((link) => (
+                          <a
+                            key={link.href}
+                            href={link.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-sm btn-error btn-outline"
+                          >
+                            {link.label}
+                            <ExternalLink className="size-4" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                 </div>
               </div>
             )}
