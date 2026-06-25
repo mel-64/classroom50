@@ -385,7 +385,16 @@ export function jsonFileQuery<T>(
         { method: "GET", signal },
       )
 
-      return JSON.parse(raw) as T
+      // A truncated/hand-edited file would otherwise reject as a raw SyntaxError
+      // and surface no useful message; throw a friendly one naming the file so
+      // consumers can render it (matching submissionResultQuery).
+      try {
+        return JSON.parse(raw) as T
+      } catch {
+        throw new Error(
+          `${path} couldn't be read (the file may be malformed). Try refreshing in a moment.`,
+        )
+      }
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
@@ -395,6 +404,11 @@ export function jsonFileQuery<T>(
 
 const ARTIFACTS_BRANCH = "artifacts"
 const RESULT_PATH = "result.json"
+// The result.json contract this client understands. A future result/v2 may
+// rename or reshape fields, so we fail loudly on an unrecognized version rather
+// than silently mis-rendering a v2 payload through the v1 type (mirrors
+// extractAssignments' version guard for assignments.json).
+const RESULT_SCHEMA_PREFIX = "classroom50/result/v1"
 
 // Reads the student's latest graded result from the committed `result.json` on
 // the repo's orphan `artifacts` branch (written by the autograde runner). We
@@ -429,13 +443,33 @@ export function submissionResultQuery<T>(
         throw error
       }
 
+      let parsed: unknown
       try {
-        return JSON.parse(raw) as T
+        parsed = JSON.parse(raw)
       } catch {
         throw new Error(
           "Your submission result couldn't be read (it may still be uploading). Try again in a moment.",
         )
       }
+
+      // Reject an unrecognized schema version up front so a newer runner's
+      // reshaped payload fails loudly instead of mis-rendering as v1. A missing
+      // `schema` field is tolerated for backward compatibility with older
+      // result.json files that predate the version stamp.
+      const schema =
+        typeof parsed === "object" && parsed !== null && "schema" in parsed
+          ? (parsed as { schema?: unknown }).schema
+          : undefined
+      if (
+        typeof schema === "string" &&
+        !schema.startsWith(RESULT_SCHEMA_PREFIX)
+      ) {
+        throw new Error(
+          "This submission was graded by a newer version of Classroom 50. Please refresh or update to view it.",
+        )
+      }
+
+      return parsed as T
     },
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,

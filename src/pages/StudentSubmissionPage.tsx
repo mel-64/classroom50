@@ -22,6 +22,7 @@ import useGetSubmissionResult from "@/hooks/useGetSubmissionResult"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
+import { safeHttpUrl } from "@/util/url"
 import type { ResultJson } from "@/types/result"
 import type { Assignment } from "@/types/classroom"
 
@@ -112,22 +113,28 @@ const TestRow = ({ test }: { test: ResultJson["tests"][number] }) => {
 
 const ResultLinks = ({ result }: { result: ResultJson }) => {
   const links: { label: string; href: string; icon: React.ReactNode }[] = []
-  if (result.commit)
+  // result.json comes from the student's own repo (artifacts branch), so its
+  // link fields are untrusted: only render genuine http(s) URLs to keep a
+  // `javascript:`/`data:` value from becoming a clickable script sink.
+  const commit = safeHttpUrl(result.commit)
+  const release = safeHttpUrl(result.release)
+  const review = safeHttpUrl(result.review)
+  if (commit)
     links.push({
       label: "Graded commit",
-      href: result.commit,
+      href: commit,
       icon: <GitCommitHorizontal className="size-4" />,
     })
-  if (result.release)
+  if (release)
     links.push({
       label: "Submission release",
-      href: result.release,
+      href: release,
       icon: <FileText className="size-4" />,
     })
-  if (result.review && result.review !== result.commit)
+  if (review && review !== commit)
     links.push({
       label: "Full diff",
-      href: result.review,
+      href: review,
       icon: <ExternalLink className="size-4" />,
     })
 
@@ -194,8 +201,15 @@ const SubmissionBody = ({
     error,
   } = useGetSubmissionResult(org, classroom, assignment, user?.login)
   // Distinguish "never accepted" (no repo) from "accepted but not yet graded".
-  const { assignment: studentRepo, isLoading: repoLoading } =
-    useGetAssignmentRepo(org, classroom, assignment, user?.login)
+  // getRepo returns null only on a true 404; a 403/5xx throws, so we must read
+  // the repo query's error too — otherwise a transient/permission failure falls
+  // through to the "haven't accepted yet" CTA and misdirects the student.
+  const {
+    assignment: studentRepo,
+    isLoading: repoLoading,
+    isError: repoIsError,
+    error: repoError,
+  } = useGetAssignmentRepo(org, classroom, assignment, user?.login)
 
   if (isLoading || repoLoading) {
     return (
@@ -206,11 +220,17 @@ const SubmissionBody = ({
     )
   }
 
-  if (isError) {
+  if (isError || repoIsError) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : repoError instanceof Error
+          ? repoError.message
+          : ""
     return (
       <div className="alert alert-error mt-6">
         Could not load your submission result.
-        {error instanceof Error ? ` ${error.message}` : ""}
+        {message ? ` ${message}` : ""}
       </div>
     )
   }
