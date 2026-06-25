@@ -99,10 +99,7 @@ export const TeacherSidebarMenu = ({
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link
-          to="/$org/$classroom/assignments"
-          params={{ org, classroom }}
-        >
+        <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
           <li
             className={`flex px-2 ${selected === "assignments" && "bg-[#323b49] rounded-box"}`}
           >
@@ -150,8 +147,11 @@ export const SidebarFooter = () => {
   const avatar_img = user?.avatar_url || duck
   const name = user?.name || user?.login || "User"
   const { org } = useParams({ strict: false })
-  const { isTeacher, isStudent, isLoading: roleLoading } =
-    useCourseTeacherAccess(org)
+  const {
+    isTeacher,
+    isStudent,
+    isLoading: roleLoading,
+  } = useCourseTeacherAccess(org)
   // Identity claim: only assert a role once resolved; placeholder while pending.
   // Stays conservative (blank) on transient errors while nav stays optimistic —
   // a deliberate split, not a bug.

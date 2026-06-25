@@ -8,9 +8,7 @@ function StepNumber({ value, done }: { value: number; done: boolean }) {
     <div
       className={[
         "flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-        done
-          ? "bg-success/10 text-success"
-          : "bg-primary/10 text-primary",
+        done ? "bg-success/10 text-success" : "bg-primary/10 text-primary",
       ].join(" ")}
     >
       {done ? <Check className="size-4" /> : value}

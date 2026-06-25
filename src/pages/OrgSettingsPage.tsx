@@ -117,42 +117,41 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           submissions.
         </p>
 
-        {!tokenStatusLoading && tokenStatus && (() => {
-          const banner = TOKEN_STATUS_BANNER[tokenStatus.status]
-          const { Icon } = banner
-          return (
-            <div
-              className={[
-                "mt-4 flex items-start gap-3 rounded-xl border p-4 text-sm",
-                banner.className,
-              ].join(" ")}
-            >
-              <Icon
-                className={`mt-0.5 size-5 shrink-0 ${banner.iconClassName}`}
-              />
-              <div className="min-w-0">
-                <p className="font-semibold text-base-content">
-                  {banner.title}
-                </p>
-                <p className="mt-1 text-base-content/70">
-                  {tokenStatus.message}
-                </p>
-                {tokenStatus.status === "present" && (
-                  <p className="mt-1 text-base-content/70">
-                    Saving below will replace the existing token (an update).
-                    The old token is overwritten in place.
+        {!tokenStatusLoading &&
+          tokenStatus &&
+          (() => {
+            const banner = TOKEN_STATUS_BANNER[tokenStatus.status]
+            const { Icon } = banner
+            return (
+              <div
+                className={[
+                  "mt-4 flex items-start gap-3 rounded-xl border p-4 text-sm",
+                  banner.className,
+                ].join(" ")}
+              >
+                <Icon
+                  className={`mt-0.5 size-5 shrink-0 ${banner.iconClassName}`}
+                />
+                <div className="min-w-0">
+                  <p className="font-semibold text-base-content">
+                    {banner.title}
                   </p>
-                )}
+                  <p className="mt-1 text-base-content/70">
+                    {tokenStatus.message}
+                  </p>
+                  {tokenStatus.status === "present" && (
+                    <p className="mt-1 text-base-content/70">
+                      Saving below will replace the existing token (an update).
+                      The old token is overwritten in place.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })()}
+            )
+          })()}
 
         <div className="mt-5">
-          <label
-            htmlFor="token-expiry"
-            className="block text-sm font-semibold"
-          >
+          <label htmlFor="token-expiry" className="block text-sm font-semibold">
             Token expiry
           </label>
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -261,7 +260,9 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
         >
           <div className="flex flex-col gap-2 w-full pb-10">
             <label className="label font-bold mt-4 text-sm">
-              {tokenAlreadySet ? "Enter new service token" : "Enter service token"}
+              {tokenAlreadySet
+                ? "Enter new service token"
+                : "Enter service token"}
             </label>
             <input
               ref={tokenInputRef}

@@ -1,8 +1,8 @@
 function base64Url(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '')
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "")
 }
 
 export function randomBase64Url(byteLength = 32) {
@@ -17,6 +17,6 @@ export function generateVerifier() {
 
 export async function deriveChallenge(verifier: string) {
   const encoded = new TextEncoder().encode(verifier)
-  const digest = await crypto.subtle.digest('SHA-256', encoded)
+  const digest = await crypto.subtle.digest("SHA-256", encoded)
   return base64Url(new Uint8Array(digest))
 }

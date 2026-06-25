@@ -771,7 +771,9 @@ export async function unenrollStudent(
       console.error("org membership removal failed (student unenrolled):", err)
       const detail = getErrorMessage(err)
       const what =
-        orgState === "pending" ? "cancelling their pending org invite" : "removing them from the organization"
+        orgState === "pending"
+          ? "cancelling their pending org invite"
+          : "removing them from the organization"
       warnings.push(
         `${toRemoveStudent.username} was removed from the roster, but ${what} ` +
           `failed (${detail}); retry from the organization's people page.`,

@@ -1,6 +1,10 @@
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useQuery } from "@tanstack/react-query"
-import { githubKeys, getOrgInvitations, getOrgFailedInvitations } from "./github/queries"
+import {
+  githubKeys,
+  getOrgInvitations,
+  getOrgFailedInvitations,
+} from "./github/queries"
 import { GitHubAPIError } from "./github/errors"
 
 // Owner-only endpoints; a non-owner token gets 403, surfaced as `isForbidden`

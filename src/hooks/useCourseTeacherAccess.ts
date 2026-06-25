@@ -44,7 +44,8 @@ export function useCourseTeacherAccess(org: string | undefined) {
   // Show teacher UI only for a real org that isn't a definitive non-teacher
   // (student 404 / blocked 403); stays visible on transient errors so real
   // teachers don't flicker out.
-  const showTeacherUi = Boolean(org) && roleResolved && !(isStudent || isBlocked)
+  const showTeacherUi =
+    Boolean(org) && roleResolved && !(isStudent || isBlocked)
 
   return {
     ...repoQuery,

@@ -88,8 +88,11 @@ const StudentAssignmentsView = ({
 
 const AssignmentsPage = () => {
   const { org, classroom } = useParams({ strict: false })
-  const { isTeacher, isStudent, isLoading: roleLoading } =
-    useCourseTeacherAccess(org)
+  const {
+    isTeacher,
+    isStudent,
+    isLoading: roleLoading,
+  } = useCourseTeacherAccess(org)
 
   return (
     <div className="min-h-screen">

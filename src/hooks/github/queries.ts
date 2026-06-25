@@ -39,8 +39,7 @@ export const githubKeys = {
   orgFailedInvitations: (org: string) =>
     [...githubKeys.all, "org-failed-invitations", org] as const,
 
-  orgMembers: (org: string) =>
-    ["orgs", "list", "members", org] as const,
+  orgMembers: (org: string) => ["orgs", "list", "members", org] as const,
 
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
@@ -91,10 +90,7 @@ export const githubKeys = {
 // Refresh the lists that drive roster invite status after enroll/resend/
 // unenroll: a resend moves an invite between pending and failed, and accepting
 // moves a user into members.
-export function invalidateInviteQueries(
-  queryClient: QueryClient,
-  org: string,
-) {
+export function invalidateInviteQueries(queryClient: QueryClient, org: string) {
   queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
   queryClient.invalidateQueries({
     queryKey: githubKeys.orgFailedInvitations(org),

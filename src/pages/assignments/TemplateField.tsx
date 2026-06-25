@@ -194,8 +194,8 @@ const TemplateVerificationNote = ({
       return (
         <Note tone="success" icon={CheckCircle2}>
           {verification.visibility === "public" ? "Public" : "Private"} template
-          {where}, branch <Code>{verification.branch}</Code>. Students can access
-          it.
+          {where}, branch <Code>{verification.branch}</Code>. Students can
+          access it.
         </Note>
       )
     }

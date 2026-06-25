@@ -4,6 +4,7 @@
   themes: corporate --default;
 }
 
-html, body {
+html,
+body {
   font-family: "Inter", system-ui, sans-serif;
 }

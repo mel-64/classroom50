@@ -320,11 +320,7 @@ const EnrolledStudents = ({
 
   const getStatus = useMemo(
     () =>
-      buildInviteStatusLookup(
-        members ?? [],
-        invitations,
-        failedInvitations,
-      ),
+      buildInviteStatusLookup(members ?? [], invitations, failedInvitations),
     [members, invitations, failedInvitations],
   )
 

@@ -94,7 +94,9 @@ export type DueFields = { due: string; due_meta?: DueMeta }
 // else is stored verbatim.
 export const buildDueFields = (dueInput: string): DueFields => {
   const dateOnly = isBareDate(dueInput)
-  const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(dueInput)
+  const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(
+    dueInput,
+  )
 
   if (!dateOnly && !localDateTime) {
     // Already carries a zone/offset, or isn't a shape we normalize.

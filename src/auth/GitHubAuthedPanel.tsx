@@ -1,10 +1,10 @@
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle } from "lucide-react"
 
-import type { GitHubUser } from '@/hooks/github/types'
+import type { GitHubUser } from "@/hooks/github/types"
 
 function previewToken(token: string | null) {
-  if (!token) return ''
-  return `${token.slice(0, 8)}${'·'.repeat(18)}${token.slice(-4)}`
+  if (!token) return ""
+  return `${token.slice(0, 8)}${"·".repeat(18)}${token.slice(-4)}`
 }
 
 export function GitHubAuthedPanel({
@@ -12,7 +12,7 @@ export function GitHubAuthedPanel({
   isLoadingUser,
   token,
   tokenScope,
-  onSignOut
+  onSignOut,
 }: {
   user: GitHubUser | null
   isLoadingUser: boolean
@@ -25,7 +25,7 @@ export function GitHubAuthedPanel({
       <div className="alert alert-success items-start text-sm">
         <CheckCircle className="size-4 shrink-0" />
         <span>
-          Signed in - token stored in{' '}
+          Signed in - token stored in{" "}
           <code className="font-mono">localStorage</code>
         </span>
       </div>
@@ -44,7 +44,9 @@ export function GitHubAuthedPanel({
         )}
 
         {isLoadingUser && !user ? (
-          <div className="text-sm text-base-content/60">Fetching profile...</div>
+          <div className="text-sm text-base-content/60">
+            Fetching profile...
+          </div>
         ) : user ? (
           <div>
             <div className="text-xl font-bold tracking-tight">
@@ -62,13 +64,13 @@ export function GitHubAuthedPanel({
         )}
 
         <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
-          <strong className="text-base-content">gh_access_token</strong> →{' '}
+          <strong className="text-base-content">gh_access_token</strong> →{" "}
           {previewToken(token)}
         </div>
 
         <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
-          <strong className="text-base-content">granted scopes</strong> →{' '}
-          {tokenScope || '(none reported)'}
+          <strong className="text-base-content">granted scopes</strong> →{" "}
+          {tokenScope || "(none reported)"}
         </div>
       </div>
 

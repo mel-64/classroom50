@@ -24,9 +24,8 @@ const POLL_BACKOFF_INTERVAL_MS = 15000
 
 // Terminal once GitHub reports a conclusion, even before `status` flips to
 // "completed".
-const isRunFinished = (
-  run: GitHubWorkflowRun | null | undefined,
-) => Boolean(run && (run.status === "completed" || run.conclusion !== null))
+const isRunFinished = (run: GitHubWorkflowRun | null | undefined) =>
+  Boolean(run && (run.status === "completed" || run.conclusion !== null))
 
 // The in-flight dispatch we're tracking. The dispatch API returns no run id, so
 // `sinceRunId` records the newest dispatch run before our POST (null = none);
@@ -107,7 +106,10 @@ const useTriggerScoreCollection = (org: string | undefined) => {
   })
 
   const runQuery = useQuery({
-    queryKey: githubKeys.collectScoresRun(org ?? "", dispatch?.sinceRunId ?? null),
+    queryKey: githubKeys.collectScoresRun(
+      org ?? "",
+      dispatch?.sinceRunId ?? null,
+    ),
     queryFn: ({ signal }) =>
       getCollectScoresRunAfterId(
         client,

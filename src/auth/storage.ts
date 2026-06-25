@@ -1,7 +1,7 @@
-import { GITHUB_AUTH_SESSION, GITHUB_AUTH_STORAGE } from './constants'
+import { GITHUB_AUTH_SESSION, GITHUB_AUTH_STORAGE } from "./constants"
 
 function canUseBrowserStorage() {
-  return typeof window !== 'undefined'
+  return typeof window !== "undefined"
 }
 
 export function getStoredGithubToken() {
@@ -10,13 +10,13 @@ export function getStoredGithubToken() {
 }
 
 export function getStoredGithubClientId() {
-  if (!canUseBrowserStorage()) return ''
-  return localStorage.getItem(GITHUB_AUTH_STORAGE.CLIENT_ID) ?? ''
+  if (!canUseBrowserStorage()) return ""
+  return localStorage.getItem(GITHUB_AUTH_STORAGE.CLIENT_ID) ?? ""
 }
 
 export function getStoredGithubScope() {
-  if (!canUseBrowserStorage()) return ''
-  return localStorage.getItem(GITHUB_AUTH_STORAGE.SCOPE_GRANTED) ?? ''
+  if (!canUseBrowserStorage()) return ""
+  return localStorage.getItem(GITHUB_AUTH_STORAGE.SCOPE_GRANTED) ?? ""
 }
 
 export function persistGithubClientId(clientId: string) {
@@ -24,7 +24,7 @@ export function persistGithubClientId(clientId: string) {
   localStorage.setItem(GITHUB_AUTH_STORAGE.CLIENT_ID, clientId)
 }
 
-export function persistGithubToken(token: string, scope = '') {
+export function persistGithubToken(token: string, scope = "") {
   if (!canUseBrowserStorage()) return
   localStorage.setItem(GITHUB_AUTH_STORAGE.TOKEN, token)
   localStorage.setItem(GITHUB_AUTH_STORAGE.SCOPE_GRANTED, scope)
@@ -56,7 +56,7 @@ export function consumeOAuthSession() {
       verifier: null,
       expectedState: null,
       clientId: null,
-      scope: null
+      scope: null,
     }
   }
 
@@ -74,6 +74,6 @@ export function consumeOAuthSession() {
     verifier,
     expectedState,
     clientId,
-    scope
+    scope,
   }
 }

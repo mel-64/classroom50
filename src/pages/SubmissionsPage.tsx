@@ -124,17 +124,19 @@ const SubmissionsPage = () => {
         (a, b) =>
           new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
       )
-      .map(({ usernames, score, datetime, submissionCount, late, ...rest }) => ({
-        usernames: usernames.join(", "),
-        score,
-        max_score: rest["max-score"],
-        submissions: submissionCount,
-        submitted_at: new Date(datetime).toISOString(),
-        late: late ? "yes" : "no",
-        commit: rest.commit,
-        review: rest.review,
-        release: rest.release,
-      }))
+      .map(
+        ({ usernames, score, datetime, submissionCount, late, ...rest }) => ({
+          usernames: usernames.join(", "),
+          score,
+          max_score: rest["max-score"],
+          submissions: submissionCount,
+          submitted_at: new Date(datetime).toISOString(),
+          late: late ? "yes" : "no",
+          commit: rest.commit,
+          review: rest.review,
+          release: rest.release,
+        }),
+      )
 
     // Append non-submitters so the exported gradebook covers the whole roster.
     // Scored 0 with blank submission fields; pinned after submitters.

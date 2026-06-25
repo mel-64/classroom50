@@ -1,8 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router'
-import AcceptAssignmentPage from '@/pages/AcceptAssignmentPage'
+import { createFileRoute } from "@tanstack/react-router"
+import AcceptAssignmentPage from "@/pages/AcceptAssignmentPage"
 
 export const Route = createFileRoute(
-  '/_authed/$org/$classroom/assignments/$assignment/accept/',
+  "/_authed/$org/$classroom/assignments/$assignment/accept/",
 )({
-  component: AcceptAssignmentPage
+  component: AcceptAssignmentPage,
 })

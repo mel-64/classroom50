@@ -56,10 +56,7 @@ export async function createClassroomFiles(
     })
     updatedRef = await updateRef(client, input.org, newCommit.sha)
   } catch (err) {
-    if (
-      teamCreated &&
-      !(err instanceof GitHubAPIError && err.status === 409)
-    ) {
+    if (teamCreated && !(err instanceof GitHubAPIError && err.status === 409)) {
       try {
         await deleteClassroomTeam(client, input.org, team)
       } catch {
