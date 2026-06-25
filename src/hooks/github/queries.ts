@@ -5,6 +5,7 @@ import type { GitHubClient } from "./client"
 import type {
   GitHubBranchRef,
   GitHubCommitRef,
+  GitHubOrgInvitation,
   GitHubOrgMembership,
   GitHubRepo,
   GitHubTeam,
@@ -30,6 +31,12 @@ export const githubKeys = {
 
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
+
+  orgInvitations: (org: string) =>
+    [...githubKeys.all, "org-invitations", org] as const,
+
+  orgFailedInvitations: (org: string) =>
+    [...githubKeys.all, "org-failed-invitations", org] as const,
 
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
@@ -475,6 +482,31 @@ export async function getOrgMembers(
   return paginateAll<GitHubUser>(
     client,
     (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
+// Pending org invitations (people invited but not yet accepted). Owner-only
+// (403 for non-owners). Expired invites drop off this list — they surface via
+// getOrgFailedInvitations instead.
+export async function getOrgInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/invitations?per_page=100&page=${page}`,
+  )
+}
+
+// Failed / expired org invitations. Owner-only (403 for non-owners). Each entry
+// carries failed_at / failed_reason.
+export async function getOrgFailedInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/failed_invitations?per_page=100&page=${page}`,
   )
 }
 

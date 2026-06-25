@@ -542,24 +542,143 @@ export async function removeUserFromTeam(
   }
 }
 
-export function inviteUserToOrgTeam(
+// Low-level create: POST /orgs/{org}/invitations. Mirrors the classroom50-cli
+// primitive — body is invitee_id + role only (no team_ids, no email). Team
+// membership is a separate PUT. invitee_id must be a number (a string 422s).
+// Owner-only.
+export function createOrgInvitation(
   client: GitHubClient,
   input: {
     org: string
-    invitee_id?: number
-    email?: string
-    team_ids: number[]
+    invitee_id: number
+    role?: "direct_member" | "admin"
   },
 ) {
-  const { org, ...body } = input
+  const { org, invitee_id, role = "direct_member" } = input
 
   return client.request(`/orgs/${org}/invitations`, {
     method: "POST",
-    body: {
-      role: "direct_member",
-      ...body,
-    },
+    body: { invitee_id, role },
   })
+}
+
+// Cancel an outstanding org invitation. Owner-only. Idempotent enough for our
+// use — a 404 (already gone) is treated as success so resend can proceed.
+export async function cancelOrgInvitation(
+  client: GitHubClient,
+  input: { org: string; invitationId: number },
+): Promise<void> {
+  const { org, invitationId } = input
+
+  try {
+    await client.request(`/orgs/${org}/invitations/${invitationId}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+// Remove a user's org membership OR cancel their pending invitation.
+// DELETE /orgs/{org}/memberships/{username} handles both cases (active member
+// -> removed; pending invitee -> invitation cancelled). Owner-only. Idempotent:
+// a 404 (not affiliated) is treated as success.
+export async function removeOrgMembership(
+  client: GitHubClient,
+  input: { org: string; username: string },
+): Promise<void> {
+  const { org, username } = input
+
+  try {
+    await client.request(`/orgs/${org}/memberships/${username}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+export type OrgMembershipState = "active" | "pending"
+
+// GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
+// Mirrors the CLI's MembershipState: the precheck that lets us avoid inviting
+// someone who is already active or pending.
+export async function getOrgMembershipState(
+  client: GitHubClient,
+  org: string,
+  username: string,
+): Promise<OrgMembershipState | null> {
+  try {
+    const membership = await client.request<{ state: OrgMembershipState }>(
+      `/orgs/${org}/memberships/${username}`,
+    )
+    return membership.state ?? null
+  } catch {
+    return null
+  }
+}
+
+export type EnsureOrgMembershipResult = {
+  // "active"/"pending" = already a member or already invited (no new invite
+  // sent); "invited" = a fresh invitation was created.
+  state: OrgMembershipState | "invited"
+}
+
+// Mirrors the CLI's inviteIfNotMember: precheck membership state, only invite
+// when the user is neither active nor pending, and disambiguate a 422 with a
+// follow-up membership read (treating already-active/already-pending as
+// success — the precheck/POST TOCTOU race). Any other 422/error propagates.
+export async function ensureOrgMembership(
+  client: GitHubClient,
+  input: { org: string; username: string; inviteeId: number },
+): Promise<EnsureOrgMembershipResult> {
+  const { org, username, inviteeId } = input
+
+  const existing = await getOrgMembershipState(client, org, username)
+  if (existing === "active" || existing === "pending") {
+    return { state: existing }
+  }
+
+  try {
+    await createOrgInvitation(client, { org, invitee_id: inviteeId })
+    return { state: "invited" }
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      const state = await getOrgMembershipState(client, org, username)
+      if (state === "active" || state === "pending") {
+        return { state }
+      }
+    }
+    throw err
+  }
+}
+
+// Resend an org invitation: cancel the existing one (when present), then
+// re-create via the shared ensureOrgMembership path. `invitationId` is the id
+// from the failed-invitations list for an expired invite; omit it for a
+// never-invited ("none") student, where this is just a fresh invite.
+export async function resendOrgInvitation(
+  client: GitHubClient,
+  input: {
+    org: string
+    username: string
+    inviteeId: number
+    invitationId?: number
+  },
+): Promise<EnsureOrgMembershipResult> {
+  const { org, username, inviteeId, invitationId } = input
+
+  if (invitationId !== undefined) {
+    await cancelOrgInvitation(client, { org, invitationId })
+  }
+
+  return ensureOrgMembership(client, { org, username, inviteeId })
 }
 
 export {

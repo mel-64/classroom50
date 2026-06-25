@@ -10,6 +10,21 @@ export type GitHubOrgMembership = {
   }
 }
 
+// Shared by GET /orgs/{org}/invitations (pending) and
+// GET /orgs/{org}/failed_invitations. `failed_at` / `failed_reason` are only
+// populated on the failed list. The object carries no invitee numeric id, so
+// students are matched on `login` / `email`. `id` is the invitation id, needed
+// to cancel (DELETE) before resending.
+export type GitHubOrgInvitation = {
+  id: number
+  login: string | null
+  email: string | null
+  role: string
+  created_at: string
+  failed_at: string | null
+  failed_reason: string | null
+}
+
 export type GitHubBranchRef = {
   ref: string
   node_id: string

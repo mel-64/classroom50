@@ -54,6 +54,18 @@ const AddByGithubUsername = ({
           `${classroom}/students.csv`,
         ),
       })
+      // Enroll sends an org invite, so the new student should show as
+      // "Pending invite" — refresh the invitation/member lists that drive the
+      // roster status badges (without these, the stale lists show "Not in org").
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.orgInvitations(org),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.orgFailedInvitations(org),
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["orgs", "list", "members", org],
+      })
     },
   })
 
