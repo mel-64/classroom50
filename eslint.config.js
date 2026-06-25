@@ -30,6 +30,11 @@ export default defineConfig([
       // refactors. Revisit case-by-case.
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/exhaustive-deps": "warn",
+      // Stop stray debug `console.log` from shipping (a recurring source of
+      // GitHub API response bodies leaking to the production console). Allow
+      // `console.warn`/`console.error` for genuine diagnostics; DEV-only debug
+      // logging should be guarded by `import.meta.env.DEV`.
+      "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
   // Last: turn off ESLint rules that conflict with Prettier (formatting is

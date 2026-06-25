@@ -52,7 +52,9 @@ export function createGitHubClient(args: {
     })
 
     const rateLimit = readGitHubRateLimitHeaders(res)
-    console.warn("rate limit headers", rateLimit)
+    if (import.meta.env.DEV) {
+      console.warn("rate limit headers", rateLimit)
+    }
 
     if (!res.ok) {
       let body: unknown
@@ -64,7 +66,9 @@ export function createGitHubClient(args: {
         body = text
       }
 
-      console.log("body when request fail", body)
+      if (import.meta.env.DEV) {
+        console.warn("body when request fail", body)
+      }
 
       const message =
         typeof body === "object" &&

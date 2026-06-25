@@ -77,7 +77,6 @@ export async function fetchAssignmentFromPages(
   )
 
   const assignments = extractAssignments(json)
-  console.log("assignments", assignments)
   const assignment = assignments.find((entry) => entry.slug === assignmentSlug)
 
   if (!assignment) {
