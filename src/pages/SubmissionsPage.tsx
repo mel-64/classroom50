@@ -26,6 +26,7 @@ import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
+import { formatDueDateTime } from "@/util/formatDate"
 import { formatDistanceToNow } from "date-fns"
 
 // Re-renders on an interval to keep relative timestamps fresh; returns nothing.
@@ -73,6 +74,11 @@ const SubmissionsPage = () => {
   const isGroupAssignment = assignmentInfo?.mode === "group"
   const scoresInfo = scoresData?.submissions?.[assignment] || []
 
+  // Count repos whose latest submission landed after the deadline. `late` is
+  // computed upstream (collect_scores.py) from the push time, not the grade
+  // time, so an on-time push graded after the deadline still counts as on time.
+  const lateCount = scoresInfo.filter((row) => row.late).length
+
   // Roster students with no submission. A student is "credited" if their login
   // appears in any row's `usernames` (which is `member_usernames` for groups,
   // else `[owner]`), so group teammates aren't falsely flagged. Group
@@ -117,12 +123,13 @@ const SubmissionsPage = () => {
         (a, b) =>
           new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
       )
-      .map(({ usernames, score, datetime, submissionCount, ...rest }) => ({
+      .map(({ usernames, score, datetime, submissionCount, late, ...rest }) => ({
         usernames: usernames.join(", "),
         score,
         max_score: rest["max-score"],
         submissions: submissionCount,
         submitted_at: new Date(datetime).toISOString(),
+        late: late ? "yes" : "no",
         commit: rest.commit,
         review: rest.review,
         release: rest.release,
@@ -136,6 +143,7 @@ const SubmissionsPage = () => {
       max_score: "",
       submissions: 0,
       submitted_at: "",
+      late: "",
       commit: "",
       review: "",
       release: "",
@@ -172,7 +180,7 @@ const SubmissionsPage = () => {
               <h1 className="text-lg pt-8 pb-2 font-bold">
                 {assignmentInfo?.name}
               </h1>
-              <div className="flex items-center gap-2 pb-10 text-sm text-base-content/70">
+              <div className="flex flex-wrap items-center gap-2 pb-10 text-sm text-base-content/70">
                 <span>
                   {isGroupAssignment ? (
                     <>
@@ -185,6 +193,20 @@ const SubmissionsPage = () => {
                     </>
                   )}
                 </span>
+                <span>•</span>
+                <span>
+                  {assignmentInfo?.due
+                    ? `Due ${formatDueDateTime(assignmentInfo.due)}`
+                    : "No due date"}
+                </span>
+                {lateCount > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="badge badge-sm badge-error badge-soft">
+                      {lateCount} late
+                    </span>
+                  </>
+                )}
                 <span>•</span>
                 <ArrowDownWideNarrow className="size-4" />
                 <span>Sorted by most recent</span>

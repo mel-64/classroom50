@@ -246,7 +246,12 @@ const SubmissionHistory = ({
           {s.score}/{s["max-score"]}
         </span>
         {s.late ? (
-          <span className="badge badge-sm badge-warning badge-soft">Late</span>
+          <span
+            className="badge badge-sm badge-error badge-soft"
+            title="Pushed after the deadline."
+          >
+            Late
+          </span>
         ) : null}
         {isGroup && s.submittedBy ? (
           <span className="text-base-content/60">
@@ -343,7 +348,14 @@ const SubmissionsTable = ({
               )
               .toReversed()
               .map(
-                ({ usernames, score, datetime, submissionCount, ...rest }) => {
+                ({
+                  usernames,
+                  score,
+                  datetime,
+                  submissionCount,
+                  late,
+                  ...rest
+                }) => {
                   const repo = studentRepoName(
                     classroom,
                     assignment,
@@ -421,7 +433,21 @@ const SubmissionsTable = ({
                             {score}/{rest["max-score"]}
                           </label>
                         </td>
-                        <td>{formatDateTime(datetime)}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <span className="whitespace-nowrap">
+                              {formatDateTime(datetime)}
+                            </span>
+                            {late ? (
+                              <span
+                                className="badge badge-sm badge-error badge-soft"
+                                title="The latest submission was pushed after the deadline."
+                              >
+                                Late
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td>
                           <div className="flex gap-4 max-xl:[&>div>a]:flex-col">
                             {isGroup && (
