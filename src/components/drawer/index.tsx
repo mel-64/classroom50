@@ -278,6 +278,11 @@ const AssignmentSidebarMenu = ({
     publicAssignment?.name ||
     assignment
 
+  // Group assignments give students something to manage (collaborators);
+  // individual assignments have nothing student-editable, so we omit the
+  // settings entry rather than route them to a dead-end.
+  const isGroupAssignment = publicAssignment?.mode === "group"
+
   const onSubmissions = Boolean(
     matchRoute({
       to: "/$org/$classroom/assignments/$assignment/submissions",
@@ -427,22 +432,24 @@ const AssignmentSidebarMenu = ({
                   </li>
                 </Link>
               </Tip>
-              <Tip label="Assignment Settings">
-                <Link
-                  to="/$org/$classroom/assignments/$assignment/edit"
-                  params={{ org, classroom, assignment }}
-                >
-                  <li
-                    aria-current={onSettings ? "page" : undefined}
-                    className={navItemClass(onSettings, collapsed)}
+              {isGroupAssignment && (
+                <Tip label="Manage Group">
+                  <Link
+                    to="/$org/$classroom/assignments/$assignment/edit"
+                    params={{ org, classroom, assignment }}
                   >
-                    <Settings className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate">Assignment Settings</span>
-                    )}
-                  </li>
-                </Link>
-              </Tip>
+                    <li
+                      aria-current={onSettings ? "page" : undefined}
+                      className={navItemClass(onSettings, collapsed)}
+                    >
+                      <UsersRound className="shrink-0" />
+                      {!collapsed && (
+                        <span className="truncate">Manage Group</span>
+                      )}
+                    </li>
+                  </Link>
+                </Tip>
+              )}
             </>
           )}
         </ul>

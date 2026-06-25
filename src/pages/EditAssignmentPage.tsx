@@ -69,9 +69,21 @@ const EditAssignmentFormStudent = ({
 
   if (assignmentMode === "individual") {
     return (
-      <div className="alert alert-warning mt-6">
-        This is an individual assignment. There is nothing available to edit as
-        a Student at this time.
+      <div className="mt-6">
+        <div className="alert alert-info">
+          <div>
+            This is an individual assignment — there are no group settings to
+            manage. View your{" "}
+            <Link
+              className="underline"
+              to="/$org/$classroom/assignments/$assignment/submission"
+              params={{ org, classroom, assignment }}
+            >
+              submission and autograder results
+            </Link>
+            .
+          </div>
+        </div>
       </div>
     )
   }

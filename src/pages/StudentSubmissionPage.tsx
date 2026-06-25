@@ -5,6 +5,9 @@ import {
   ExternalLink,
   GitCommitHorizontal,
   FileText,
+  UserRound,
+  UsersRound,
+  CalendarClock,
 } from "lucide-react"
 
 import Breadcrumb from "@/components/breadcrumb"
@@ -17,8 +20,10 @@ import Drawer, {
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetSubmissionResult from "@/hooks/useGetSubmissionResult"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
-import { formatDueDateTime } from "@/util/formatDate"
+import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
+import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import type { ResultJson } from "@/types/result"
+import type { Assignment } from "@/types/classroom"
 
 const ScoreSummary = ({ result }: { result: ResultJson }) => {
   const max = result["max-score"]
@@ -146,6 +151,32 @@ const ResultLinks = ({ result }: { result: ResultJson }) => {
   )
 }
 
+const AssignmentMeta = ({ assignment }: { assignment?: Assignment }) => {
+  if (!assignment) return null
+  const due = assignment.due
+  const overdue = due ? isPastDue(due) : false
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {assignment.mode === "group" ? (
+        <span className="badge badge-ghost badge-sm gap-1">
+          <UsersRound className="size-3.5" /> Group
+        </span>
+      ) : assignment.mode === "individual" ? (
+        <span className="badge badge-ghost badge-sm gap-1">
+          <UserRound className="size-3.5" /> Individual
+        </span>
+      ) : null}
+      <span
+        className={`badge badge-sm gap-1 ${overdue ? "badge-error badge-soft" : "badge-ghost"}`}
+      >
+        <CalendarClock className="size-3.5" />
+        {due ? `Due ${formatDueDateTime(due)}` : "No due date"}
+      </span>
+    </div>
+  )
+}
+
 const SubmissionBody = ({
   org,
   classroom,
@@ -162,8 +193,11 @@ const SubmissionBody = ({
     isError,
     error,
   } = useGetSubmissionResult(org, classroom, assignment, user?.login)
+  // Distinguish "never accepted" (no repo) from "accepted but not yet graded".
+  const { assignment: studentRepo, isLoading: repoLoading } =
+    useGetAssignmentRepo(org, classroom, assignment, user?.login)
 
-  if (isLoading) {
+  if (isLoading || repoLoading) {
     return (
       <div className="mt-8 space-y-4">
         <div className="skeleton h-24 w-full rounded-box" />
@@ -181,21 +215,44 @@ const SubmissionBody = ({
     )
   }
 
-  if (!result) {
+  // No repo yet -> the student hasn't accepted the assignment.
+  if (!studentRepo) {
     return (
-      <div className="alert alert-info mt-6">
+      <div className="alert alert-warning mt-6">
         <div>
-          No graded submission yet. Once you push your work, the autograder
-          publishes a result here. Need to{" "}
+          You haven't accepted this assignment yet.{" "}
           <Link
             className="underline"
             to="/$org/$classroom/assignments/$assignment/accept"
             params={{ org, classroom, assignment }}
           >
-            accept the assignment
+            Accept it
           </Link>{" "}
-          first?
+          to get your repository, then push your work to be graded.
         </div>
+      </div>
+    )
+  }
+
+  // Has a repo but no graded result -> accepted, not yet submitted/graded.
+  if (!result) {
+    return (
+      <div className="mt-6 space-y-4">
+        <div className="alert alert-info">
+          <div>
+            No graded submission yet. Push a commit to your assignment
+            repository and the autograder will publish your result here.
+          </div>
+        </div>
+        <a
+          href={studentRepo.html_url}
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-sm btn-outline"
+        >
+          <ExternalLink className="size-4" />
+          Open my repository
+        </a>
       </div>
     )
   }
@@ -203,7 +260,18 @@ const SubmissionBody = ({
   return (
     <div className="mt-6 space-y-6">
       <ScoreSummary result={result} />
-      <ResultLinks result={result} />
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={studentRepo.html_url}
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-sm btn-outline"
+        >
+          <ExternalLink className="size-4" />
+          Open my repository
+        </a>
+        <ResultLinks result={result} />
+      </div>
 
       <div className="card border border-base-200 bg-base-100 shadow-sm">
         <div className="card-body p-0">
@@ -252,7 +320,7 @@ const StudentSubmissionPage = () => {
           <h1 className="text-2xl font-bold mt-4">
             {assignmentData?.name || assignment || "Submission"}
           </h1>
-          <p className="text-base-content/60">My submission</p>
+          <AssignmentMeta assignment={assignmentData} />
           {org && classroom && assignment ? (
             <SubmissionBody
               org={org}

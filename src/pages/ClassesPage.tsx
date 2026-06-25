@@ -179,19 +179,26 @@ const JoinOrgCard = ({ org }: { org: string }) => {
 const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
   const { classroom, assignment } = cl50Yaml
-  const assignmentData = useGetPublicAssignment(org, classroom, assignment)
+  const { assignment: assignmentData } = useGetPublicAssignment(
+    org,
+    classroom,
+    assignment,
+  )
 
-  const canEdit = classroom && assignment
+  // Only group assignments have something a student can manage (collaborators);
+  // for individual assignments the edit page is a dead-end, so no pencil.
+  const canManageGroup =
+    Boolean(classroom && assignment) && assignmentData?.mode === "group"
 
   return (
     <div className="card relative col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
-      {canEdit && (
+      {canManageGroup && classroom && assignment && (
         <Link
           to="/$org/$classroom/assignments/$assignment/edit"
           params={{ org, classroom, assignment }}
           className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
-          aria-label={`Edit ${assignment}`}
-          title="Edit assignment"
+          aria-label={`Manage group for ${assignment}`}
+          title="Manage group"
         >
           <Pencil className="size-4" />
         </Link>
@@ -260,12 +267,12 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
 
         <div className="card-actions items-center justify-between pt-1">
           <div className="flex flex-wrap items-end gap-2">
-            {assignmentData.assignment?.mode === "individual" && (
+            {assignmentData?.mode === "individual" && (
               <div className="badge badge-ghost badge-sm py-3">
                 <UserRound className="size-4" /> Individual
               </div>
             )}
-            {assignmentData.assignment?.mode === "group" && (
+            {assignmentData?.mode === "group" && (
               <div className="badge badge-ghost badge-sm">
                 <UsersRound className="size-4" /> Group
               </div>
