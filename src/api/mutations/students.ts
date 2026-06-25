@@ -4,14 +4,19 @@ import {
   addUserToTeam,
   createGitCommit,
   createGitTree,
+  ensureOrgMembership,
   getErrorMessage,
+  getOrgMembershipState,
+  removeOrgMembership,
   removeUserFromTeam,
   updateRef,
 } from "@/hooks/github/mutations"
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import { getRawFile, getUser } from "@/hooks/github/queries"
+import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
+import { isSameGitHubUser } from "@/util/students"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
@@ -235,9 +240,31 @@ export async function enrollStudentInClassroom(
   teamSlugPromise.catch(() => {})
   const result = await addStudentToClassroomWithConflictRetry(client, input)
 
-  // The roster commit already landed, so any team-side failure — resolving the
-  // slug OR the team-add — is a non-fatal warning, not a failed enroll.
-  let teamWarning: string | undefined
+  // CLI order: roster row -> membership -> team. Membership/team failures are
+  // non-fatal warnings since the commit already landed.
+  const warnings: string[] = []
+
+  // Ensure org membership via the numeric github_id resolved during the roster
+  // write. ensureOrgMembership prechecks and swallows the benign already-member/
+  // already-pending 422.
+  const inviteeId = Number(result.student.github_id)
+  if (Number.isFinite(inviteeId) && inviteeId > 0) {
+    try {
+      await ensureOrgMembership(client, {
+        org,
+        username: result.student.username,
+        inviteeId,
+      })
+    } catch (err) {
+      console.error("org invite failed (student enrolled):", err)
+      const detail = getErrorMessage(err)
+      warnings.push(
+        `${result.student.username} was added to the roster, but sending their ` +
+          `organization invite failed (${detail}); re-send it from the roster.`,
+      )
+    }
+  }
+
   try {
     const teamSlug = await teamSlugPromise
     await addUserToTeam(client, {
@@ -249,13 +276,17 @@ export async function enrollStudentInClassroom(
   } catch (err) {
     console.error("team add failed (student enrolled):", err)
     const detail = getErrorMessage(err)
-    teamWarning =
+    warnings.push(
       `${result.student.username} was added to the roster, but adding them to ` +
-      `the classroom team failed (${detail}); they won't have read on private ` +
-      `templates until it's retried.`
+        `the classroom team failed (${detail}); they won't have read on private ` +
+        `templates until it's retried.`,
+    )
   }
 
-  return { ...result, teamWarning }
+  return {
+    ...result,
+    teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
+  }
 }
 
 type BulkImportProgress = {
@@ -606,12 +637,16 @@ export type UnenrollStudentInput = {
   org: string
   classroom: string
   student: Student
+  // Teacher's choice for an ACTIVE member: also remove them from the org.
+  // Ignored for pending invitees (always cancelled) and non-members. Defaults
+  // off so a student switching classes keeps their org seat.
+  removeFromOrg?: boolean
 }
 export async function unenrollStudent(
   client: GitHubClient,
   input: UnenrollStudentInput,
 ) {
-  const { org, classroom, student: toRemoveStudent } = input
+  const { org, classroom, student: toRemoveStudent, removeFromOrg } = input
   const normalizedUsername = toRemoveStudent?.username.trim()
 
   if (!normalizedUsername) {
@@ -622,6 +657,14 @@ export async function unenrollStudent(
   // transient read; attach a catch and consume it in the warning path below.
   const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
   teamSlugPromise.catch(() => {})
+
+  // Read org state and viewer before the commit. State is null on read failure
+  // (we then skip the org action). The viewer guards against removing the
+  // signed-in teacher from their own org.
+  const orgStatePromise = getOrgMembershipState(client, org, normalizedUsername)
+  orgStatePromise.catch(() => {})
+  const viewerPromise = getAuthenticatedUser(client)
+  viewerPromise.catch(() => {})
 
   const ref = await getBranchRef(client, org)
   const commit = await getCommit(client, org, ref.object.sha)
@@ -680,11 +723,11 @@ export async function unenrollStudent(
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
 
-  // Symmetric with enroll: drop the student from the classroom team. Idempotent
-  // (404 = not a member / team gone); org membership untouched. The commit
-  // already landed, so any team-side failure — resolving the slug OR the
-  // removal — is a non-fatal warning, not a thrown error.
-  let teamWarning: string | undefined
+  // Commit landed, so every org-side step below is a non-fatal warning.
+  const warnings: string[] = []
+
+  // Drop from the classroom team. Idempotent (404 = not a member / team gone);
+  // org membership untouched by this call.
   try {
     const teamSlug = await teamSlugPromise
     await removeUserFromTeam(client, {
@@ -695,10 +738,45 @@ export async function unenrollStudent(
   } catch (err) {
     console.error("team removal failed (student unenrolled):", err)
     const detail = getErrorMessage(err)
-    teamWarning =
+    warnings.push(
       `${toRemoveStudent.username} was removed from the roster, but removing ` +
-      `them from the classroom team failed (${detail}); they may keep read on ` +
-      `private templates until it's retried.`
+        `them from the classroom team failed (${detail}); they may keep read on ` +
+        `private templates until it's retried.`,
+    )
+  }
+
+  // pending invite -> always cancel; active member -> remove only if opted in;
+  // neither -> nothing. DELETE /orgs/{org}/memberships/{username} does both.
+  const orgState = await orgStatePromise
+
+  // Never remove the signed-in teacher from their own org (GitHub would remove a
+  // non-sole owner, or 403 on the last owner).
+  const viewer = await viewerPromise.catch(() => null)
+  const isSelf = isSameGitHubUser(viewer, toRemoveStudent)
+
+  const shouldRemoveFromOrg =
+    orgState === "pending" || (orgState === "active" && removeFromOrg === true)
+
+  if (shouldRemoveFromOrg && isSelf) {
+    warnings.push(
+      `${toRemoveStudent.username} was removed from the roster. Their ` +
+        `organization membership was kept because they are the signed-in ` +
+        `account. Remove yourself from the organization's people page if you ` +
+        `really intend to.`,
+    )
+  } else if (shouldRemoveFromOrg) {
+    try {
+      await removeOrgMembership(client, { org, username: normalizedUsername })
+    } catch (err) {
+      console.error("org membership removal failed (student unenrolled):", err)
+      const detail = getErrorMessage(err)
+      const what =
+        orgState === "pending" ? "cancelling their pending org invite" : "removing them from the organization"
+      warnings.push(
+        `${toRemoveStudent.username} was removed from the roster, but ${what} ` +
+          `failed (${detail}); retry from the organization's people page.`,
+      )
+    }
   }
 
   return {
@@ -707,6 +785,6 @@ export async function unenrollStudent(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
-    teamWarning,
+    teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
 }

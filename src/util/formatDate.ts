@@ -1,4 +1,5 @@
 import type { DueMeta } from "@/types/classroom"
+import { formatDistanceToNow } from "date-fns"
 
 const dueDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -51,6 +52,14 @@ export const formatDueDateTime = (dateString: string): string => {
   }
 
   return dueDateTimeFormatter.format(date)
+}
+
+// Relative "x ago" for an invitation timestamp. Returns null on missing/invalid.
+export const formatInvitedAt = (dateString?: string | null): string | null => {
+  if (!dateString) return null
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return null
+  return formatDistanceToNow(date, { addSuffix: true })
 }
 
 export const isPastDue = (dateString: string): boolean => {

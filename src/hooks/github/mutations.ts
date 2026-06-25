@@ -542,24 +542,132 @@ export async function removeUserFromTeam(
   }
 }
 
-export function inviteUserToOrgTeam(
+// POST /orgs/{org}/invitations. Mirrors the CLI: body is invitee_id + role only
+// (no team_ids/email). invitee_id must be a number (a string 422s). Owner-only.
+function createOrgInvitation(
   client: GitHubClient,
   input: {
     org: string
-    invitee_id?: number
-    email?: string
-    team_ids: number[]
+    invitee_id: number
+    role?: "direct_member" | "admin"
   },
 ) {
-  const { org, ...body } = input
+  const { org, invitee_id, role = "direct_member" } = input
 
   return client.request(`/orgs/${org}/invitations`, {
     method: "POST",
-    body: {
-      role: "direct_member",
-      ...body,
-    },
+    body: { invitee_id, role },
   })
+}
+
+// Owner-only. A 404 (already gone) is treated as success so resend can proceed.
+export async function cancelOrgInvitation(
+  client: GitHubClient,
+  input: { org: string; invitationId: number },
+): Promise<void> {
+  const { org, invitationId } = input
+
+  try {
+    await client.request(`/orgs/${org}/invitations/${invitationId}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+// DELETE /orgs/{org}/memberships/{username}: removes an active member or
+// cancels a pending invite. Owner-only. 404 (not affiliated) treated as success.
+export async function removeOrgMembership(
+  client: GitHubClient,
+  input: { org: string; username: string },
+): Promise<void> {
+  const { org, username } = input
+
+  try {
+    await client.request(`/orgs/${org}/memberships/${username}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+export type OrgMembershipState = "active" | "pending"
+
+// GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
+export async function getOrgMembershipState(
+  client: GitHubClient,
+  org: string,
+  username: string,
+): Promise<OrgMembershipState | null> {
+  try {
+    const membership = await client.request<{ state: OrgMembershipState }>(
+      `/orgs/${org}/memberships/${username}`,
+    )
+    return membership.state ?? null
+  } catch {
+    return null
+  }
+}
+
+type EnsureOrgMembershipResult = {
+  // "active"/"pending" = no new invite sent; "invited" = a fresh one created.
+  state: OrgMembershipState | "invited"
+}
+
+// Precheck membership, only invite when neither active nor pending, and treat a
+// 422 (already member/invited) as success via a follow-up read. Mirrors the
+// CLI's inviteIfNotMember. Any other 422/error propagates.
+export async function ensureOrgMembership(
+  client: GitHubClient,
+  input: { org: string; username: string; inviteeId: number },
+): Promise<EnsureOrgMembershipResult> {
+  const { org, username, inviteeId } = input
+
+  const existing = await getOrgMembershipState(client, org, username)
+  if (existing === "active" || existing === "pending") {
+    return { state: existing }
+  }
+
+  try {
+    await createOrgInvitation(client, { org, invitee_id: inviteeId })
+    return { state: "invited" }
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      const state = await getOrgMembershipState(client, org, username)
+      if (state === "active" || state === "pending") {
+        return { state }
+      }
+    }
+    throw err
+  }
+}
+
+// Resend: cancel the existing invitation (when invitationId is given, e.g. an
+// expired invite) then re-create. Omit invitationId for a never-invited student.
+export async function resendOrgInvitation(
+  client: GitHubClient,
+  input: {
+    org: string
+    username: string
+    inviteeId: number
+    invitationId?: number
+  },
+): Promise<EnsureOrgMembershipResult> {
+  const { org, username, inviteeId, invitationId } = input
+
+  if (invitationId !== undefined) {
+    await cancelOrgInvitation(client, { org, invitationId })
+  }
+
+  return ensureOrgMembership(client, { org, username, inviteeId })
 }
 
 export {

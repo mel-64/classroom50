@@ -1,10 +1,12 @@
 import { queryOptions } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 import Papa from "papaparse"
 
 import type { GitHubClient } from "./client"
 import type {
   GitHubBranchRef,
   GitHubCommitRef,
+  GitHubOrgInvitation,
   GitHubOrgMembership,
   GitHubRepo,
   GitHubTeam,
@@ -30,6 +32,15 @@ export const githubKeys = {
 
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
+
+  orgInvitations: (org: string) =>
+    [...githubKeys.all, "org-invitations", org] as const,
+
+  orgFailedInvitations: (org: string) =>
+    [...githubKeys.all, "org-failed-invitations", org] as const,
+
+  orgMembers: (org: string) =>
+    ["orgs", "list", "members", org] as const,
 
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
@@ -75,6 +86,20 @@ export const githubKeys = {
 
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
+}
+
+// Refresh the lists that drive roster invite status after enroll/resend/
+// unenroll: a resend moves an invite between pending and failed, and accepting
+// moves a user into members.
+export function invalidateInviteQueries(
+  queryClient: QueryClient,
+  org: string,
+) {
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
+  queryClient.invalidateQueries({
+    queryKey: githubKeys.orgFailedInvitations(org),
+  })
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgMembers(org) })
 }
 
 export function viewerQuery(client: GitHubClient) {
@@ -475,6 +500,29 @@ export async function getOrgMembers(
   return paginateAll<GitHubUser>(
     client,
     (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
+// Owner-only (403 for non-owners). Expired invites drop off this list and
+// surface via getOrgFailedInvitations.
+export async function getOrgInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/invitations?per_page=100&page=${page}`,
+  )
+}
+
+// Failed / expired org invitations (carry failed_at / failed_reason). Owner-only.
+export async function getOrgFailedInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/failed_invitations?per_page=100&page=${page}`,
   )
 }
 

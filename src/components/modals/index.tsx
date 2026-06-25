@@ -129,10 +129,12 @@ export function ConfirmModal({
 
         {!hasAcknowledged ? (
           <>
-            <div className="mt-6 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
-              Are you sure you want to continue? This action may be difficult or
-              impossible to undo.
-            </div>
+            {dangerous ? (
+              <div className="mt-6 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
+                Are you sure you want to continue? This action may be difficult
+                or impossible to undo.
+              </div>
+            ) : null}
 
             {error ? (
               <div className="alert alert-error alert-soft mt-4 text-sm">

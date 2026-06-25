@@ -4,7 +4,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
-import { githubKeys } from "@/hooks/github/queries"
+import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
@@ -54,6 +54,9 @@ const AddByGithubUsername = ({
           `${classroom}/students.csv`,
         ),
       })
+      // Enroll sends an org invite; refresh the invite/member lists so the new
+      // student shows "Pending invite" rather than a stale "Not in org".
+      invalidateInviteQueries(queryClient, org)
     },
   })
 
