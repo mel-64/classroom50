@@ -1,7 +1,5 @@
-// Centered full-height spinner shown while the viewer's course role is still
-// resolving. Shared by the role-gated surfaces (RequireTeacher, the assignment
-// index redirect, and the SubmissionsPage self-guard) so they present one
-// consistent pending state instead of three near-identical inline copies.
+// Shared pending state for the role-gated surfaces (RequireTeacher, the
+// assignment index redirect, the SubmissionsPage self-guard).
 const RoleResolvingFallback = ({
   className = "min-h-[60vh]",
 }: {

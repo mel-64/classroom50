@@ -4,11 +4,9 @@ import { latestReleaseResultQuery } from "./github/queries"
 import { studentRepoName } from "@/util/studentRepo"
 import type { ResultJson } from "@/types/result"
 
-// Reads the logged-in student's most recent graded submission for an
-// assignment. The autograder publishes result.json as an asset on each
-// submit/* release of the student's repo (<classroom>-<assignment>-<username>)
-// and marks the newest one "latest", so we resolve /releases/latest and pull
-// its result.json. `data` is null when the student has not submitted yet.
+// The logged-in student's most recent graded submission. result.json is an
+// asset on the latest submit/* release of their repo
+// (<classroom>-<assignment>-<username>); `data` is null until they submit.
 const useGetSubmissionResult = (
   org: string | undefined,
   classroom: string | undefined,

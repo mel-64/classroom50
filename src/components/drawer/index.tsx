@@ -142,10 +142,8 @@ const Tip = ({ label, children }: { label: string; children: ReactNode }) => {
   )
 }
 
-// The repeated inner markup of a sidebar nav row: the styled <li> with its
-// active border, the leading icon, and the label (hidden when collapsed).
-// Callers keep their own typed <Link to params> wrapping this (so router type
-// inference stays intact) and the <Tip> for the collapsed tooltip.
+// Inner markup of a sidebar nav row. Callers keep their own typed
+// <Link to params> wrapping this so router type inference stays intact.
 const SidebarItemBody = ({
   label,
   icon,
@@ -324,9 +322,8 @@ const AssignmentSidebarMenu = ({
   const onSettings = onRoute("/$org/$classroom/assignments/$assignment/edit")
   const onAccept = onRoute("/$org/$classroom/assignments/$assignment/accept")
 
-  // Students only: surface "Accept assignment" until they have their repo.
-  // Resolved best-effort; while loading we don't show it (avoids a flash that
-  // then disappears once we learn they've already accepted).
+  // Students only: surface "Accept" until they have their repo. Hidden while
+  // loading to avoid a flash that then disappears once we learn they accepted.
   const { user } = useGithubAuth()
   const { assignment: studentRepo, isLoading: repoLoading } =
     useGetAssignmentRepo(org, classroom, assignment, user?.login)
@@ -524,9 +521,8 @@ export const SidebarFooter = () => {
     isStudent,
     isLoading: roleLoading,
   } = useCourseTeacherAccess(org)
-  // Identity claim: only assert a role once resolved; placeholder while pending.
-  // Stays conservative (blank) on transient errors while nav stays optimistic —
-  // a deliberate split, not a bug.
+  // Only assert a role once one is known; blank while pending or on a
+  // transient error rather than guessing.
   const roleLabel = roleLoading
     ? null
     : isTeacher

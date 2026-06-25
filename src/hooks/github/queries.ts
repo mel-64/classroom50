@@ -408,11 +408,9 @@ type GitHubRelease = {
 }
 
 // Reads the `result.json` asset off a student repo's latest submit/* release.
-// The autograde-runner workflow attaches result.json to each submission
-// release and flips the "latest" pointer to the newest one (see the CLI's
-// autograde-runner.yaml), so /releases/latest resolves the most recent graded
-// submission. Returns null when the repo has no releases yet (student has not
-// submitted) or the release carries no result.json asset.
+// The autograde workflow marks the newest submission release "latest", so
+// /releases/latest is the most recent graded submission. Returns null when the
+// repo has no releases yet or the release carries no result.json asset.
 export function latestReleaseResultQuery<T>(
   client: GitHubClient,
   owner: string,
@@ -682,10 +680,8 @@ export function pagesAssignmentUrl(org: string, classroom: string) {
 }
 
 // Public, unauthenticated signal that an org is a real Classroom50 org: the
-// classroom50 repo's publish-pages workflow writes this index at the site
-// root. Anyone (including a student who can't read the private config repo)
-// can probe it to distinguish a genuine Classroom50 org from an unrelated org
-// the user merely belongs to.
+// classroom50 Pages site publishes this index, so a student who can't read the
+// private config repo can still distinguish a genuine Classroom50 org.
 export function classroomsIndexUrl(org: string) {
   return `https://${org}.github.io/classroom50/classrooms-index.json`
 }

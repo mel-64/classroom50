@@ -215,7 +215,7 @@ const SubmissionBody = ({
     )
   }
 
-  // No repo yet -> the student hasn't accepted the assignment.
+  // No repo means the student hasn't accepted yet.
   if (!studentRepo) {
     return (
       <div className="alert alert-warning mt-6">
@@ -234,7 +234,6 @@ const SubmissionBody = ({
     )
   }
 
-  // Has a repo but no graded result -> accepted, not yet submitted/graded.
   if (!result) {
     return (
       <div className="mt-6 space-y-4">

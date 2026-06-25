@@ -983,14 +983,12 @@ export async function editAssignmentWithConflictRetry(
 export function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
-  // Repo owner identity. `id` is GitHub's immutable numeric user id, recorded
-  // so the repo<->student binding survives a username rename (classroom50-cli#185).
-  // `accepted_at` is the UTC instant of the accept commit (the owner is the acceptor).
+  // `id` is the immutable numeric GitHub user id, recorded so the
+  // repo<->student binding survives a username rename (classroom50-cli#185).
   ownerUsername: string
   ownerId?: number | null
   acceptedAt?: string
   // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
-  // owner_id is the template owner's immutable id (org or user).
   sourceOwner?: string
   sourceOwnerId?: number | null
   sourceRepo?: string
@@ -1407,7 +1405,6 @@ export async function acceptAssignment(params: {
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
-    // The accepting user owns the repo they create.
     ownerUsername: username,
     ownerId: user.id,
     acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
