@@ -77,15 +77,19 @@ const SubmissionsPage = () => {
   // appears in any row's `usernames` (which is `member_usernames` for groups,
   // else `[owner]`), so group teammates aren't falsely flagged. Group
   // assignments don't surface an "X of Y" roster denominator, so we only
-  // compute non-submitters for individual assignments.
+  // compute non-submitters for individual assignments. Gated on scores having
+  // loaded (`scoresData` present): until then `scoresInfo` is empty, which
+  // would otherwise flag the entire roster as non-submitters mid-load.
+  const scoresLoaded = scoresData !== undefined
   const creditedUsernames = new Set(
     scoresInfo.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
   )
-  const nonSubmitters = isGroupAssignment
-    ? []
-    : students.filter(
-        (student) => !creditedUsernames.has(student.username.toLowerCase()),
-      )
+  const nonSubmitters =
+    isGroupAssignment || !scoresLoaded
+      ? []
+      : students.filter(
+          (student) => !creditedUsernames.has(student.username.toLowerCase()),
+        )
 
   const collectScores = useTriggerScoreCollection(org)
   const { data: lastRun, refetch: refetchLastRun } =
