@@ -89,6 +89,13 @@ function OrgCard({
   const noAccess = classroom50.status === "no_access"
   const hasServiceToken = classroom50.serviceToken?.status === "present"
   const isAdmin = membership.role === "admin"
+  const isActiveMember = membership.state === "active"
+
+  // A student is an active member who can't read the classroom50 config repo
+  // (hence no_access). That's the normal student state, not a dead end: they
+  // can still open the org to reach their own assignment repos. Only a teacher
+  // (admin) needs the config repo + service token wired up before "Open".
+  const canOpen = isAdmin ? isReady && hasServiceToken : isActiveMember
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -132,7 +139,7 @@ function OrgCard({
         </div>
 
         <div className="card-actions mt-5 justify-end">
-          {isReady && hasServiceToken && (
+          {canOpen && (
             <Link
               to="/$org"
               params={{ org: org.login }}
@@ -162,7 +169,7 @@ function OrgCard({
             </Link>
           )}
 
-          {noAccess && (
+          {noAccess && !isActiveMember && (
             <button className="btn btn-disabled btn-sm">
               Ask a teacher for access
             </button>
