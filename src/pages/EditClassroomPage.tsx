@@ -1,4 +1,5 @@
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -77,9 +78,7 @@ const EditClassroomPage = () => {
   }
 
   if (!org || !classroom) {
-    return (
-      <div className="alert alert-error">Missing organization or classroom.</div>
-    )
+    return <MissingParams message="Missing organization or classroom." />
   }
 
   return (

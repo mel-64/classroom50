@@ -21,7 +21,7 @@ const Breadcrumb = ({
           Classes
         </Link>
       )}{" "}
-      {classroom && <>› </>}
+      {org && classroom && <>› </>}
       {org && classroom && (
         <Link to="/$org/$classroom" params={{ org, classroom }}>
           {classData?.name || classData?.short_name || classroom}

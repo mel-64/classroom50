@@ -285,8 +285,7 @@ export {
 } from "@/api/mutations/classrooms"
 
 // One entry in a git tree write. GitHub accepts either inline `content` (create
-// or update a blob) or a `sha` (point at an existing blob, or `null` to delete
-// the path). `mode` is a git file mode string.
+// or update a blob) or a `sha` (existing blob, or `null` to delete the path).
 export type GitTreeFileMode = "100644" | "100755" | "120000"
 export type GitTreeEntry = {
   path: string

@@ -20,6 +20,7 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import type { GitHubFileListing, GitHubRepo } from "@/hooks/github/types"
+import MissingParams from "@/components/MissingParams"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
@@ -344,7 +345,7 @@ const ClassesPage = () => {
   const isMember = membership?.state === "active"
 
   if (!org) {
-    return <div className="alert alert-error m-10">Missing organization.</div>
+    return <MissingParams message="Missing organization." />
   }
 
   return (

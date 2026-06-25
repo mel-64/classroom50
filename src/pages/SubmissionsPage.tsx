@@ -14,6 +14,7 @@ import {
 import { useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -171,9 +172,7 @@ const SubmissionsPage = () => {
 
   if (!org || !classroom || !assignment) {
     return (
-      <div className="alert alert-error m-10">
-        Missing organization, classroom, or assignment in the URL.
-      </div>
+      <MissingParams message="Missing organization, classroom, or assignment in the URL." />
     )
   }
 

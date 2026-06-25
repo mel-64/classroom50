@@ -10,6 +10,7 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
@@ -60,7 +61,7 @@ const CreateClassroomPage = () => {
   })
 
   if (!org) {
-    return <div className="alert alert-error m-10">Missing organization.</div>
+    return <MissingParams message="Missing organization." />
   }
 
   return (

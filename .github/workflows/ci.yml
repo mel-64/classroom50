@@ -1,9 +1,7 @@
 name: CI
 
-# Quality gate for pull requests and pushes to the long-lived branches.
-# Runs the type-check, linter, and tests; a failure blocks the merge. This is
-# the authoritative check (it can't be bypassed like a local hook), and it's
-# what keeps `npm run build` green after the TypeScript 6.0 strict-mode fix.
+# Quality gate for PRs and pushes to long-lived branches: type-check, lint,
+# and tests. Blocks merge and can't be bypassed like a local hook.
 
 on:
   pull_request:

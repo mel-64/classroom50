@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import CreateAssignmentForm from "@/pages/assignments/CreateAssignmentForm"
 import Drawer, {
   DrawerContent,
@@ -78,11 +79,7 @@ const CreateAssignmentPage = () => {
   })
 
   if (!org || !classroom) {
-    return (
-      <div className="alert alert-error m-10">
-        Missing organization or classroom.
-      </div>
-    )
+    return <MissingParams message="Missing organization or classroom." />
   }
   return (
     <div className="min-h-screen">
