@@ -86,6 +86,17 @@ export type GitHubRepo = {
   html_url: string
 }
 
+export type GitHubRelease = {
+  id: number
+  tag_name: string
+  name: string | null
+  html_url: string
+  draft: boolean
+  prerelease: boolean
+  created_at: string
+  published_at: string | null
+}
+
 export type GitHubUser = {
   login: string
   id: number

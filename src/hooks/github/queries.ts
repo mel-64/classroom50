@@ -8,6 +8,7 @@ import type {
   GitHubCommitRef,
   GitHubOrgInvitation,
   GitHubOrgMembership,
+  GitHubRelease,
   GitHubRepo,
   GitHubTeam,
   GitHubUser,
@@ -86,8 +87,8 @@ export const githubKeys = {
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
 
-  submissionResult: (owner: string, repo: string) =>
-    [...githubKeys.all, "submission-result", owner, repo] as const,
+  releases: (owner: string, repo: string) =>
+    [...githubKeys.all, "releases", owner, repo] as const,
 }
 
 // Refresh the lists that drive roster invite status after enroll/resend/
@@ -385,8 +386,7 @@ export function jsonFileQuery<T>(
         { method: "GET", signal },
       )
 
-      // Throw a friendly error naming the file rather than a raw SyntaxError
-      // (matches submissionResultQuery).
+      // Throw a friendly error naming the file rather than a raw SyntaxError.
       try {
         return JSON.parse(raw) as T
       } catch {
@@ -401,79 +401,43 @@ export function jsonFileQuery<T>(
   })
 }
 
-const ARTIFACTS_BRANCH = "artifacts"
-const RESULT_PATH = "result.json"
-// The result.json contract this client understands; a future result/v2 may
-// reshape fields, so reject an unrecognized version rather than mis-render it
-// (mirrors extractAssignments' version guard).
-const RESULT_SCHEMA_PREFIX = "classroom50/result/v1"
+// The submission-tag convention written by the autograde runner: each graded
+// push publishes a `submit/<timestamp>-<sha>` release whose body GitHub renders
+// as the score + per-test table. We list these and link students straight to
+// the release page rather than reading result.json.
+const SUBMISSION_TAG_PREFIX = "submit/"
 
-// Reads the student's latest graded result from the committed `result.json` on
-// the repo's orphan `artifacts` branch (written by the autograde runner). We
-// use the Contents API — not the release asset — because release-asset
-// downloads 302-redirect to a storage host with no CORS headers and are
-// unreadable from the browser. Returns null when the file/branch doesn't exist
-// yet (no graded submission). The result.json contract is shared with
-// classroom50-cli.
-export function submissionResultQuery<T>(
+// All graded-submission releases for a student's repo, newest first. A repo
+// with no releases yet (or the very first push still grading) returns []. The
+// release page itself shows the rendered grade, so we only need the metadata.
+export function releasesQuery(
   client: GitHubClient,
   owner: string,
   repo: string,
 ) {
   return queryOptions({
-    queryKey: githubKeys.submissionResult(owner, repo),
-    queryFn: async ({ signal }): Promise<T | null> => {
-      let raw: string
-      try {
-        raw = await client.requestRaw(
-          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-            repo,
-          )}/contents/${RESULT_PATH}?ref=${encodeURIComponent(
-            ARTIFACTS_BRANCH,
-          )}`,
-          { method: "GET", signal },
-        )
-      } catch (error) {
-        // No artifacts branch / file yet -> no graded submission.
-        if (error instanceof GitHubAPIError && error.status === 404) {
-          return null
-        }
-        throw error
-      }
+    queryKey: githubKeys.releases(owner, repo),
+    queryFn: async ({ signal }): Promise<GitHubRelease[]> => {
+      const releases = await client.request<GitHubRelease[]>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo,
+        )}/releases?per_page=100`,
+        { method: "GET", signal },
+      )
 
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch {
-        throw new Error(
-          "Your submission result couldn't be read (it may still be uploading). Try again in a moment.",
-        )
-      }
-
-      // Reject an unrecognized schema version (fail loud, don't mis-render).
-      // Match an exact segment (bare prefix or `v1.x`) so `result/v10`/`v1x`
-      // aren't misaccepted as v1. A missing `schema` field is tolerated for
-      // older result.json files.
-      const schema =
-        typeof parsed === "object" && parsed !== null && "schema" in parsed
-          ? (parsed as { schema?: unknown }).schema
-          : undefined
-      if (
-        typeof schema === "string" &&
-        schema !== RESULT_SCHEMA_PREFIX &&
-        !schema.startsWith(`${RESULT_SCHEMA_PREFIX}.`)
-      ) {
-        throw new Error(
-          "This submission was graded by a newer version of Classroom 50. Please refresh or update to view it.",
-        )
-      }
-
-      return parsed as T
+      return releases
+        .filter((r) => r.tag_name.startsWith(SUBMISSION_TAG_PREFIX))
+        .sort((a, b) => releaseTime(b) - releaseTime(a))
     },
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
+}
+
+// published_at is null for a draft; fall back to created_at so ordering holds.
+function releaseTime(release: GitHubRelease): number {
+  return new Date(release.published_at ?? release.created_at).getTime()
 }
 
 export function csvFileQuery<T>(

@@ -1,9 +1,6 @@
 import { Link, useParams } from "@tanstack/react-router"
 import {
-  CheckCircle2,
-  XCircle,
   ExternalLink,
-  GitCommitHorizontal,
   FileText,
   UserRound,
   UsersRound,
@@ -18,142 +15,47 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import { useGithubAuth } from "@/auth/useGithubAuth"
-import useGetSubmissionResult from "@/hooks/useGetSubmissionResult"
+import useGetSubmissionReleases from "@/hooks/useGetSubmissionReleases"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { safeHttpUrl } from "@/util/url"
-import type { ResultJson } from "@/types/result"
+import type { GitHubRelease } from "@/hooks/github/types"
 import type { Assignment } from "@/types/classroom"
 
-const ScoreSummary = ({ result }: { result: ResultJson }) => {
-  const max = result["max-score"]
-  const pct = max > 0 ? Math.round((result.score / max) * 100) : null
+// Strips the `submit/` tag prefix for a friendlier label, falling back to the
+// release name when present.
+const releaseLabel = (release: GitHubRelease): string =>
+  release.name?.trim() || release.tag_name.replace(/^submit\//, "")
+
+const ReleaseRow = ({ release }: { release: GitHubRelease }) => {
+  // html_url comes from the GitHub API (always http(s)); guard anyway to keep
+  // the no-unsafe-href rule uniform across views.
+  const href = safeHttpUrl(release.html_url)
+  const when = release.published_at ?? release.created_at
 
   return (
-    <div className="card border border-base-200 bg-base-100 shadow-sm">
-      <div className="card-body gap-2">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-base-content/60">
-              Your score
-            </p>
-            <p className="text-3xl font-bold">
-              {result.score}
-              <span className="text-xl font-medium text-base-content/60">
-                {" "}
-                / {max}
-              </span>
-            </p>
-          </div>
-          {pct !== null && (
-            <div
-              className="radial-progress text-primary"
-              style={
-                {
-                  "--value": pct,
-                  "--size": "4rem",
-                  "--thickness": "0.4rem",
-                } as React.CSSProperties
-              }
-              role="progressbar"
-              aria-valuenow={pct}
-            >
-              {pct}%
-            </div>
-          )}
-        </div>
+    <li className="flex items-center justify-between gap-4 px-4 py-3">
+      <div className="min-w-0">
+        <p className="truncate font-medium">{releaseLabel(release)}</p>
         <p className="text-sm text-base-content/60">
-          Graded {formatDueDateTime(result.datetime)}
+          Submitted {formatDueDateTime(when)}
         </p>
       </div>
-    </div>
-  )
-}
-
-const TestRow = ({ test }: { test: ResultJson["tests"][number] }) => {
-  const detail =
-    typeof test.output === "string"
-      ? test.output
-      : typeof test.message === "string"
-        ? test.message
-        : null
-
-  return (
-    <>
-      <tr>
-        <td>
-          {test.passed ? (
-            <span className="inline-flex items-center gap-1.5 text-success">
-              <CheckCircle2 className="size-4" /> Passed
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-error">
-              <XCircle className="size-4" /> Failed
-            </span>
-          )}
-        </td>
-        <td className="font-medium">{test["test-name"]}</td>
-        <td className="text-right tabular-nums">
-          {test.score} / {test["max-score"]}
-        </td>
-      </tr>
-      {detail && (
-        <tr>
-          <td colSpan={3} className="bg-base-200/40">
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-base-content/70">
-              {detail}
-            </pre>
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-const ResultLinks = ({ result }: { result: ResultJson }) => {
-  const links: { label: string; href: string; icon: React.ReactNode }[] = []
-  // result.json comes from the student's own repo (artifacts branch), so its
-  // link fields are untrusted: render only genuine http(s) URLs.
-  const commit = safeHttpUrl(result.commit)
-  const release = safeHttpUrl(result.release)
-  const review = safeHttpUrl(result.review)
-  if (commit)
-    links.push({
-      label: "Graded commit",
-      href: commit,
-      icon: <GitCommitHorizontal className="size-4" />,
-    })
-  if (release)
-    links.push({
-      label: "Submission release",
-      href: release,
-      icon: <FileText className="size-4" />,
-    })
-  if (review && review !== commit)
-    links.push({
-      label: "Full diff",
-      href: review,
-      icon: <ExternalLink className="size-4" />,
-    })
-
-  if (links.length === 0) return null
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {links.map((link) => (
+      {href ? (
         <a
-          key={link.label}
-          href={link.href}
+          href={href}
           target="_blank"
           rel="noreferrer"
-          className="btn btn-sm btn-outline"
+          className="btn btn-sm btn-outline shrink-0"
         >
-          {link.icon}
-          {link.label}
+          <FileText className="size-4" />
+          View grade
         </a>
-      ))}
-    </div>
+      ) : (
+        <span className="text-sm text-base-content/40">Unavailable</span>
+      )}
+    </li>
   )
 }
 
@@ -194,11 +96,11 @@ const SubmissionBody = ({
 }) => {
   const { user } = useGithubAuth()
   const {
-    data: result,
+    data: releases,
     isLoading,
     isError,
     error,
-  } = useGetSubmissionResult(org, classroom, assignment, user?.login)
+  } = useGetSubmissionReleases(org, classroom, assignment, user?.login)
   // Distinguish "never accepted" (no repo) from "accepted but not yet graded".
   // getRepo returns null only on a true 404; a 403/5xx throws, so read the repo
   // query's error too — otherwise a transient/permission failure falls through
@@ -228,7 +130,7 @@ const SubmissionBody = ({
           : ""
     return (
       <div className="alert alert-error mt-6">
-        Could not load your submission result.
+        Could not load your submissions.
         {message ? ` ${message}` : ""}
       </div>
     )
@@ -253,7 +155,7 @@ const SubmissionBody = ({
     )
   }
 
-  if (!result) {
+  if (!releases || releases.length === 0) {
     return (
       <div className="mt-6 space-y-4">
         <div className="alert alert-info">
@@ -277,8 +179,11 @@ const SubmissionBody = ({
 
   return (
     <div className="mt-6 space-y-6">
-      <ScoreSummary result={result} />
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-base-content/60">
+          Each submission opens its graded release on GitHub, with your score
+          and per-test results.
+        </p>
         <a
           href={studentRepo.html_url}
           target="_blank"
@@ -288,34 +193,14 @@ const SubmissionBody = ({
           <ExternalLink className="size-4" />
           Open my repository
         </a>
-        <ResultLinks result={result} />
       </div>
 
       <div className="card border border-base-200 bg-base-100 shadow-sm">
-        <div className="card-body p-0">
-          {result.tests.length === 0 ? (
-            <p className="p-6 text-sm text-base-content/60">
-              No autograder tests were run for this submission.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Result</th>
-                    <th>Test</th>
-                    <th className="text-right">Score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.tests.map((test) => (
-                    <TestRow key={test["test-name"]} test={test} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <ul className="divide-y divide-base-200">
+          {releases.map((release) => (
+            <ReleaseRow key={release.id} release={release} />
+          ))}
+        </ul>
       </div>
     </div>
   )
