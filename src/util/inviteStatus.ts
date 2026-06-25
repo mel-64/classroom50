@@ -55,7 +55,11 @@ export function buildInviteStatusLookup(
       (login ? pendingByLogin.get(login) : undefined) ??
       (email ? pendingByEmail.get(email) : undefined)
     if (pending) {
-      return { status: "pending", invitedAt: pending.created_at }
+      return {
+        status: "pending",
+        invitationId: pending.id,
+        invitedAt: pending.created_at,
+      }
     }
 
     const failed =

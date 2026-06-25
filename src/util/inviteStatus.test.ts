@@ -52,6 +52,7 @@ describe("buildInviteStatusLookup", () => {
     const lookup = buildInviteStatusLookup([], [invitation()], [])
     const result = lookup(student())
     expect(result.status).toBe("pending")
+    expect(result.invitationId).toBe(1)
     expect(result.invitedAt).toBe("2026-01-01T00:00:00Z")
   })
 

@@ -330,11 +330,15 @@ const EnrolledStudents = ({
     return map
   }, [students, getStatus, statusLoading, statusAvailable])
 
-  const expiredStudents = useMemo(
+  // Everyone who is not already an org member — pending, expired, or never
+  // invited. "Resend invites" targets this set: cancel any existing invitation
+  // (pending/expired) and create a fresh one for each.
+  const nonMemberStudents = useMemo(
     () =>
-      students.filter(
-        (student) => statusByUsername.get(student.username)?.status === "expired",
-      ),
+      students.filter((student) => {
+        const status = statusByUsername.get(student.username)?.status
+        return status != null && status !== "member"
+      }),
     [students, statusByUsername],
   )
 
@@ -406,12 +410,13 @@ const EnrolledStudents = ({
   }
 
   // Sequential (not concurrent) to respect GitHub's 50/24h invite cap and
-  // secondary rate limiting. Aggregates a single summary warning.
-  const handleResendAllExpired = async () => {
+  // secondary rate limiting. Cancels any existing invitation then re-creates,
+  // for every non-member student. Aggregates a single summary warning.
+  const handleResendAll = async () => {
     let succeeded = 0
     const failures: string[] = []
 
-    for (const student of expiredStudents) {
+    for (const student of nonMemberStudents) {
       try {
         const ok = await resendForStudent(student)
         if (ok) succeeded++
@@ -426,11 +431,14 @@ const EnrolledStudents = ({
 
     const summaryKey = "__resend_all__"
     if (failures.length === 0) {
-      setWarning(summaryKey, `Re-sent ${succeeded} invite${succeeded === 1 ? "" : "s"}.`)
+      setWarning(
+        summaryKey,
+        `Re-sent ${succeeded} invite${succeeded === 1 ? "" : "s"}.`,
+      )
     } else {
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} of ${expiredStudents.length}; ${failures.length} failed (${failures.join(", ")}).`,
+        `Re-sent ${succeeded} of ${nonMemberStudents.length}; ${failures.length} failed (${failures.join(", ")}).`,
       )
     }
   }
@@ -441,14 +449,14 @@ const EnrolledStudents = ({
         <h2 className="text-lg font-semibold">Enrolled Students</h2>
 
         <div className="flex items-center gap-2">
-          {statusAvailable && expiredStudents.length > 0 ? (
+          {statusAvailable ? (
             <button
               type="button"
               className="btn btn-sm btn-primary"
               onClick={() => setConfirmResendAllOpen(true)}
             >
               <Send className="size-4" />
-              Re-send all expired ({expiredStudents.length})
+              Resend invites
             </button>
           ) : null}
 
@@ -577,24 +585,29 @@ const EnrolledStudents = ({
 
       <ConfirmModal
         open={confirmResendAllOpen}
-        title="Re-send expired invites?"
+        title="Resend invites to all students?"
         description={
           <>
-            This will re-send organization invitations to{" "}
+            All pending organization invitations will be{" "}
             <span className="font-semibold text-base-content">
-              {expiredStudents.length}
+              deleted and then resent
+            </span>
+            . After this, every student who is not already a member of{" "}
+            <span className="font-semibold text-base-content">{org}</span> —{" "}
+            <span className="font-semibold text-base-content">
+              {nonMemberStudents.length}
             </span>{" "}
-            student{expiredStudents.length === 1 ? "" : "s"} whose invite
-            expired. Each receives a new invitation email.
+            student{nonMemberStudents.length === 1 ? "" : "s"} — will receive a
+            new invitation email.
           </>
         }
         confirmText="resend"
-        confirmLabel="Re-send invites"
+        confirmLabel="Resend invites"
         cancelLabel="Cancel"
         dangerous={false}
         needsConfirm={false}
         onConfirm={async () => {
-          await handleResendAllExpired()
+          await handleResendAll()
         }}
         onClose={() => setConfirmResendAllOpen(false)}
       />
