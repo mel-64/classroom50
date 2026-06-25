@@ -22,16 +22,20 @@ function assertOAuthSuccess(
 async function readJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text()
 
-  let data: unknown = null
+  let data: unknown
 
   try {
     data = text ? JSON.parse(text) : null
-  } catch (_err) {
+  } catch (err) {
     if (!res.ok) {
-      throw new Error(`HTTP: ${res.status}: ${text || res.statusText}`)
+      throw new Error(`HTTP: ${res.status}: ${text || res.statusText}`, {
+        cause: err,
+      })
     }
 
-    throw new Error(`Expected JSON but received: ${text.slice(0, 200)}`)
+    throw new Error(`Expected JSON but received: ${text.slice(0, 200)}`, {
+      cause: err,
+    })
   }
 
   if (!res.ok) {

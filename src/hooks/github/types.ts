@@ -45,6 +45,12 @@ export type GitHubCreateTree = {
   sha: string
 }
 
+// Response from POST /repos/{owner}/{repo}/git/blobs.
+export type GitHubBlob = {
+  sha: string
+  url: string
+}
+
 export type GitHubCreateCommit = {
   sha: string
 }
@@ -64,6 +70,11 @@ export type GitHubRepo = {
   is_template?: boolean
   default_branch: string
   visibility?: "public" | "private" | "internal"
+  description?: string | null
+  owner?: {
+    login: string
+    id: number
+  }
   permissions?: {
     admin: boolean
     maintain?: boolean

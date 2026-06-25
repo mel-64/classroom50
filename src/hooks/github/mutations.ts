@@ -7,6 +7,7 @@ import {
   type GitHubTeam,
   type GitHubRepo,
   type GitHubOrgMembership,
+  type GitHubBlob,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
@@ -21,12 +22,14 @@ const ASSIGNMENTS_TEMPLATE = {
 const createClassroomMetadata = (
   org: string,
   classroom: string,
-  name: string,
+  name: string | undefined,
   term: string,
   team?: ClassroomTeamRef,
 ) => ({
   schema: "classroom50/classroom/v1",
-  name,
+  // Fall back to the slug when no display name was supplied, so classroom.json
+  // always carries a non-empty name.
+  name: name || classroom,
   short_name: classroom,
   term,
   org,
@@ -41,7 +44,7 @@ const createClassroomBody = (
   base_tree: string,
   org: string,
   classroom: string,
-  name: string,
+  name: string | undefined,
   term: string,
   team?: ClassroomTeamRef,
 ) => {
@@ -281,12 +284,14 @@ export {
   createClassroomFilesWithConflictRetry,
 } from "@/api/mutations/classrooms"
 
+// One entry in a git tree write. GitHub accepts either inline `content` (create
+// or update a blob) or a `sha` (existing blob, or `null` to delete the path).
+export type GitTreeFileMode = "100644" | "100755" | "120000"
 export type GitTreeEntry = {
   path: string
-  mode: "100644"
+  mode: GitTreeFileMode
   type: "blob"
-  content: string
-}
+} & ({ content: string } | { sha: string | null })
 export type CreateGitTreeInput = {
   org: string
   base_tree: string
@@ -683,6 +688,12 @@ export async function getPendingOrgInvite(client: GitHubClient, org: string) {
   return client.request<GitHubOrgMembership>(`/user/memberships/orgs/${org}`)
 }
 
+// Sentinel returned by tryStep when fn throws: a warning (a tolerated status
+// code) or a hard error. Callers detect the hard case via stepFailed().
+type StepOutcome =
+  | { status: "warning"; message: string }
+  | { status: "error"; message: string }
+
 async function tryStep<T>({
   id,
   fn,
@@ -693,7 +704,7 @@ async function tryStep<T>({
   fn: () => Promise<T>
   onStepUpdate?: (update: InitStepUpdate) => void
   options?: { warningCodes: number[] }
-}): Promise<T | null> {
+}): Promise<T | StepOutcome> {
   const { warningCodes } = options || {}
 
   onStepUpdate?.({
@@ -739,7 +750,7 @@ async function tryStep<T>({
       onStepUpdate?.({
         id,
         status: "warning",
-        error: err?.message,
+        error: err.message,
       })
       return {
         status: "warning" as const,
@@ -747,14 +758,15 @@ async function tryStep<T>({
       }
     }
 
+    const message = err instanceof Error ? err.message : "Unknown error"
     onStepUpdate?.({
       id,
       status: "error",
-      error: err?.message,
+      error: message,
     })
     return {
       status: "error" as const,
-      message: err?.message ?? "Unknown error",
+      message,
     }
   }
 }
@@ -913,6 +925,7 @@ export async function fetchSkeletonSourceFile(
     if (isNotFound(err)) {
       throw new Error(
         `Skeleton source file not found: ${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}:${path}`,
+        { cause: err },
       )
     }
 
@@ -1055,6 +1068,7 @@ async function enableWorkflowPages(
       `Could not enable GitHub Pages for ${owner}/${repo}: ${getErrorMessage(
         err,
       )}`,
+      { cause: err },
     )
   }
 }
@@ -1182,6 +1196,7 @@ export async function ensureWorkflowPermissions(
         `Could not set workflow permissions for ${owner}/${repo}: ${getErrorMessage(
           err,
         )}`,
+        { cause: err },
       )
     }
 
@@ -2069,14 +2084,18 @@ export type UpdateClassroomMetadataResult = {
   updatedRef: unknown
   classroom: Classroom
 }
+export type EditClassroomInput = {
+  org: string
+  slug: string
+  term: string
+  name: string
+}
+
+export type EditClassroomResult = Awaited<ReturnType<typeof editClassroom>>
+
 export async function editClassroom(
   client: GitHubClient,
-  input: {
-    org: string
-    slug: string
-    term: string
-    name: string
-  },
+  input: EditClassroomInput,
 ) {
   console.log("editing classroom...")
   const { org, slug, term, name } = input

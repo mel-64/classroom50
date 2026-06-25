@@ -57,6 +57,88 @@ export type CreateAssignmentFormValues = {
   tests: AssignmentTestDraft[]
 }
 
+// The concrete form instance type for this form's values, shared with child
+// panes (AutogradingTestsPane, FormErrors) so their `form` prop is fully typed
+// without re-stating useForm's many (invariant) generics. Derived from the
+// actual hook below so the validator generics always match the real form.
+export type AssignmentForm = ReturnType<typeof useAssignmentForm>
+
+const useAssignmentForm = (
+  defaultValues: Partial<CreateAssignmentFormValues> | undefined,
+  onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>,
+) =>
+  useForm({
+    defaultValues: {
+      name: defaultValues?.name || "",
+      description: defaultValues?.description || "",
+      mode: defaultValues?.mode || "individual",
+      template_repo: defaultValues?.template_repo || "",
+      due_date:
+        utcIsoToDatetimeLocalValue(defaultValues?.due_date) ||
+        toDatetimeLocalValue(new Date()),
+      max_group_size: defaultValues?.max_group_size || 2,
+      feedback_pr: defaultValues?.feedback_pr ?? true,
+      runs_on: defaultValues?.runs_on || "",
+      container_image: defaultValues?.container_image || "",
+      container_user: defaultValues?.container_user || "",
+      setup_command: defaultValues?.setup_command || "",
+      allowed_files: defaultValues?.allowed_files || "",
+      tests: defaultValues?.tests || [],
+    } satisfies CreateAssignmentFormValues,
+    validators: {
+      onSubmit: ({ value }) => {
+        const errors: Record<string, string> = {}
+        if (!value.name.trim()) {
+          errors.name = "Assignment name is required."
+        }
+        if (!Number(value.max_group_size)) {
+          errors.max_group_size = "Max group size must be a valid number."
+        } else if (
+          value.mode === "group" &&
+          (!Number.isInteger(Number(value.max_group_size)) ||
+            Number(value.max_group_size) < GROUP_SIZE_MIN ||
+            Number(value.max_group_size) > GROUP_SIZE_MAX)
+        ) {
+          // Mirror the buildAssignmentEntry guard: the CLI schema needs a whole
+          // number in [MIN, MAX] or assignments.json becomes unparseable.
+          errors.max_group_size = `Group size must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
+        }
+
+        // Mirrors gh-teacher's write-time validation so a bad test is
+        // caught in the form, not by a failed commit (or worse, a file
+        // the CLI later refuses to parse).
+        Object.assign(errors, validateTestDrafts(value.tests))
+
+        // Mirror the CLI's cap/shape rules so a bad value can't reach the file.
+        const allowedFilesError = validateAllowedFiles(
+          parseAllowedFiles(value.allowed_files),
+        )
+        if (allowedFilesError) {
+          errors.allowed_files = allowedFilesError
+        }
+
+        return Object.keys(errors).length > 0 ? { fields: errors } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await onSubmit({
+        name: value.name.trim(),
+        description: value.description.trim(),
+        mode: value.mode,
+        template_repo: value.template_repo.trim(),
+        due_date: value.due_date.trim(),
+        max_group_size: value.max_group_size,
+        feedback_pr: value.feedback_pr,
+        runs_on: value.runs_on.trim(),
+        container_image: value.container_image.trim(),
+        container_user: value.container_user.trim(),
+        setup_command: value.setup_command.trim(),
+        allowed_files: value.allowed_files,
+        tests: value.tests,
+      })
+    },
+  })
+
 type CreateAssignmentFormProps = {
   defaultValues?: Partial<CreateAssignmentFormValues>
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>
@@ -70,13 +152,13 @@ type CreateAssignmentFormProps = {
   // classroom team already has read on an in-org private template.
   classroom?: string
 }
-const FormErrors = ({ form }) => (
+const FormErrors = ({ form }: { form: AssignmentForm }) => (
   <form.Subscribe selector={(state) => [state.errors]}>
     {([errors]) => (
       <div>
         {errors.map((err) => (
-          <p className="text-error" key={err}>
-            {err}
+          <p className="text-error" key={String(err)}>
+            {String(err)}
           </p>
         ))}
       </div>
@@ -332,77 +414,7 @@ const CreateAssignmentForm = ({
   org,
   classroom,
 }: CreateAssignmentFormProps) => {
-  const form = useForm({
-    defaultValues: {
-      name: defaultValues?.name || "",
-      description: defaultValues?.description || "",
-      mode: defaultValues?.mode || "individual",
-      template_repo: defaultValues?.template_repo || "",
-      due_date:
-        utcIsoToDatetimeLocalValue(defaultValues?.due_date) ||
-        toDatetimeLocalValue(new Date()),
-      max_group_size: defaultValues?.max_group_size || 2,
-      feedback_pr: defaultValues?.feedback_pr ?? true,
-      runs_on: defaultValues?.runs_on || "",
-      container_image: defaultValues?.container_image || "",
-      container_user: defaultValues?.container_user || "",
-      setup_command: defaultValues?.setup_command || "",
-      allowed_files: defaultValues?.allowed_files || "",
-      tests: defaultValues?.tests || [],
-    } satisfies CreateAssignmentFormValues,
-    validators: {
-      onSubmit: ({ value }) => {
-        const errors: Record<string, string> = {}
-        if (!value.name.trim()) {
-          errors.name = "Assignment name is required."
-        }
-        if (!Number(value.max_group_size)) {
-          errors.max_group_size = "Max group size must be a valid number."
-        } else if (
-          value.mode === "group" &&
-          (!Number.isInteger(Number(value.max_group_size)) ||
-            Number(value.max_group_size) < GROUP_SIZE_MIN ||
-            Number(value.max_group_size) > GROUP_SIZE_MAX)
-        ) {
-          // Mirror the buildAssignmentEntry guard: the CLI schema needs a whole
-          // number in [MIN, MAX] or assignments.json becomes unparseable.
-          errors.max_group_size = `Group size must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
-        }
-
-        // Mirrors gh-teacher's write-time validation so a bad test is
-        // caught in the form, not by a failed commit (or worse, a file
-        // the CLI later refuses to parse).
-        Object.assign(errors, validateTestDrafts(value.tests))
-
-        // Mirror the CLI's cap/shape rules so a bad value can't reach the file.
-        const allowedFilesError = validateAllowedFiles(
-          parseAllowedFiles(value.allowed_files),
-        )
-        if (allowedFilesError) {
-          errors.allowed_files = allowedFilesError
-        }
-
-        return Object.keys(errors).length > 0 ? { fields: errors } : undefined
-      },
-    },
-    onSubmit: async ({ value }) => {
-      await onSubmit({
-        name: value.name.trim(),
-        description: value.description.trim(),
-        mode: value.mode,
-        template_repo: value.template_repo.trim(),
-        due_date: value.due_date.trim(),
-        max_group_size: value.max_group_size,
-        feedback_pr: value.feedback_pr,
-        runs_on: value.runs_on.trim(),
-        container_image: value.container_image.trim(),
-        container_user: value.container_user.trim(),
-        setup_command: value.setup_command.trim(),
-        allowed_files: value.allowed_files,
-        tests: value.tests,
-      })
-    },
-  })
+  const form = useAssignmentForm(defaultValues, onSubmit)
   const tzShort = new Intl.DateTimeFormat(undefined, {
     timeZoneName: "short",
   })

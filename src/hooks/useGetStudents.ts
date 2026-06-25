@@ -4,14 +4,17 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { csvFileQuery } from "./github/queries"
 import type { Student } from "@/types/classroom"
 
-const useGetStudents = (org: string, classroom: string) => {
+const useGetStudents = (
+  org: string | undefined,
+  classroom: string | undefined,
+) => {
   const client = useGitHubClient()
   const { data: students, isLoading } = useQuery(
     csvFileQuery<Student>(
       client,
-      org,
+      org ?? "",
       "classroom50",
-      `${classroom}/students.csv`,
+      `${classroom ?? ""}/students.csv`,
     ),
   )
 

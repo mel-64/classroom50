@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import CreateAssignmentForm from "@/pages/assignments/CreateAssignmentForm"
 import Drawer, {
   DrawerContent,
@@ -58,9 +59,9 @@ const CreateAssignmentPage = () => {
     onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
-          org,
+          org ?? "",
           "classroom50",
-          `${classroom}/assignments.json`,
+          `${classroom ?? ""}/assignments.json`,
         ),
       })
       // Assignment created. If the template team grant failed, stay on the
@@ -70,9 +71,16 @@ const CreateAssignmentPage = () => {
         window.scrollTo({ top: 0, behavior: "smooth" })
         return
       }
-      navigate({ to: `/${org}/${classroom}/assignments` })
+      navigate({
+        to: "/$org/$classroom/assignments",
+        params: { org: org ?? "", classroom: classroom ?? "" },
+      })
     },
   })
+
+  if (!org || !classroom) {
+    return <MissingParams message="Missing organization or classroom." />
+  }
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -98,7 +106,10 @@ const CreateAssignmentPage = () => {
                 type="button"
                 className="btn btn-sm"
                 onClick={() =>
-                  navigate({ to: `/${org}/${classroom}/assignments` })
+                  navigate({
+                    to: "/$org/$classroom/assignments",
+                    params: { org, classroom },
+                  })
                 }
               >
                 Go to assignments

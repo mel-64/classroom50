@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { Pencil, Trash } from "lucide-react"
+import type { AssignmentForm } from "./CreateAssignmentForm"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { emptyTestDraft, validateTestDraft } from "@/util/assignmentTests"
+import type { AssignmentTestComparison } from "@/types/classroom"
 
 const TYPE_OPTIONS = [
   {
@@ -40,7 +42,7 @@ const VALIDATED_FIELDS = [
 ] as const
 
 type AutogradingTestModalProps = {
-  form: any
+  form: AssignmentForm
   dialogRef: React.RefObject<HTMLDialogElement | null>
   index: number | null
   onClose: () => void
@@ -65,7 +67,9 @@ const AutogradingTestModal = ({
 
     for (const fieldName of VALIDATED_FIELDS) {
       const message = errors[fieldName]
-      const key = `tests[${index}].${fieldName}`
+      const key = `tests[${index}].${fieldName}` as Parameters<
+        typeof form.getFieldMeta
+      >[0]
       // Fields that never mounted (e.g. exit code on an io test, or the
       // not-yet-built fixture-file inputs) have no meta to update — and
       // nowhere to display an error anyway.
@@ -238,7 +242,11 @@ const AutogradingTestModal = ({
                             className="select w-full"
                             value={field.state.value}
                             onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
+                            onChange={(e) =>
+                              field.handleChange(
+                                e.target.value as AssignmentTestComparison,
+                              )
+                            }
                           >
                             <option value="included">
                               Included — expected appears anywhere in the output
@@ -374,7 +382,7 @@ const AutogradingTestModal = ({
 const typeBadge = (type: AssignmentTestDraft["type"]) =>
   TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type
 
-const AutogradingTestsPane = ({ form }) => {
+const AutogradingTestsPane = ({ form }: { form: AssignmentForm }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
 

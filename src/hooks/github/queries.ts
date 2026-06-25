@@ -696,7 +696,7 @@ export async function getClassroom50OrgSummary(
 
   let canAccessRepo = false
   let serviceToken: ServiceTokenStatus | null = null
-  let status: Classroom50Status = "unknown"
+  let status: Classroom50Status
 
   try {
     await client.request(`/repos/${org.login}/classroom50`)
@@ -704,8 +704,8 @@ export async function getClassroom50OrgSummary(
     status = "ready"
 
     serviceToken = await getServiceTokenStatus(client, org.login)
-  } catch (error: any) {
-    if (error.status === 404) {
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
 
       status =

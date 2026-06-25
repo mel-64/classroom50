@@ -57,7 +57,7 @@ export function ConfirmModal({
     }
   }, [open])
 
-  const handleClose = (event?: React.MouseEvent | Event) => {
+  const handleClose = (event?: React.SyntheticEvent | Event) => {
     event?.stopPropagation?.()
 
     if (isSubmitting) return

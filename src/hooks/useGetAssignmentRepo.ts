@@ -5,14 +5,16 @@ const useGetAssignmentRepo = (
   org: string,
   classroom: string,
   assignment: string,
-  username: string,
+  username: string | undefined,
 ) => {
   const assignmentRepos = useGetOrgRepos(org)
 
   return {
     ...assignmentRepos,
     assignment: assignmentRepos.data?.find((repo) =>
-      repo.name.startsWith(studentRepoName(classroom, assignment, username)),
+      repo.name.startsWith(
+        studentRepoName(classroom, assignment, username ?? ""),
+      ),
     ),
   }
 }

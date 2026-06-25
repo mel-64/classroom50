@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query"
 import { jsonFileQuery } from "./github/queries"
 import type { GitHubFileListing } from "./github/types"
 
-const useGetClasses = (org: string) => {
+const useGetClasses = (org: string | undefined) => {
   const client = useGitHubClient()
   const classesQuery = useQuery(
-    jsonFileQuery<GitHubFileListing[]>(client, org, "classroom50", ""),
+    jsonFileQuery<GitHubFileListing[]>(client, org ?? "", "classroom50", ""),
   )
 
   return {

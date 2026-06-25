@@ -29,6 +29,7 @@ import {
   saveOAuthSession,
 } from "./storage"
 import type { DeviceAuthState, GithubAuthScreen } from "./types"
+import type { AuthStatus } from "@/types/router"
 
 function formatError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
@@ -450,7 +451,7 @@ function useGithubAuthState() {
     }
   }, [device, now])
 
-  const status = useMemo(() => {
+  const status = useMemo<AuthStatus>(() => {
     if (!hasLoadedStoredAuth) {
       return "loading"
     }

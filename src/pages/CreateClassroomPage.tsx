@@ -10,6 +10,7 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
@@ -53,11 +54,15 @@ const CreateClassroomPage = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org, "classroom50", `/`),
+        queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
       })
       setClassroomCreated(true)
     },
   })
+
+  if (!org) {
+    return <MissingParams message="Missing organization." />
+  }
 
   return (
     <div className="min-h-screen">
@@ -74,7 +79,11 @@ const CreateClassroomPage = () => {
             <div className="alert alert-success mb-4">
               <div>
                 Your classroom has been created. Click{" "}
-                <Link className="underline" to={`/${org}/${classroomSlug}`}>
+                <Link
+                  className="underline"
+                  to="/$org/$classroom"
+                  params={{ org, classroom: classroomSlug }}
+                >
                   here
                 </Link>{" "}
                 to view your new classroom; please note it may take a minute or

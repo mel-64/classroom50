@@ -25,8 +25,8 @@ const InitStep = ({
   message,
 }: {
   title: string
-  description: string
-  status: "pending" | "running" | "complete" | "warning" | "error"
+  description?: string
+  status: "pending" | "running" | "complete" | "warning" | "error" | "skipped"
   message?: string
 }) => {
   const badgeClass =
@@ -78,7 +78,14 @@ const OrgSteps = ({
   nextStep = false,
   org = "",
   stage = 1,
-  setStage = (num: number) => {},
+  setStage = () => {},
+}: {
+  steps: Record<InitStepId, InitStepUpdate>
+  mutation: { isPending: boolean; mutateAsync: () => Promise<unknown> }
+  nextStep?: boolean
+  org?: string
+  stage?: number
+  setStage?: (num: number) => void
 }) => {
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
@@ -138,7 +145,7 @@ const OrgSteps = ({
             <div>
               You have finished setting up your organization for Classroom 50.
               Please click{" "}
-              <Link className="underline" to={`/${org}`}>
+              <Link className="underline" to="/$org" params={{ org }}>
                 here
               </Link>{" "}
               to view your organization and its classrooms.

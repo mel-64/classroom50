@@ -13,12 +13,18 @@ import {
   type DeleteAssignmentInput,
 } from "@/api/mutations/assignments"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import type { Assignment, Student } from "@/types/classroom"
 
 const DeleteAssignmentButton = ({
   org,
   classroom,
   assignment,
   onDeleteAssignment,
+}: {
+  org: string
+  classroom: string
+  assignment: Assignment
+  onDeleteAssignment: () => void
 }) => {
   const client = useGitHubClient()
   const [open, setOpen] = useState(false)
@@ -104,6 +110,12 @@ const AssignmentsTable = ({
   assignments,
   students = [],
   loading = false,
+}: {
+  org: string
+  classroom: string
+  assignments?: Assignment[]
+  students?: Student[]
+  loading?: boolean
 }) => {
   const queryClient = useQueryClient()
   const { data: scoresData } = useGetScores(org, classroom)
@@ -139,7 +151,8 @@ const AssignmentsTable = ({
                 <td
                   onClick={() =>
                     navigate({
-                      to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
+                      to: "/$org/$classroom/assignments/$assignment/submissions",
+                      params: { org, classroom, assignment: assignment.slug },
                     })
                   }
                   className="font-bold link link-info no-underline truncate"
@@ -149,7 +162,8 @@ const AssignmentsTable = ({
                 <td
                   onClick={() =>
                     navigate({
-                      to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
+                      to: "/$org/$classroom/assignments/$assignment/submissions",
+                      params: { org, classroom, assignment: assignment.slug },
                     })
                   }
                   className="max-xl:text-xs"
@@ -168,7 +182,8 @@ const AssignmentsTable = ({
                 <td
                   onClick={() =>
                     navigate({
-                      to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
+                      to: "/$org/$classroom/assignments/$assignment/submissions",
+                      params: { org, classroom, assignment: assignment.slug },
                     })
                   }
                 >
@@ -181,7 +196,8 @@ const AssignmentsTable = ({
                 <td
                   onClick={() =>
                     navigate({
-                      to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
+                      to: "/$org/$classroom/assignments/$assignment/submissions",
+                      params: { org, classroom, assignment: assignment.slug },
                     })
                   }
                 >
@@ -219,7 +235,8 @@ const AssignmentsTable = ({
                 <td>
                   <Link
                     className="btn btn-circle btn-sm btn-ghost"
-                    to={`/${org}/${classroom}/assignments/${assignment.slug}/edit`}
+                    to="/$org/$classroom/assignments/$assignment/edit"
+                    params={{ org, classroom, assignment: assignment.slug }}
                     onClick={(event) => {
                       event.stopPropagation()
                     }}

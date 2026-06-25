@@ -40,7 +40,7 @@ const storageKey = (org: string) => `cl50:collect-scores:${org}`
 // dispatch instead of re-enabling "Collect now" and inviting a duplicate.
 // sessionStorage (tab-scoped) matches the "collection started this session"
 // lifetime.
-const loadDispatch = (org: string): DispatchState | null => {
+const loadDispatch = (org: string | undefined): DispatchState | null => {
   if (!org) return null
   try {
     const raw = sessionStorage.getItem(storageKey(org))
@@ -57,7 +57,7 @@ const loadDispatch = (org: string): DispatchState | null => {
   }
 }
 
-const saveDispatch = (org: string, state: DispatchState | null) => {
+const saveDispatch = (org: string | undefined, state: DispatchState | null) => {
   if (!org) return
   try {
     if (state) sessionStorage.setItem(storageKey(org), JSON.stringify(state))
@@ -75,7 +75,7 @@ const saveDispatch = (org: string, state: DispatchState | null) => {
  * sessionStorage so a remount re-attaches; `phase` latches at
  * completed/failed/timeout until the next dispatch.
  */
-const useTriggerScoreCollection = (org: string) => {
+const useTriggerScoreCollection = (org: string | undefined) => {
   const client = useGitHubClient()
   const [dispatch, setDispatch] = useState<DispatchState | null>(() =>
     loadDispatch(org),
@@ -94,7 +94,7 @@ const useTriggerScoreCollection = (org: string) => {
     // Org-wide collection, matching the "Last collected" timestamp. Pass a
     // classroom slug as the third arg to scope it: the workflow already accepts
     // a `classroom` dispatch input.
-    mutationFn: () => triggerScoreCollection(client, org),
+    mutationFn: () => triggerScoreCollection(client, org ?? ""),
     onSuccess: (result) => {
       setTimedOut(false)
       const next: DispatchState = {
@@ -107,9 +107,14 @@ const useTriggerScoreCollection = (org: string) => {
   })
 
   const runQuery = useQuery({
-    queryKey: githubKeys.collectScoresRun(org, dispatch?.sinceRunId ?? null),
+    queryKey: githubKeys.collectScoresRun(org ?? "", dispatch?.sinceRunId ?? null),
     queryFn: ({ signal }) =>
-      getCollectScoresRunAfterId(client, org, dispatch?.sinceRunId ?? null, signal),
+      getCollectScoresRunAfterId(
+        client,
+        org ?? "",
+        dispatch?.sinceRunId ?? null,
+        signal,
+      ),
     enabled: Boolean(org && dispatch && !timedOut),
     refetchInterval: (query) => {
       if (isRunFinished(query.state.data)) return false

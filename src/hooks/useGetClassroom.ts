@@ -3,14 +3,17 @@ import { jsonFileQuery } from "./github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import type { Classroom } from "@/types/classroom"
 
-const useGetClassroom = (org: string, classroom: string) => {
+const useGetClassroom = (
+  org: string | undefined,
+  classroom: string | undefined,
+) => {
   const client = useGitHubClient()
   return useQuery({
     ...jsonFileQuery<Classroom>(
       client,
-      org,
+      org ?? "",
       "classroom50",
-      `${classroom}/classroom.json`,
+      `${classroom ?? ""}/classroom.json`,
     ),
     enabled: Boolean(org && classroom),
   })

@@ -52,7 +52,7 @@ const AcceptNavbar = () => {
   )
 }
 
-const AcceptCard = ({ children }) => {
+const AcceptCard = ({ children }: { children: React.ReactNode }) => {
   return (
     <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
       {children}
@@ -60,7 +60,7 @@ const AcceptCard = ({ children }) => {
   )
 }
 
-const UserInfo = ({ user }) => {
+const UserInfo = ({ user }: { user: GitHubUser | null }) => {
   const username = user?.login
   const displayName = user?.name || user?.login || "GitHub user"
 
@@ -90,7 +90,13 @@ const UserInfo = ({ user }) => {
   )
 }
 
-const AssignmentNotFound = ({ user, assignment }) => {
+const AssignmentNotFound = ({
+  user,
+  assignment,
+}: {
+  user: GitHubUser | null
+  assignment?: string
+}) => {
   return (
     <div className="min-h-screen bg-base-100">
       <AcceptNavbar />
@@ -161,7 +167,15 @@ const AssignmentNotFound = ({ user, assignment }) => {
   )
 }
 
-const NotOrgMember = ({ user, org, classroom }) => {
+const NotOrgMember = ({
+  user,
+  org,
+  classroom,
+}: {
+  user: GitHubUser | null
+  org?: string
+  classroom?: string
+}) => {
   return (
     <div className="min-h-screen bg-base-100">
       <AcceptNavbar />
@@ -226,7 +240,7 @@ const NotOrgMember = ({ user, org, classroom }) => {
   )
 }
 
-const modeMap = {
+const modeMap: Record<string, string> = {
   individual: "Individual Assignment",
   group: "Group Assignment",
 }
@@ -421,8 +435,12 @@ const AcceptAssignmentPage = () => {
   const pastDue = Boolean(assignmentData?.due && isPastDue(assignmentData.due))
 
   const expectedRepoName = username
-    ? studentRepoName(classroom, assignment, username)
-    : studentRepoName(classroom, assignment, "{your-github-username}")
+    ? studentRepoName(classroom ?? "", assignment ?? "", username)
+    : studentRepoName(
+        classroom ?? "",
+        assignment ?? "",
+        "{your-github-username}",
+      )
 
   const { data: checkedRepo, isLoading: isLoadingRepo } = useGetRepo(
     org,
@@ -438,9 +456,9 @@ const AcceptAssignmentPage = () => {
       setSteps(initialStepState)
       return acceptAssignment({
         client,
-        org,
-        classroom,
-        assignmentSlug: assignment,
+        org: org ?? "",
+        classroom: classroom ?? "",
+        assignmentSlug: assignment ?? "",
         onStepUpdate: (update) =>
           setSteps((prev) => ({
             ...prev,
@@ -473,14 +491,7 @@ const AcceptAssignmentPage = () => {
   }
 
   if (!orgInvite) {
-    return (
-      <NotOrgMember
-        assignment={assignment}
-        classroom={classroom}
-        user={user}
-        org={org}
-      />
-    )
+    return <NotOrgMember classroom={classroom} user={user} org={org} />
   }
 
   if (!assignmentData) {
@@ -653,7 +664,7 @@ const AcceptAssignmentPage = () => {
           <GroupCollaboratorsModal
             open={collaboratorsOpen}
             onClose={() => setCollaboratorsOpen(false)}
-            org={org}
+            org={org ?? ""}
             repoName={acceptMutation.data?.repo.name || checkedRepo?.name || ""}
             repoUrl={
               acceptMutation.data?.repo.html_url || checkedRepo?.html_url

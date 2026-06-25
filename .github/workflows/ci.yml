@@ -1,0 +1,45 @@
+name: CI
+
+# Quality gate for PRs and pushes to long-lived branches: type-check, lint,
+# and tests. Blocks merge and can't be bypassed like a local hook.
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main, staging]
+
+# Cancel superseded runs on the same ref so a quick succession of pushes
+# doesn't pile up redundant CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Full project type-check (tsc -b). Blocking: the build depends on this
+      # staying green.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # ESLint. Fails on errors; advisory rules are configured as warnings in
+      # eslint.config.js and do not block.
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test

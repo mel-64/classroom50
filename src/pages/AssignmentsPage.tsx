@@ -13,7 +13,13 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import { OrgRepos } from "./ClassesPage"
 
-const TeacherAssignmentsView = ({ org, classroom }) => {
+const TeacherAssignmentsView = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
   const { data: classData, isLoading: assignmentsLoading } =
     useGetClassroomAssignments(org, classroom)
   const { students, isLoading: studentsLoading } = useGetStudents(
@@ -42,7 +48,10 @@ const TeacherAssignmentsView = ({ org, classroom }) => {
           </h3>
         </div>
         <div className="pt-10">
-          <Link to={`/${org}/${classroom}/assignments/new`}>
+          <Link
+            to="/$org/$classroom/assignments/new"
+            params={{ org, classroom }}
+          >
             <button className="btn btn-primary">+ Assignment</button>
           </Link>
         </div>
@@ -58,7 +67,13 @@ const TeacherAssignmentsView = ({ org, classroom }) => {
   )
 }
 
-const StudentAssignmentsView = ({ org, classroom }) => {
+const StudentAssignmentsView = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
   return (
     <div>
       <h1 className="text-2xl font-bold mt-6">Classroom Assignments</h1>
@@ -81,11 +96,7 @@ const AssignmentsPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <Breadcrumb
-            endpoint="Assignments"
-            isTeacher={isTeacher}
-            classroom={classroom}
-          />
+          <Breadcrumb endpoint="Assignments" />
           {roleLoading && (
             <div className="mt-8 space-y-4">
               <div className="skeleton h-6 w-48" />
@@ -93,10 +104,10 @@ const AssignmentsPage = () => {
               <div className="skeleton h-64 w-full rounded-box" />
             </div>
           )}
-          {!roleLoading && isTeacher && (
+          {!roleLoading && isTeacher && org && classroom && (
             <TeacherAssignmentsView org={org} classroom={classroom} />
           )}
-          {!roleLoading && isStudent && (
+          {!roleLoading && isStudent && org && classroom && (
             <StudentAssignmentsView org={org} classroom={classroom} />
           )}
         </DrawerContent>

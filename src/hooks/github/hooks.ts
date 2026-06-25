@@ -21,9 +21,9 @@ export function useGitHubOrgMembership(org: string) {
   return useQuery(orgMembershipQuery(client, org))
 }
 
-export function useGitHubRepo(owner: string, repo: string) {
+export function useGitHubRepo(owner: string | undefined, repo: string) {
   const client = useGitHubClient()
-  return useQuery(repoQuery(client, owner, repo))
+  return useQuery(repoQuery(client, owner ?? "", repo))
 }
 
 export function useGitHubRawFile(

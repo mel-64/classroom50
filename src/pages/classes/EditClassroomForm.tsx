@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Trash2 } from "lucide-react"
 import { useState } from "react"
+import type { Classroom } from "@/types/classroom"
 
 export type EditClassroomFormValues = {
   name: string
@@ -19,9 +20,18 @@ export type EditClassroomFormValues = {
 type EditClassroomFormProps = {
   defaultValues?: Partial<EditClassroomFormValues>
   onSubmit: (values: EditClassroomFormValues) => void | Promise<void>
+  cl?: Classroom
 }
 
-const DeleteClassroomButton = ({ org, classroom, onDeleteClassroom }) => {
+const DeleteClassroomButton = ({
+  org,
+  classroom,
+  onDeleteClassroom,
+}: {
+  org: string
+  classroom: string
+  onDeleteClassroom: () => void
+}) => {
   const client = useGitHubClient()
   const [open, setOpen] = useState(false)
   const deleteClassroomMutation = useMutation({
@@ -105,6 +115,8 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
     },
   })
 
+  if (!org || !classroom) return null
+
   return (
     <form
       className="card bg-base-100 w-full shadow-sm"
@@ -124,7 +136,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
               queryClient.invalidateQueries({
                 queryKey: githubKeys.jsonFile(org, "classroom50"),
               })
-              navigate({ to: `/${org}` })
+              navigate({ to: "/$org", params: { org } })
             }}
           />
         </div>

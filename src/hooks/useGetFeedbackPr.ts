@@ -12,12 +12,17 @@ import {
 // null when none exists yet (no submission graded, or the PR step skipped).
 // `enabled` defaults to true; pass false to defer the request (e.g. resolve
 // the PR on demand instead of one /pulls call per table row on mount).
-const useGetFeedbackPr = (org: string, repo: string, enabled = true) => {
+const useGetFeedbackPr = (
+  org: string | undefined,
+  repo: string | undefined,
+  enabled = true,
+) => {
   const client = useGitHubClient()
 
   return useQuery({
-    queryKey: githubKeys.openPulls(org, repo),
-    queryFn: ({ signal }) => getOpenPullRequests(client, org, repo, signal),
+    queryKey: githubKeys.openPulls(org ?? "", repo ?? ""),
+    queryFn: ({ signal }) =>
+      getOpenPullRequests(client, org ?? "", repo ?? "", signal),
     select: (pulls): GitHubPullRequest | null => pulls[0] ?? null,
     staleTime: 60 * 1000,
     retry: false,

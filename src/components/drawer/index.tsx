@@ -12,15 +12,19 @@ import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import type { Classroom } from "@/types/classroom"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
-const Drawer = ({ children }) => (
+const Drawer = ({ children }: { children: ReactNode }) => (
   <div className="drawer lg:drawer-open">{children}</div>
 )
 
-export const DrawerContent = ({ children, className }) => (
-  <div className={`${className} drawer-content`}>{children}</div>
-)
+export const DrawerContent = ({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) => <div className={`${className} drawer-content`}>{children}</div>
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
 export const DrawerSidebar = ({
@@ -57,7 +61,7 @@ export const ClassroomLogo = () => {
 export const AllClasses = ({ org }: { org: string }) => {
   return (
     <div className="py-4 text-sm">
-      <Link to={`/${org}/classes`} className="text-center">
+      <Link to="/$org/classes" params={{ org }} className="text-center">
         ‹ All Classes
       </Link>
     </div>
@@ -90,12 +94,15 @@ export const TeacherSidebarMenu = ({
   selected: string
 }) => {
   // Placeholder while pending so items never flash in then out.
-  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
 
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to={`/${org}/${classroom}/assignments`}>
+        <Link
+          to="/$org/$classroom/assignments"
+          params={{ org, classroom }}
+        >
           <li
             className={`flex px-2 ${selected === "assignments" && "bg-[#323b49] rounded-box"}`}
           >
@@ -114,7 +121,7 @@ export const TeacherSidebarMenu = ({
         ) : (
           showTeacherUi && (
             <>
-              <Link to={`/${org}/${classroom}/students`}>
+              <Link to="/$org/$classroom/students" params={{ org, classroom }}>
                 <li
                   className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
                 >
@@ -122,7 +129,7 @@ export const TeacherSidebarMenu = ({
                   <span>Students</span>
                 </li>
               </Link>
-              <Link to={`/${org}/${classroom}/edit`}>
+              <Link to="/$org/$classroom/edit" params={{ org, classroom }}>
                 <li
                   className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
                 >
@@ -268,9 +275,15 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
   return (
     <>
       <ClassroomLogo />
-      <AllClasses org={org} />
+      {org && <AllClasses org={org} />}
       <SidebarClassInfo classInfo={classData} />
-      <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
+      {org && classroom && (
+        <TeacherSidebarMenu
+          selected={selected}
+          org={org}
+          classroom={classroom}
+        />
+      )}
       <SidebarFooter />
     </>
   )
@@ -278,12 +291,13 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
 
 export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
-  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
   const onSettings = settings || selected === "settings"
+  if (!org) return null
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to={`/${org}`}>
+        <Link to="/$org" params={{ org }}>
           <li
             className={`flex px-2 rounded-box${onSettings ? "" : " bg-[#323b49]"}`}
           >
@@ -300,7 +314,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
           </li>
         </Link>
         {showTeacherUi && (
-          <Link to={`/${org}/settings`}>
+          <Link to="/$org/settings" params={{ org }}>
             <li
               className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
             >
@@ -331,7 +345,13 @@ export const MyOrgs = ({ settings = false }) => {
   )
 }
 
-export const SidebarContentClasses = ({ selected, settings = false }) => {
+export const SidebarContentClasses = ({
+  selected,
+  settings = false,
+}: {
+  selected: string
+  settings?: boolean
+}) => {
   return (
     <>
       <ClassroomLogo />
@@ -341,7 +361,7 @@ export const SidebarContentClasses = ({ selected, settings = false }) => {
   )
 }
 
-export const SidebarContentOrgs = ({ selected }) => {
+export const SidebarContentOrgs = ({ selected }: { selected: string }) => {
   return (
     <>
       <ClassroomLogo />

@@ -14,6 +14,7 @@ import {
 import { useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -72,7 +73,7 @@ const SubmissionsPage = () => {
     (a) => a.slug === assignment,
   )
   const isGroupAssignment = assignmentInfo?.mode === "group"
-  const scoresInfo = scoresData?.submissions?.[assignment] || []
+  const scoresInfo = scoresData?.submissions?.[assignment ?? ""] || []
 
   // Count repos whose latest submission landed after the deadline. `late` is
   // computed upstream (collect_scores.py) from the push time, not the grade
@@ -167,6 +168,12 @@ const SubmissionsPage = () => {
     link.click()
 
     URL.revokeObjectURL(url)
+  }
+
+  if (!org || !classroom || !assignment) {
+    return (
+      <MissingParams message="Missing organization, classroom, or assignment in the URL." />
+    )
   }
 
   return (

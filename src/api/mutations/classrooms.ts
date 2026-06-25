@@ -11,6 +11,7 @@ import {
   getErrorMessage,
   updateRef,
   type GitTreeEntry,
+  type GitTreeFileMode,
 } from "@/hooks/github/mutations"
 
 export type CreateClassroomResult = {
@@ -165,12 +166,14 @@ export async function deleteClassroom(
     .filter(
       (entry) => entry.path === classroom || entry.path.startsWith(prefix),
     )
-    .map((entry) => ({
-      path: entry.path,
-      mode: entry.mode,
-      type: "blob",
-      sha: null,
-    }))
+    .map(
+      (entry): GitTreeEntry => ({
+        path: entry.path,
+        mode: entry.mode as GitTreeFileMode,
+        type: "blob",
+        sha: null,
+      }),
+    )
 
   if (entriesToDelete.length === 0) {
     return {

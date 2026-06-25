@@ -56,7 +56,8 @@ const EditAssignmentFormStudent = ({
           You do not have this assignment yet! Do you need to{" "}
           <Link
             className="underline"
-            to={`/${org}/${classroom}/assignments/${assignment}/accept`}
+            to="/$org/$classroom/assignments/$assignment/accept"
+            params={{ org, classroom, assignment }}
           >
             accept it
           </Link>{" "}
@@ -157,11 +158,7 @@ const EditAssignmentPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <Breadcrumb
-            endpoint="Edit Assignment"
-            isTeacher={isTeacher}
-            classroom={classroom}
-          />
+          <Breadcrumb endpoint="Edit Assignment" />
           {editError && (
             <div className="alert alert-error mt-6">{editError}</div>
           )}
@@ -174,7 +171,7 @@ const EditAssignmentPage = () => {
             <div className="alert alert-warning mt-6">{editWarning}</div>
           )}
           <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
-          {isTeacher && (
+          {isTeacher && org && classroom && assignment && (
             <EditAssignmentForm
               org={org}
               classroom={classroom}
@@ -206,7 +203,7 @@ const EditAssignmentPage = () => {
               }}
             />
           )}
-          {isStudent && (
+          {isStudent && org && classroom && assignment && (
             <EditAssignmentFormStudent
               org={org}
               classroom={classroom}

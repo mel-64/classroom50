@@ -35,7 +35,15 @@ const AddByGithubUsername = ({
   const [teamWarning, setTeamWarning] = useState("")
 
   const addStudentMutation = useMutation({
-    mutationFn: ({ username, first_name, last_name }) =>
+    mutationFn: ({
+      username,
+      first_name,
+      last_name,
+    }: {
+      username: string
+      first_name?: string
+      last_name?: string
+    }) =>
       enrollStudentInClassroom(githubClient, {
         org,
         classroom,

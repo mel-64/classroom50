@@ -17,7 +17,7 @@ export type CourseManifest = {
   }>
 }
 
-export function useCourseTeacherAccess(org: string) {
+export function useCourseTeacherAccess(org: string | undefined) {
   const teacherRepo = "classroom50"
   const repoQuery = useGitHubRepo(org, teacherRepo)
 

@@ -22,7 +22,7 @@ const parseUsernameImportFile = (text: string): string[] => {
     transformHeader: (header) => header.trim().toLowerCase(),
   })
 
-  let candidates: string[] = []
+  let candidates: string[]
 
   if (
     parsed.errors.length === 0 &&

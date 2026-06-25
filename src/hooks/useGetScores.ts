@@ -147,14 +147,17 @@ export function normalizeScores(
   return { schema: data.schema, submissions }
 }
 
-const useGetScores = (org: string, classroom: string) => {
+const useGetScores = (
+  org: string | undefined,
+  classroom: string | undefined,
+) => {
   const client = useGitHubClient()
   return useQuery({
     ...jsonFileQuery<ScoresSchema>(
       client,
-      org,
+      org ?? "",
       "classroom50",
-      `${classroom}/scores.json`,
+      `${classroom ?? ""}/scores.json`,
     ),
     select: normalizeScores,
   })

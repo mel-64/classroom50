@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { getRepo } from "./github/queries"
 
 const useGetRepo = (
-  org: string,
+  org: string | undefined,
   path: string,
   options?: { enabled?: boolean },
 ) => {
@@ -11,7 +11,7 @@ const useGetRepo = (
 
   return useQuery({
     queryKey: ["github", "repo", org, path],
-    queryFn: () => getRepo(client, org, path),
+    queryFn: () => getRepo(client, org ?? "", path),
     enabled: Boolean(org && path) && (options?.enabled ?? true),
   })
 }

@@ -1,6 +1,6 @@
 import { createRouter } from "@tanstack/react-router"
 import { routeTree } from "./routeTree.gen"
-import type { GitHubUser } from "./hooks/github/types"
+import type { RouterContext } from "./types/router"
 
 export const router = createRouter({
   routeTree,
@@ -8,15 +8,10 @@ export const router = createRouter({
   basepath: import.meta.env.BASE_URL,
   context: {
     auth: {
-      user: undefined!,
+      user: null,
       status: "loading",
     },
-  } as {
-    auth: {
-      user: GitHubUser
-      status: string
-    }
-  },
+  } satisfies RouterContext,
 })
 
 declare module "@tanstack/react-router" {

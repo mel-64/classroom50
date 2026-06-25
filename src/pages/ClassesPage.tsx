@@ -19,7 +19,8 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import type { GitHubFileListing } from "@/hooks/github/types"
+import type { GitHubFileListing, GitHubRepo } from "@/hooks/github/types"
+import MissingParams from "@/components/MissingParams"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
@@ -79,7 +80,8 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
         )}
         <Link
           type="button"
-          to={`/${org}/${cl.path}/assignments`}
+          to="/$org/$classroom/assignments"
+          params={{ org, classroom: cl.path }}
           className="btn btn-outline btn-primary w-full"
         >
           <BookText />
@@ -90,7 +92,7 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   )
 }
 
-const CreateClassroomPane = ({ org }) => (
+const CreateClassroomPane = ({ org }: { org: string }) => (
   <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
     <div className="card-body items-center py-12 text-center">
       <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -106,7 +108,8 @@ const CreateClassroomPane = ({ org }) => (
 
       <div className="card-actions mt-4">
         <Link
-          to={`/${org}/classes/new`}
+          to="/$org/classes/new"
+          params={{ org }}
           type="button"
           className="btn btn-primary"
         >
@@ -173,7 +176,7 @@ const JoinOrgCard = ({ org }: { org: string }) => {
   )
 }
 
-const RepoCard = ({ org, repo }) => {
+const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
   const { classroom, assignment } = cl50Yaml
   const assignmentData = useGetPublicAssignment(org, classroom, assignment)
@@ -237,10 +240,10 @@ const RepoCard = ({ org, repo }) => {
               </Link>
             )}
 
-            {assignment && (
+            {classroom && assignment && (
               <Link
-                to={`/${org}/${classroom}/assignments/${assignment}`}
-                params={{ org, classroom }}
+                to="/$org/$classroom/assignments/$assignment"
+                params={{ org, classroom, assignment }}
                 className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
               >
                 <BookOpen className="size-4" />
@@ -257,12 +260,12 @@ const RepoCard = ({ org, repo }) => {
 
         <div className="card-actions items-center justify-between pt-1">
           <div className="flex flex-wrap items-end gap-2">
-            {assignmentData?.mode === "individual" && (
+            {assignmentData.assignment?.mode === "individual" && (
               <div className="badge badge-ghost badge-sm py-3">
                 <UserRound className="size-4" /> Individual
               </div>
             )}
-            {assignmentData?.mode === "group" && (
+            {assignmentData.assignment?.mode === "group" && (
               <div className="badge badge-ghost badge-sm">
                 <UsersRound className="size-4" /> Group
               </div>
@@ -341,6 +344,10 @@ const ClassesPage = () => {
 
   const isMember = membership?.state === "active"
 
+  if (!org) {
+    return <MissingParams message="Missing organization." />
+  }
+
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -380,7 +387,8 @@ const ClassesPage = () => {
                 <div className="flex sm:self-end">
                   <Link
                     type="button"
-                    to={`/${org}/classes/new`}
+                    to="/$org/classes/new"
+                    params={{ org }}
                     className="btn btn-primary"
                   >
                     + New Class

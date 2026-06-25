@@ -86,12 +86,3 @@ export async function fetchAssignmentFromPages(
 
   return assignment
 }
-
-export async function getAssignmentsJson(
-  client: GitHubClient,
-  input: {
-    org: string
-    classroom: string
-    ref?: string
-  },
-) {}
