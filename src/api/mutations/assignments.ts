@@ -982,20 +982,54 @@ export async function editAssignmentWithConflictRetry(
 function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
-  // The source block lets `gh student submit` re-fetch instructor
-  // .gitignore/.github on each push. Omitted for a template-less assignment,
-  // matching the CLI (which writes no `source:` block).
+  // Repo owner identity. `id` is GitHub's immutable numeric user id, recorded
+  // so the repo<->student binding survives a username rename (classroom50-cli#185).
+  ownerUsername: string
+  ownerId?: number | null
+  // Who performed the accept (equals owner for individual assignments).
+  acceptedByUsername?: string
+  acceptedById?: number | null
+  acceptedAt?: string
+  // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
   sourceOwner?: string
   sourceRepo?: string
   sourceBranch?: string
 }) {
-  const { classroom, assignment, sourceOwner, sourceRepo, sourceBranch } =
-    params
+  const {
+    classroom,
+    assignment,
+    ownerUsername,
+    ownerId,
+    acceptedByUsername,
+    acceptedById,
+    acceptedAt,
+    sourceOwner,
+    sourceRepo,
+    sourceBranch,
+  } = params
 
   const lines = [
+    `schema: "classroom50/repo-config/v1"`,
     `classroom: ${JSON.stringify(classroom)}`,
     `assignment: ${JSON.stringify(assignment)}`,
+    `owner:`,
+    `  username: ${JSON.stringify(ownerUsername)}`,
+    // id is a number (or null) — never quote it.
+    `  id: ${typeof ownerId === "number" ? ownerId : "null"}`,
   ]
+
+  if (acceptedByUsername) {
+    lines.push(
+      `accepted_by:`,
+      `  username: ${JSON.stringify(acceptedByUsername)}`,
+      `  id: ${typeof acceptedById === "number" ? acceptedById : "null"}`,
+    )
+  }
+
+  if (acceptedAt) {
+    lines.push(`accepted_at: ${JSON.stringify(acceptedAt)}`)
+  }
+
   if (sourceOwner && sourceRepo) {
     lines.push(
       `source:`,
@@ -1366,6 +1400,12 @@ export async function acceptAssignment(params: {
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
+    // The accepting user owns the repo they create, so owner == accepted_by.
+    ownerUsername: username,
+    ownerId: user.id,
+    acceptedByUsername: username,
+    acceptedById: user.id,
+    acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     sourceOwner,
     sourceRepo,
     sourceBranch,

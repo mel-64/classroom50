@@ -85,6 +85,9 @@ export const githubKeys = {
 
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
+
+  latestReleaseResult: (owner: string, repo: string) =>
+    [...githubKeys.all, "latest-release-result", owner, repo] as const,
 }
 
 // Refresh the lists that drive roster invite status after enroll/resend/
@@ -386,6 +389,67 @@ export function jsonFileQuery<T>(
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+}
+
+type GitHubReleaseAsset = {
+  name: string
+  url: string
+  browser_download_url: string
+}
+
+type GitHubRelease = {
+  tag_name: string
+  name: string | null
+  html_url: string
+  created_at: string
+  assets: GitHubReleaseAsset[]
+}
+
+// Reads the `result.json` asset off a student repo's latest submit/* release.
+// The autograde-runner workflow attaches result.json to each submission
+// release and flips the "latest" pointer to the newest one (see the CLI's
+// autograde-runner.yaml), so /releases/latest resolves the most recent graded
+// submission. Returns null when the repo has no releases yet (student has not
+// submitted) or the release carries no result.json asset.
+export function latestReleaseResultQuery<T>(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.latestReleaseResult(owner, repo),
+    queryFn: async ({ signal }): Promise<T | null> => {
+      let release: GitHubRelease
+      try {
+        release = await client.request<GitHubRelease>(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo,
+          )}/releases/latest`,
+          { method: "GET", signal },
+        )
+      } catch (error) {
+        // No published release yet -> no submission graded yet.
+        if (error instanceof GitHubAPIError && error.status === 404) {
+          return null
+        }
+        throw error
+      }
+
+      const asset = release.assets.find((a) => a.name === "result.json")
+      if (!asset) return null
+
+      const raw = await client.requestRaw(asset.url, {
+        method: "GET",
+        accept: "application/octet-stream",
+        signal,
+      })
+
+      return JSON.parse(raw) as T
+    },
+    enabled: Boolean(owner && repo),
+    staleTime: 5 * 60 * 1000,
     retry: false,
   })
 }

@@ -9,12 +9,15 @@ import {
   ChevronRight,
   ArrowLeft,
   Menu,
+  FileCheck2,
 } from "lucide-react"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useParams, useMatchRoute } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import type { Classroom } from "@/types/classroom"
 import {
   createContext,
@@ -245,6 +248,174 @@ export const SidebarClassInfo = ({ classInfo }: { classInfo?: Classroom }) => {
   )
 }
 
+const AssignmentSidebarMenu = ({
+  org,
+  classroom,
+  assignment,
+}: {
+  org: string
+  classroom: string
+  assignment: string
+}) => {
+  const { collapsed } = useSidebarCollapse()
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
+  const matchRoute = useMatchRoute()
+
+  // Resolve the display name from whichever source the role can read.
+  const { data: teacherAssignments } = useGetClassroomAssignments(
+    org,
+    classroom,
+  )
+  const { assignment: publicAssignment } = useGetPublicAssignment(
+    org,
+    classroom,
+    assignment,
+  )
+  const assignmentName =
+    teacherAssignments?.assignments.find((a) => a.slug === assignment)?.name ||
+    publicAssignment?.name ||
+    assignment
+
+  const onSubmissions = Boolean(
+    matchRoute({
+      to: "/$org/$classroom/assignments/$assignment/submissions",
+      fuzzy: false,
+    }) ||
+    matchRoute({
+      to: "/$org/$classroom/assignments/$assignment",
+      fuzzy: false,
+    }),
+  )
+  const onSubmission = Boolean(
+    matchRoute({
+      to: "/$org/$classroom/assignments/$assignment/submission",
+      fuzzy: false,
+    }),
+  )
+  const onSettings = Boolean(
+    matchRoute({
+      to: "/$org/$classroom/assignments/$assignment/edit",
+      fuzzy: false,
+    }),
+  )
+
+  return (
+    <>
+      {/* Back to the assignments list */}
+      {collapsed ? (
+        <div className="flex justify-center py-2 text-sm">
+          <Link
+            to="/$org/$classroom/assignments"
+            params={{ org, classroom }}
+            className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+            data-tip="All Assignments"
+            aria-label="All Assignments"
+          >
+            <ArrowLeft className="size-5" />
+          </Link>
+        </div>
+      ) : (
+        <div className="py-4 text-sm">
+          <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
+            ‹ All Assignments
+          </Link>
+        </div>
+      )}
+
+      {!collapsed && (
+        <div className="py-2">
+          <h3 className="font-bold leading-tight">{assignmentName}</h3>
+          <p className="text-gray-500 text-sm">Assignment</p>
+        </div>
+      )}
+
+      <div className="py-4">
+        <ul className="flex flex-col gap-1">
+          {!roleResolved ? (
+            <>
+              {[0, 1].map((i) => (
+                <li key={i} className="flex px-2 py-2">
+                  <span className="skeleton h-4 w-24 bg-white/10" />
+                </li>
+              ))}
+            </>
+          ) : showTeacherUi ? (
+            <>
+              <Tip label="Submissions">
+                <Link
+                  to="/$org/$classroom/assignments/$assignment/submissions"
+                  params={{ org, classroom, assignment }}
+                >
+                  <li
+                    aria-current={onSubmissions ? "page" : undefined}
+                    className={navItemClass(onSubmissions, collapsed)}
+                  >
+                    <UsersRound className="shrink-0" />
+                    {!collapsed && (
+                      <span className="truncate">Submissions</span>
+                    )}
+                  </li>
+                </Link>
+              </Tip>
+              <Tip label="Assignment Settings">
+                <Link
+                  to="/$org/$classroom/assignments/$assignment/edit"
+                  params={{ org, classroom, assignment }}
+                >
+                  <li
+                    aria-current={onSettings ? "page" : undefined}
+                    className={navItemClass(onSettings, collapsed)}
+                  >
+                    <Settings className="shrink-0" />
+                    {!collapsed && (
+                      <span className="truncate">Assignment Settings</span>
+                    )}
+                  </li>
+                </Link>
+              </Tip>
+            </>
+          ) : (
+            <>
+              <Tip label="My Submission">
+                <Link
+                  to="/$org/$classroom/assignments/$assignment/submission"
+                  params={{ org, classroom, assignment }}
+                >
+                  <li
+                    aria-current={onSubmission ? "page" : undefined}
+                    className={navItemClass(onSubmission, collapsed)}
+                  >
+                    <FileCheck2 className="shrink-0" />
+                    {!collapsed && (
+                      <span className="truncate">My Submission</span>
+                    )}
+                  </li>
+                </Link>
+              </Tip>
+              <Tip label="Assignment Settings">
+                <Link
+                  to="/$org/$classroom/assignments/$assignment/edit"
+                  params={{ org, classroom, assignment }}
+                >
+                  <li
+                    aria-current={onSettings ? "page" : undefined}
+                    className={navItemClass(onSettings, collapsed)}
+                  >
+                    <Settings className="shrink-0" />
+                    {!collapsed && (
+                      <span className="truncate">Assignment Settings</span>
+                    )}
+                  </li>
+                </Link>
+              </Tip>
+            </>
+          )}
+        </ul>
+      </div>
+    </>
+  )
+}
+
 export const TeacherSidebarMenu = ({
   org,
   classroom,
@@ -450,8 +621,25 @@ export const SidebarFooter = () => {
 }
 
 export const SidebarContent = ({ selected }: { selected: string }) => {
-  const { org, classroom } = useParams({ strict: false })
+  const { org, classroom, assignment } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
+
+  // Inside a single assignment the nav becomes assignment-scoped: show
+  // assignment actions (and a back link) instead of the classroom menu.
+  if (org && classroom && assignment) {
+    return (
+      <>
+        <ClassroomLogo />
+        <ExpandSidebarButton />
+        <AssignmentSidebarMenu
+          org={org}
+          classroom={classroom}
+          assignment={assignment}
+        />
+        <SidebarFooter />
+      </>
+    )
+  }
 
   return (
     <>
