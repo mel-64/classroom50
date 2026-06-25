@@ -5,7 +5,7 @@ import { studentRepoName } from "@/util/studentRepo"
 import type { ResultJson } from "@/types/result"
 
 // The logged-in student's most recent graded submission. The autograde runner
-// commits result.json to the repo's `results` branch
+// commits result.json to the repo's `artifacts` branch
 // (<classroom>-<assignment>-<username>); `data` is null until they submit.
 const useGetSubmissionResult = (
   org: string | undefined,

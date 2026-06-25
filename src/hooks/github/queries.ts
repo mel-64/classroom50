@@ -393,15 +393,16 @@ export function jsonFileQuery<T>(
   })
 }
 
-const RESULT_BRANCH = "results"
+const ARTIFACTS_BRANCH = "artifacts"
 const RESULT_PATH = "result.json"
 
 // Reads the student's latest graded result from the committed `result.json` on
-// the repo's orphan `results` branch (written by the autograde runner). We use
-// the Contents API — not the release asset — because release-asset downloads
-// 302-redirect to a storage host with no CORS headers and are unreadable from
-// the browser. Returns null when the file/branch doesn't exist yet (no graded
-// submission). The result.json contract is shared with classroom50-cli.
+// the repo's orphan `artifacts` branch (written by the autograde runner). We
+// use the Contents API — not the release asset — because release-asset
+// downloads 302-redirect to a storage host with no CORS headers and are
+// unreadable from the browser. Returns null when the file/branch doesn't exist
+// yet (no graded submission). The result.json contract is shared with
+// classroom50-cli.
 export function submissionResultQuery<T>(
   client: GitHubClient,
   owner: string,
@@ -415,11 +416,13 @@ export function submissionResultQuery<T>(
         raw = await client.requestRaw(
           `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
             repo,
-          )}/contents/${RESULT_PATH}?ref=${encodeURIComponent(RESULT_BRANCH)}`,
+          )}/contents/${RESULT_PATH}?ref=${encodeURIComponent(
+            ARTIFACTS_BRANCH,
+          )}`,
           { method: "GET", signal },
         )
       } catch (error) {
-        // No results branch / file yet -> no graded submission.
+        // No artifacts branch / file yet -> no graded submission.
         if (error instanceof GitHubAPIError && error.status === 404) {
           return null
         }
