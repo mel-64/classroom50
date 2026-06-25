@@ -3,9 +3,8 @@ import { useQuery } from "@tanstack/react-query"
 import { githubKeys, getOrgInvitations, getOrgFailedInvitations } from "./github/queries"
 import { GitHubAPIError } from "./github/errors"
 
-// Reading org invitations / failed invitations is owner-only; a non-owner token
-// gets a 403. We surface that as `isForbidden` so the UI can explain why no
-// invite status is shown rather than rendering an ambiguous empty state.
+// Owner-only endpoints; a non-owner token gets 403, surfaced as `isForbidden`
+// so the UI can explain why invite status is hidden.
 const useGetOrgInvitations = (org: string) => {
   const client = useGitHubClient()
 

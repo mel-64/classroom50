@@ -542,10 +542,8 @@ export async function removeUserFromTeam(
   }
 }
 
-// Low-level create: POST /orgs/{org}/invitations. Mirrors the classroom50-cli
-// primitive — body is invitee_id + role only (no team_ids, no email). Team
-// membership is a separate PUT. invitee_id must be a number (a string 422s).
-// Owner-only.
+// POST /orgs/{org}/invitations. Mirrors the CLI: body is invitee_id + role only
+// (no team_ids/email). invitee_id must be a number (a string 422s). Owner-only.
 function createOrgInvitation(
   client: GitHubClient,
   input: {
@@ -562,8 +560,7 @@ function createOrgInvitation(
   })
 }
 
-// Cancel an outstanding org invitation. Owner-only. Idempotent enough for our
-// use — a 404 (already gone) is treated as success so resend can proceed.
+// Owner-only. A 404 (already gone) is treated as success so resend can proceed.
 export async function cancelOrgInvitation(
   client: GitHubClient,
   input: { org: string; invitationId: number },
@@ -582,10 +579,8 @@ export async function cancelOrgInvitation(
   }
 }
 
-// Remove a user's org membership OR cancel their pending invitation.
-// DELETE /orgs/{org}/memberships/{username} handles both cases (active member
-// -> removed; pending invitee -> invitation cancelled). Owner-only. Idempotent:
-// a 404 (not affiliated) is treated as success.
+// DELETE /orgs/{org}/memberships/{username}: removes an active member or
+// cancels a pending invite. Owner-only. 404 (not affiliated) treated as success.
 export async function removeOrgMembership(
   client: GitHubClient,
   input: { org: string; username: string },
@@ -607,8 +602,6 @@ export async function removeOrgMembership(
 export type OrgMembershipState = "active" | "pending"
 
 // GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
-// Mirrors the CLI's MembershipState: the precheck that lets us avoid inviting
-// someone who is already active or pending.
 export async function getOrgMembershipState(
   client: GitHubClient,
   org: string,
@@ -625,15 +618,13 @@ export async function getOrgMembershipState(
 }
 
 type EnsureOrgMembershipResult = {
-  // "active"/"pending" = already a member or already invited (no new invite
-  // sent); "invited" = a fresh invitation was created.
+  // "active"/"pending" = no new invite sent; "invited" = a fresh one created.
   state: OrgMembershipState | "invited"
 }
 
-// Mirrors the CLI's inviteIfNotMember: precheck membership state, only invite
-// when the user is neither active nor pending, and disambiguate a 422 with a
-// follow-up membership read (treating already-active/already-pending as
-// success — the precheck/POST TOCTOU race). Any other 422/error propagates.
+// Precheck membership, only invite when neither active nor pending, and treat a
+// 422 (already member/invited) as success via a follow-up read. Mirrors the
+// CLI's inviteIfNotMember. Any other 422/error propagates.
 export async function ensureOrgMembership(
   client: GitHubClient,
   input: { org: string; username: string; inviteeId: number },
@@ -659,10 +650,8 @@ export async function ensureOrgMembership(
   }
 }
 
-// Resend an org invitation: cancel the existing one (when present), then
-// re-create via the shared ensureOrgMembership path. `invitationId` is the id
-// from the failed-invitations list for an expired invite; omit it for a
-// never-invited ("none") student, where this is just a fresh invite.
+// Resend: cancel the existing invitation (when invitationId is given, e.g. an
+// expired invite) then re-create. Omit invitationId for a never-invited student.
 export async function resendOrgInvitation(
   client: GitHubClient,
   input: {

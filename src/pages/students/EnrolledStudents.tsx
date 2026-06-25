@@ -46,11 +46,9 @@ const UnenrollStudentButton = ({
   const [open, setOpen] = useState(false)
   const [removeFromOrg, setRemoveFromOrg] = useState(false)
 
-  // Only an active member offers the "also remove from org" choice. A pending
-  // invite is always cancelled by the mutation (they were never a member), and
-  // a non-member has nothing org-side to do — so no checkbox in those cases.
-  // The signed-in account (e.g. an owner who added themselves as a test
-  // student) can't be removed from their own org here, so no checkbox either.
+  // Only an active member offers the org-removal choice. Pending invites are
+  // always cancelled, non-members have nothing to remove, and the signed-in
+  // account can't remove itself here.
   const isMember = status === "member"
   const canRemoveFromOrg = isMember && !isSelf
   const dialogRef = useRef<HTMLDialogElement | null>(null)
@@ -82,9 +80,8 @@ const UnenrollStudentButton = ({
         student,
         removeFromOrg: canRemoveFromOrg ? removeFromOrg : false,
       })
-      // Hand the warning to the list keyed by username (this button unmounts
-      // on roster refetch); keying stops a concurrent clean unenroll from
-      // clobbering an unread warning.
+      // Key the warning by username: this button unmounts on roster refetch,
+      // and keying stops a concurrent clean unenroll from clobbering it.
       onRemoveStudent(student.username, result.teamWarning)
       setOpen(false)
       setRemoveFromOrg(false)
@@ -227,9 +224,8 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
   return null
 }
 
-// A copy-pasteable link teachers can share so students land on GitHub's org
-// invitation page and accept. It's the same org-wide accept URL for everyone —
-// no per-student token — so it's safe to share with the whole class.
+// A copy-paste link teachers share so students accept on GitHub. Same org-wide
+// URL for everyone (no per-student token).
 const InviteLink = ({ org }: { org: string }) => {
   const inviteUrl = `https://github.com/orgs/${org}/invitation`
   const [copied, setCopied] = useState(false)
@@ -319,8 +315,7 @@ const EnrolledStudents = ({
   } = useGetOrgInvitations(org)
 
   const statusLoading = members === undefined || invitesLoading
-  // Owner-only endpoints 403 for non-owners: we can't determine invite status,
-  // so hide all badges/affordances and explain why instead of an empty grid.
+  // Owner-only endpoints 403 for non-owners; hide status and explain instead.
   const statusAvailable = !invitesForbidden
 
   const getStatus = useMemo(
@@ -342,9 +337,8 @@ const EnrolledStudents = ({
     return map
   }, [students, getStatus, statusLoading, statusAvailable])
 
-  // Everyone who is not already an org member — pending, expired, or never
-  // invited. "Resend invites" targets this set: cancel any existing invitation
-  // (pending/expired) and create a fresh one for each.
+  // Every non-member (pending, expired, or never invited): the "Resend invites"
+  // target.
   const nonMemberStudents = useMemo(
     () =>
       students.filter((student) => {
@@ -367,9 +361,8 @@ const EnrolledStudents = ({
   const invalidateInviteQueries = () =>
     invalidateInviteQueriesForOrg(queryClient, org)
 
-  // Resend (or first-time invite) for one student. Returns true on success.
-  // `none` students have no invitation id, so this is a plain create; `expired`
-  // students carry an id we cancel before re-creating.
+  // Resend (or first-time invite for "none"). Returns true on success. "expired"
+  // carries an invitation id we cancel first; "none" is a plain create.
   const resendForStudent = async (student: Student): Promise<boolean> => {
     const inviteeId = Number(student.github_id)
     if (!Number.isFinite(inviteeId) || inviteeId <= 0) {
@@ -414,9 +407,8 @@ const EnrolledStudents = ({
     }
   }
 
-  // Sequential (not concurrent) to respect GitHub's 50/24h invite cap and
-  // secondary rate limiting. Cancels any existing invitation then re-creates,
-  // for every non-member student. Aggregates a single summary warning.
+  // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
+  // Aggregates a single summary warning.
   const handleResendAll = async () => {
     let succeeded = 0
     const failures: string[] = []
@@ -574,8 +566,7 @@ const EnrolledStudents = ({
                         `${classroom}/students.csv`,
                       ),
                     })
-                    // Unenroll may have cancelled a pending invite or removed an
-                    // org member — refresh the lists that drive invite status.
+                    // Unenroll may cancel a pending invite or remove a member.
                     invalidateInviteQueries()
                   }}
                 />

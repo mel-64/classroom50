@@ -3,9 +3,8 @@ import type { Student } from "@/types/classroom"
 export const capitalize = (s: string) =>
   s ? s.charAt(0).toUpperCase() + s.slice(1) : ""
 
-// Whether a GitHub account (viewer) is the same person as a roster student.
-// Matches on the immutable numeric id first, falling back to a
-// case-insensitive login compare (the CSV may predate id capture).
+// Whether a GitHub account is the same person as a roster student: numeric id
+// first, then case-insensitive login (the CSV may predate id capture).
 export const isSameGitHubUser = (
   account: { id: number; login: string } | null | undefined,
   student: { github_id?: string; username: string },

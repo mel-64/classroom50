@@ -240,14 +240,13 @@ export async function enrollStudentInClassroom(
   teamSlugPromise.catch(() => {})
   const result = await addStudentToClassroomWithConflictRetry(client, input)
 
-  // The roster commit already landed, so any membership/team-side failure is a
-  // non-fatal warning, not a failed enroll. CLI order: row -> membership -> team.
+  // CLI order: roster row -> membership -> team. Membership/team failures are
+  // non-fatal warnings since the commit already landed.
   const warnings: string[] = []
 
-  // Ensure org membership using the numeric GitHub id resolved during the
-  // roster write (github_id is the immutable numeric id). The precheck means we
-  // only invite when the student isn't already active/pending; a benign
-  // already-member/already-pending 422 is swallowed by ensureOrgMembership.
+  // Ensure org membership via the numeric github_id resolved during the roster
+  // write. ensureOrgMembership prechecks and swallows the benign already-member/
+  // already-pending 422.
   const inviteeId = Number(result.student.github_id)
   if (Number.isFinite(inviteeId) && inviteeId > 0) {
     try {
@@ -638,10 +637,9 @@ export type UnenrollStudentInput = {
   org: string
   classroom: string
   student: Student
-  // Teacher's choice for an ACTIVE org member: whether to also remove them from
-  // the GitHub org. Ignored for pending invitees (those are always cancelled,
-  // since they were never members) and for non-members. Defaults to false so a
-  // student switching classes keeps their org seat.
+  // Teacher's choice for an ACTIVE member: also remove them from the org.
+  // Ignored for pending invitees (always cancelled) and non-members. Defaults
+  // off so a student switching classes keeps their org seat.
   removeFromOrg?: boolean
 }
 export async function unenrollStudent(
@@ -660,12 +658,9 @@ export async function unenrollStudent(
   const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
   teamSlugPromise.catch(() => {})
 
-  // Read org state before the commit so we can decide what to do with the
-  // membership/invitation afterward. A read failure leaves state null (we then
-  // skip the org-side action rather than guess). Also resolve the viewer so we
-  // never remove the teacher operating the roster from their own org (e.g. an
-  // owner who added themselves as a test student) — GitHub would otherwise
-  // remove a non-sole owner, or 403 on the last owner.
+  // Read org state and viewer before the commit. State is null on read failure
+  // (we then skip the org action). The viewer guards against removing the
+  // signed-in teacher from their own org.
   const orgStatePromise = getOrgMembershipState(client, org, normalizedUsername)
   orgStatePromise.catch(() => {})
   const viewerPromise = getAuthenticatedUser(client)
@@ -728,12 +723,11 @@ export async function unenrollStudent(
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
 
-  // The commit landed, so every org-side step below is a non-fatal warning, not
-  // a thrown error. Collect them so the UI can surface all in one alert.
+  // Commit landed, so every org-side step below is a non-fatal warning.
   const warnings: string[] = []
 
-  // Drop the student from the classroom team. Idempotent (404 = not a member /
-  // team gone); org membership untouched by this call.
+  // Drop from the classroom team. Idempotent (404 = not a member / team gone);
+  // org membership untouched by this call.
   try {
     const teamSlug = await teamSlugPromise
     await removeUserFromTeam(client, {
@@ -751,16 +745,12 @@ export async function unenrollStudent(
     )
   }
 
-  // Org membership / invitation handling:
-  //  - pending invite: always cancel — they were never a member.
-  //  - active member: only remove if the teacher opted in (removeFromOrg).
-  //  - neither: nothing to do.
-  // DELETE /orgs/{org}/memberships/{username} handles both cancel and remove.
+  // pending invite -> always cancel; active member -> remove only if opted in;
+  // neither -> nothing. DELETE /orgs/{org}/memberships/{username} does both.
   const orgState = await orgStatePromise
 
-  // Never remove the authenticated teacher from their own org (e.g. an owner who
-  // added themselves as a test student) — GitHub would otherwise remove a
-  // non-sole owner, or 403 on the last owner.
+  // Never remove the signed-in teacher from their own org (GitHub would remove a
+  // non-sole owner, or 403 on the last owner).
   const viewer = await viewerPromise.catch(() => null)
   const isSelf = isSameGitHubUser(viewer, toRemoveStudent)
 

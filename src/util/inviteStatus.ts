@@ -7,15 +7,14 @@ export type StudentInviteStatus = {
   status: InviteStatus
   // The invitation id for an "expired" student, used to cancel before resend.
   invitationId?: number
-  // The matched invitation's created_at (pending or failed), for "invited <when>".
+  // The matched invitation's created_at, for "Invited <when>".
   invitedAt?: string
 }
 
 const lower = (value: string | null | undefined) => (value ?? "").toLowerCase()
 
-// Builds lookups once for a roster, then classifies each student. Members are
-// matched on numeric id (authoritative) with a lowercased-login fallback;
-// invitations carry no invitee id, so they are matched on login / email.
+// Builds lookups once, then classifies each student. Members match on numeric
+// id (login fallback); invitations match on login / email (no invitee id).
 export function buildInviteStatusLookup(
   members: GitHubUser[],
   pendingInvitations: GitHubOrgInvitation[],

@@ -54,8 +54,7 @@ export const formatDueDateTime = (dateString: string): string => {
   return dueDateTimeFormatter.format(date)
 }
 
-// Relative "x ago" for an invitation timestamp (RFC 3339). Returns null for a
-// missing/invalid value so callers can omit the line rather than show junk.
+// Relative "x ago" for an invitation timestamp. Returns null on missing/invalid.
 export const formatInvitedAt = (dateString?: string | null): string | null => {
   if (!dateString) return null
   const date = new Date(dateString)

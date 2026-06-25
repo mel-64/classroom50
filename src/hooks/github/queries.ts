@@ -88,10 +88,9 @@ export const githubKeys = {
     [...githubKeys.all, "serviceToken", owner] as const,
 }
 
-// Refresh the lists that drive roster invite status after a change that may
-// have created, cancelled, or accepted an org invitation (enroll, resend,
-// unenroll). A resend moves an invite between the pending and failed lists, and
-// accepting moves a user into members, so all three are invalidated.
+// Refresh the lists that drive roster invite status after enroll/resend/
+// unenroll: a resend moves an invite between pending and failed, and accepting
+// moves a user into members.
 export function invalidateInviteQueries(
   queryClient: QueryClient,
   org: string,
@@ -504,9 +503,8 @@ export async function getOrgMembers(
   )
 }
 
-// Pending org invitations (people invited but not yet accepted). Owner-only
-// (403 for non-owners). Expired invites drop off this list — they surface via
-// getOrgFailedInvitations instead.
+// Owner-only (403 for non-owners). Expired invites drop off this list and
+// surface via getOrgFailedInvitations.
 export async function getOrgInvitations(
   client: GitHubClient,
   org: string,
@@ -517,8 +515,7 @@ export async function getOrgInvitations(
   )
 }
 
-// Failed / expired org invitations. Owner-only (403 for non-owners). Each entry
-// carries failed_at / failed_reason.
+// Failed / expired org invitations (carry failed_at / failed_reason). Owner-only.
 export async function getOrgFailedInvitations(
   client: GitHubClient,
   org: string,
