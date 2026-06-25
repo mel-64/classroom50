@@ -18,11 +18,17 @@ import {
   type EditClassroomResult,
 } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import RequireTeacher from "@/components/RequireTeacher"
 
-const EditClassroomPage = () => {
+const EditClassroomContent = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
-  const { org, classroom } = useParams({ strict: false })
   const { data: cl, isLoading: loadingClassroom } = useGetClassroom(
     org,
     classroom,
@@ -77,9 +83,58 @@ const EditClassroomPage = () => {
     )
   }
 
-  if (!org || !classroom) {
-    return <MissingParams message="Missing organization or classroom." />
-  }
+  return (
+    <>
+      <div className="flex justify-between">
+        <div>
+          <h1 className="text-xl pt-8 pb-2 font-bold">Classroom Settings</h1>
+          <p className="pb-10 text-sm text-base-content/60">
+            Configuration for the{" "}
+            <span className="font-semibold">
+              {cl.name || cl.short_name || classroom}
+            </span>{" "}
+            classroom.
+          </p>
+        </div>
+      </div>
+      {classroomEdited ? (
+        <div className="alert alert-success mb-4">
+          <div>
+            Your classroom has been edited successfully. Click{" "}
+            <Link
+              className="underline"
+              to="/$org/$classroom"
+              params={{ org, classroom }}
+            >
+              here
+            </Link>{" "}
+            to view your new classroom.
+          </div>
+        </div>
+      ) : (
+        <></>
+      )}
+      <div className="flex flex-col">
+        <div className="mb-8">
+          <EditClassroomForm
+            cl={cl}
+            onSubmit={(values) => {
+              editClassroomMutation.mutateAsync({
+                name: values.name,
+                slug: classroom,
+                org,
+                term: values.term,
+              })
+            }}
+          />
+        </div>
+      </div>
+    </>
+  )
+}
+
+const EditClassroomPage = () => {
+  const { org, classroom } = useParams({ strict: false })
 
   return (
     <div className="min-h-screen">
@@ -87,52 +142,13 @@ const EditClassroomPage = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Settings" />
-          <div className="flex justify-between">
-            <div>
-              <h1 className="text-xl pt-8 pb-2 font-bold">
-                Classroom Settings
-              </h1>
-              <p className="pb-10 text-sm text-base-content/60">
-                Configuration for the{" "}
-                <span className="font-semibold">
-                  {cl.name || cl.short_name || classroom}
-                </span>{" "}
-                classroom.
-              </p>
-            </div>
-          </div>
-          {classroomEdited ? (
-            <div className="alert alert-success mb-4">
-              <div>
-                Your classroom has been edited successfully. Click{" "}
-                <Link
-                  className="underline"
-                  to="/$org/$classroom"
-                  params={{ org, classroom }}
-                >
-                  here
-                </Link>{" "}
-                to view your new classroom.
-              </div>
-            </div>
-          ) : (
-            <></>
-          )}
-          <div className="flex flex-col">
-            <div className="mb-8">
-              <EditClassroomForm
-                cl={cl}
-                onSubmit={(values) => {
-                  editClassroomMutation.mutateAsync({
-                    name: values.name,
-                    slug: classroom,
-                    org,
-                    term: values.term,
-                  })
-                }}
-              />
-            </div>
-          </div>
+          <RequireTeacher>
+            {!org || !classroom ? (
+              <MissingParams message="Missing organization or classroom." />
+            ) : (
+              <EditClassroomContent org={org} classroom={classroom} />
+            )}
+          </RequireTeacher>
         </DrawerContent>
         <DrawerSidebar selected="settings" />
       </Drawer>

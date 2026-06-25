@@ -11,6 +11,7 @@ import Drawer, {
 } from "@/components/drawer"
 import Breadcrumb from "@/components/breadcrumb"
 import MissingParams from "@/components/MissingParams"
+import RequireTeacher from "@/components/RequireTeacher"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
@@ -70,44 +71,48 @@ const CreateClassroomPage = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="New Classroom" />
-          <div className="flex justify-between">
-            <div>
-              <h1 className="text-xl pt-8 pb-10 font-bold">Create Classroom</h1>
-            </div>
-          </div>
-          {classroomCreated ? (
-            <div className="alert alert-success mb-4">
+          <RequireTeacher>
+            <div className="flex justify-between">
               <div>
-                Your classroom has been created. Click{" "}
-                <Link
-                  className="underline"
-                  to="/$org/$classroom"
-                  params={{ org, classroom: classroomSlug }}
-                >
-                  here
-                </Link>{" "}
-                to view your new classroom; please note it may take a minute or
-                two for the new class to show up.
+                <h1 className="text-xl pt-8 pb-10 font-bold">
+                  Create Classroom
+                </h1>
               </div>
             </div>
-          ) : (
-            <></>
-          )}
-          <div className="flex flex-col">
-            <div className="mb-8">
-              <CreateClassroomForm
-                onSubmit={(values) => {
-                  setClassroomSlug(values.slug)
-                  createClassroomMutation.mutateAsync({
-                    name: values.name,
-                    classroom: values.slug,
-                    org,
-                    term: values.term,
-                  })
-                }}
-              />
+            {classroomCreated ? (
+              <div className="alert alert-success mb-4">
+                <div>
+                  Your classroom has been created. Click{" "}
+                  <Link
+                    className="underline"
+                    to="/$org/$classroom"
+                    params={{ org, classroom: classroomSlug }}
+                  >
+                    here
+                  </Link>{" "}
+                  to view your new classroom; please note it may take a minute
+                  or two for the new class to show up.
+                </div>
+              </div>
+            ) : (
+              <></>
+            )}
+            <div className="flex flex-col">
+              <div className="mb-8">
+                <CreateClassroomForm
+                  onSubmit={(values) => {
+                    setClassroomSlug(values.slug)
+                    createClassroomMutation.mutateAsync({
+                      name: values.name,
+                      classroom: values.slug,
+                      org,
+                      term: values.term,
+                    })
+                  }}
+                />
+              </div>
             </div>
-          </div>
+          </RequireTeacher>
         </DrawerContent>
         <DrawerSidebar selected="classes" page="classes" />
       </Drawer>

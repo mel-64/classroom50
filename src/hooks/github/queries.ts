@@ -85,6 +85,9 @@ export const githubKeys = {
 
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
+
+  submissionResult: (owner: string, repo: string) =>
+    [...githubKeys.all, "submission-result", owner, repo] as const,
 }
 
 // Refresh the lists that drive roster invite status after enroll/resend/
@@ -390,6 +393,56 @@ export function jsonFileQuery<T>(
   })
 }
 
+const ARTIFACTS_BRANCH = "artifacts"
+const RESULT_PATH = "result.json"
+
+// Reads the student's latest graded result from the committed `result.json` on
+// the repo's orphan `artifacts` branch (written by the autograde runner). We
+// use the Contents API — not the release asset — because release-asset
+// downloads 302-redirect to a storage host with no CORS headers and are
+// unreadable from the browser. Returns null when the file/branch doesn't exist
+// yet (no graded submission). The result.json contract is shared with
+// classroom50-cli.
+export function submissionResultQuery<T>(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.submissionResult(owner, repo),
+    queryFn: async ({ signal }): Promise<T | null> => {
+      let raw: string
+      try {
+        raw = await client.requestRaw(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo,
+          )}/contents/${RESULT_PATH}?ref=${encodeURIComponent(
+            ARTIFACTS_BRANCH,
+          )}`,
+          { method: "GET", signal },
+        )
+      } catch (error) {
+        // No artifacts branch / file yet -> no graded submission.
+        if (error instanceof GitHubAPIError && error.status === 404) {
+          return null
+        }
+        throw error
+      }
+
+      try {
+        return JSON.parse(raw) as T
+      } catch {
+        throw new Error(
+          "Your submission result couldn't be read (it may still be uploading). Try again in a moment.",
+        )
+      }
+    },
+    enabled: Boolean(owner && repo),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
 export function csvFileQuery<T>(
   client: GitHubClient,
   owner: string,
@@ -611,6 +664,37 @@ export function pagesAssignmentUrl(org: string, classroom: string) {
   return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
 }
 
+// Public, unauthenticated signal that an org is a real Classroom50 org: the
+// classroom50 Pages site publishes this index, so a student who can't read the
+// private config repo can still distinguish a genuine Classroom50 org.
+export function classroomsIndexUrl(org: string) {
+  return `https://${org}.github.io/classroom50/classrooms-index.json`
+}
+
+export async function orgPublishesClassroom50Pages(
+  org: string,
+): Promise<"yes" | "no" | "indeterminate"> {
+  try {
+    const res = await fetch(classroomsIndexUrl(org), {
+      cache: "no-store",
+      // Bound the probe so a hung github.io host can't stall the orgs load.
+      signal: AbortSignal.timeout(5000),
+    })
+    // A clean 404 is a definitive "not a Classroom50 org". Other non-ok
+    // statuses (5xx, 429) are transient -> indeterminate, don't penalize.
+    if (res.status === 404) return "no"
+    if (!res.ok) return "indeterminate"
+    // Confirm it's actually the index shape, not a stray 200 (e.g. a custom
+    // 404 page served with 200).
+    const data = (await res.json()) as { classrooms?: unknown }
+    return Array.isArray(data?.classrooms) ? "yes" : "no"
+  } catch {
+    // Network failure, timeout, DNS, CORS -> transient; never collapse to a
+    // definitive "no" (that would hide a genuinely-enrolled student's org).
+    return "indeterminate"
+  }
+}
+
 export type AssignmentsJson =
   | Assignment[]
   | {
@@ -683,7 +767,12 @@ export type Classroom50OrgSummary = {
   }
 }
 
-type Classroom50Status = "ready" | "needs_setup" | "no_access" | "unknown"
+type Classroom50Status =
+  | "ready"
+  | "needs_setup"
+  | "no_access"
+  | "not_classroom50"
+  | "unknown"
 export async function getClassroom50OrgSummary(
   client: GitHubClient,
   membership: GitHubOrgMembership,
@@ -704,10 +793,18 @@ export async function getClassroom50OrgSummary(
     if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
 
-      status =
-        membership.state === "active" && membership.role === "admin"
-          ? "needs_setup"
-          : "no_access"
+      if (membership.state === "active" && membership.role === "admin") {
+        // An admin who can't see classroom50 hasn't initialized it yet.
+        status = "needs_setup"
+      } else {
+        // A non-admin gets a 404 both when the org isn't a Classroom50 org and
+        // when it is but the config repo is private to them. Disambiguate via
+        // the public Pages index. On an indeterminate probe (transient network
+        // failure) keep the org visible (no_access) rather than hiding a
+        // genuinely-enrolled student's org behind a CDN blip.
+        const pagesVerdict = await orgPublishesClassroom50Pages(org.login)
+        status = pagesVerdict === "no" ? "not_classroom50" : "no_access"
+      }
     } else {
       status = "unknown"
     }

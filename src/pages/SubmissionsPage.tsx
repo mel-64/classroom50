@@ -11,7 +11,7 @@ import {
   LinkIcon,
   RefreshCw,
 } from "lucide-react"
-import { useParams } from "@tanstack/react-router"
+import { useParams, Navigate } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
 import MissingParams from "@/components/MissingParams"
@@ -26,6 +26,8 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
+import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
 import { formatDueDateTime } from "@/util/formatDate"
 import { formatDistanceToNow } from "date-fns"
@@ -40,7 +42,7 @@ const usePeriodicRerender = (intervalMs = 30_000) => {
   }, [intervalMs])
 }
 
-const SubmissionsPage = () => {
+const SubmissionsPageContent = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const {
     data: scoresData,
@@ -409,6 +411,31 @@ const SubmissionsPage = () => {
       </Drawer>
     </div>
   )
+}
+
+// The teacher gradebook. Students who land here directly (e.g. an old link)
+// are redirected to their own submission view; we wait for the role to resolve
+// so a real teacher never bounces. Gating here (before mounting the content)
+// also avoids firing the teacher-only score/roster reads for a student.
+const SubmissionsPage = () => {
+  const { org, classroom, assignment } = useParams({ strict: false })
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
+
+  if (!roleResolved) {
+    return <RoleResolvingFallback className="min-h-screen" />
+  }
+
+  if (!showTeacherUi && org && classroom && assignment) {
+    return (
+      <Navigate
+        to="/$org/$classroom/assignments/$assignment/submission"
+        params={{ org, classroom, assignment }}
+        replace
+      />
+    )
+  }
+
+  return <SubmissionsPageContent />
 }
 
 export default SubmissionsPage

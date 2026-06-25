@@ -19,7 +19,20 @@ export type CourseManifest = {
 
 export function useCourseTeacherAccess(org: string | undefined) {
   const teacherRepo = "classroom50"
-  const repoQuery = useGitHubRepo(org, teacherRepo)
+  // Bounded retry on transient errors only: a 404 (student) / 403 (blocked) is
+  // a definitive verdict and must not be retried, but a 5xx/429/network blip
+  // should self-heal instead of stranding the role unresolved.
+  const repoQuery = useGitHubRepo(org, teacherRepo, {
+    retry: (failureCount, error) => {
+      if (
+        error instanceof GitHubAPIError &&
+        (error.status === 404 || error.status === 403)
+      ) {
+        return false
+      }
+      return failureCount < 2
+    },
+  })
 
   const isTeacher =
     repoQuery.isSuccess &&
@@ -36,16 +49,17 @@ export function useCourseTeacherAccess(org: string | undefined) {
   const isBlocked =
     repoQuery.error instanceof GitHubAPIError && repoQuery.error.status === 403
 
-  // Resolved once the query returns a verdict; an absent org has no role to
-  // resolve, so treat it as resolved (non-teacher) instead of a forever-pending
-  // skeleton on org-less routes.
-  const roleResolved = !org || repoQuery.isSuccess || repoQuery.isError
+  // Resolved only on a DEFINITIVE verdict: success (teacher), 404 (student), or
+  // 403 (blocked). A transient 5xx/429/network error must NOT resolve the role
+  // — otherwise a student during a blip would be treated as a non-student and
+  // promoted into teacher UI. An org-less route has no role to resolve.
+  const roleResolved = !org || repoQuery.isSuccess || isStudent || isBlocked
 
-  // Show teacher UI only for a real org that isn't a definitive non-teacher
-  // (student 404 / blocked 403); stays visible on transient errors so real
-  // teachers don't flicker out.
-  const showTeacherUi =
-    Boolean(org) && roleResolved && !(isStudent || isBlocked)
+  // Teacher UI requires a positive success verdict — fail-closed for students.
+  // No longer derived from "resolved && not-student", so a transient error
+  // leaves showTeacherUi false (consumers keep their pending state) rather than
+  // optimistically granting teacher access.
+  const showTeacherUi = Boolean(org) && isTeacher
 
   return {
     ...repoQuery,
@@ -57,10 +71,3 @@ export function useCourseTeacherAccess(org: string | undefined) {
     showTeacherUi,
   }
 }
-
-// export function useCourseManifest(org: string) {
-//   return useGitHubJsonFile<CourseManifest>(
-//     org,
-//
-//   )
-// }

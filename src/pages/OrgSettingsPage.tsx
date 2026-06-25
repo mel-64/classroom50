@@ -10,6 +10,7 @@ import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
 import { githubKeys } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
+import RequireTeacher from "@/components/RequireTeacher"
 import {
   CalendarClock,
   CheckCircle2,
@@ -331,14 +332,16 @@ const OrgSettingsPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-            <p className="mt-1 text-sm text-base-content/60">
-              Organization-level configuration for{" "}
-              <span className="font-mono font-semibold">{org}</span>.
-            </p>
-          </div>
-          <OrgSettingsPane />
+          <RequireTeacher>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+              <p className="mt-1 text-sm text-base-content/60">
+                Organization-level configuration for{" "}
+                <span className="font-mono font-semibold">{org}</span>.
+              </p>
+            </div>
+            <OrgSettingsPane />
+          </RequireTeacher>
         </DrawerContent>
         <DrawerSidebar page="classes" settings selected="settings" />
       </Drawer>

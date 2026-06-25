@@ -21,9 +21,18 @@ export function useGitHubOrgMembership(org: string) {
   return useQuery(orgMembershipQuery(client, org))
 }
 
-export function useGitHubRepo(owner: string | undefined, repo: string) {
+export function useGitHubRepo(
+  owner: string | undefined,
+  repo: string,
+  options?: {
+    retry?: import("@tanstack/react-query").UseQueryOptions["retry"]
+  },
+) {
   const client = useGitHubClient()
-  return useQuery(repoQuery(client, owner ?? "", repo))
+  return useQuery({
+    ...repoQuery(client, owner ?? "", repo),
+    ...(options?.retry !== undefined ? { retry: options.retry } : {}),
+  })
 }
 
 export function useGitHubRawFile(
