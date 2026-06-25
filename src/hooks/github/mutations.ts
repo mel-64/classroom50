@@ -926,6 +926,7 @@ export async function fetchSkeletonSourceFile(
     if (isNotFound(err)) {
       throw new Error(
         `Skeleton source file not found: ${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}:${path}`,
+        { cause: err },
       )
     }
 
@@ -1068,6 +1069,7 @@ async function enableWorkflowPages(
       `Could not enable GitHub Pages for ${owner}/${repo}: ${getErrorMessage(
         err,
       )}`,
+      { cause: err },
     )
   }
 }
@@ -1195,6 +1197,7 @@ export async function ensureWorkflowPermissions(
         `Could not set workflow permissions for ${owner}/${repo}: ${getErrorMessage(
           err,
         )}`,
+        { cause: err },
       )
     }
 

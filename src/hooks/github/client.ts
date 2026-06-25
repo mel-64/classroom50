@@ -55,7 +55,7 @@ export function createGitHubClient(args: {
     console.warn("rate limit headers", rateLimit)
 
     if (!res.ok) {
-      let body: unknown = null
+      let body: unknown
       const text = await res.text()
 
       try {

@@ -36,16 +36,10 @@ jobs:
 
       - run: npm ci
 
-      # Surface type errors without blocking deploys (matches deploy.yml; the
-      # codebase has pre-existing type errors still being burned down).
-      - name: Typecheck (non-blocking)
-        run: npx tsc -b --force
-        continue-on-error: true
-
-      # vite build directly (instead of "npm run build") skips the tsc
-      # typecheck. Served from the root of staging.classroom50.org, so the
-      # default base of "/" is correct (no --base needed).
-      - run: npx vite build
+      # `npm run build` runs `tsc -b && vite build`; the type-check is now
+      # blocking (the strict-mode errors were fixed). Served from the root of
+      # staging.classroom50.org, so the default base of "/" is correct.
+      - run: npm run build
         env:
           # Staging-specific OAuth client ID. This is a public identifier (not
           # a secret), set as a repo *variable* so the staging app points at
