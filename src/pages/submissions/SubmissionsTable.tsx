@@ -288,6 +288,7 @@ const SubmissionHistory = ({
 const SubmissionsTable = ({
   scores,
   students,
+  nonSubmitters = [],
   isGroup = false,
   org,
   classroom,
@@ -297,6 +298,7 @@ const SubmissionsTable = ({
 }: {
   scores: SubmissionRow[]
   students: Student[]
+  nonSubmitters?: Student[]
   isGroup?: boolean
   org: string
   classroom: string
@@ -325,7 +327,7 @@ const SubmissionsTable = ({
             </tr>
           </thead>
           <tbody>
-            {!scores?.length && (
+            {!scores?.length && !nonSubmitters.length && (
               <tr>
                 <td colSpan={5} className="text-center">
                   No scores submitted!
@@ -479,6 +481,25 @@ const SubmissionsTable = ({
                   )
                 },
               )}
+            {nonSubmitters.map((student) => (
+              <tr key={`missing-${student.username}`} className="opacity-60">
+                <td>
+                  <Avatar
+                    name={getName(student.username, students)}
+                    initials={getInitials(student.username, students)}
+                    github={student.username}
+                  />
+                </td>
+                <td>
+                  <span className="badge badge-ghost whitespace-nowrap">
+                    Not submitted
+                  </span>
+                </td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

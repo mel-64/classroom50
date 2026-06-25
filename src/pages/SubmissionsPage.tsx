@@ -73,6 +73,20 @@ const SubmissionsPage = () => {
   const isGroupAssignment = assignmentInfo?.mode === "group"
   const scoresInfo = scoresData?.submissions?.[assignment] || []
 
+  // Roster students with no submission. A student is "credited" if their login
+  // appears in any row's `usernames` (which is `member_usernames` for groups,
+  // else `[owner]`), so group teammates aren't falsely flagged. Group
+  // assignments don't surface an "X of Y" roster denominator, so we only
+  // compute non-submitters for individual assignments.
+  const creditedUsernames = new Set(
+    scoresInfo.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
+  )
+  const nonSubmitters = isGroupAssignment
+    ? []
+    : students.filter(
+        (student) => !creditedUsernames.has(student.username.toLowerCase()),
+      )
+
   const collectScores = useTriggerScoreCollection(org)
   const { data: lastRun, refetch: refetchLastRun } =
     useGetLastCollectScoresRun(org)
@@ -94,7 +108,7 @@ const SubmissionsPage = () => {
   }, [collectScores.phase, refetchScores, refetchLastRun])
 
   const downloadScoresCsv = () => {
-    const rows = scoresInfo
+    const submittedRows = scoresInfo
       .toSorted(
         (a, b) =>
           new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
@@ -109,6 +123,21 @@ const SubmissionsPage = () => {
         review: rest.review,
         release: rest.release,
       }))
+
+    // Append non-submitters so the exported gradebook covers the whole roster.
+    // Scored 0 with blank submission fields; pinned after submitters.
+    const nonSubmittedRows = nonSubmitters.map((student) => ({
+      usernames: student.username,
+      score: 0,
+      max_score: "",
+      submissions: 0,
+      submitted_at: "",
+      commit: "",
+      review: "",
+      release: "",
+    }))
+
+    const rows = [...submittedRows, ...nonSubmittedRows]
 
     const csv = Papa.unparse(rows, {
       header: true,
@@ -162,7 +191,7 @@ const SubmissionsPage = () => {
                 type="button"
                 className="btn btn-outline"
                 onClick={downloadScoresCsv}
-                disabled={!scoresInfo.length}
+                disabled={!scoresInfo.length && !nonSubmitters.length}
               >
                 <HardDriveDownload /> Download Scores (CSV)
               </button>
@@ -332,6 +361,7 @@ const SubmissionsPage = () => {
           <SubmissionsTable
             scores={scoresInfo}
             students={students}
+            nonSubmitters={nonSubmitters}
             isGroup={isGroupAssignment}
             org={org}
             classroom={classroom}
