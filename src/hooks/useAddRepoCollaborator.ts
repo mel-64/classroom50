@@ -1,5 +1,6 @@
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { githubKeys } from "./github/queries"
 import { addRepoCollaborator } from "./github/mutations"
 
 export function useAddRepoCollaborator() {
@@ -19,7 +20,7 @@ export function useAddRepoCollaborator() {
       }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["github", "collaborators", variables.org, variables.repo],
+        queryKey: githubKeys.collaborators(variables.org, variables.repo),
       })
     },
   })

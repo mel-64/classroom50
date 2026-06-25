@@ -1,5 +1,6 @@
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { githubKeys } from "./github/queries"
 import { removeRepoCollaborator } from "./github/mutations"
 
 export function useRemoveRepoCollaborator() {
@@ -14,7 +15,7 @@ export function useRemoveRepoCollaborator() {
       }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["github", "collaborators", variables.org, variables.repo],
+        queryKey: githubKeys.collaborators(variables.org, variables.repo),
       })
     },
   })

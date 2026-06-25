@@ -7,9 +7,28 @@ import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
 import useAddRepoCollaborator from "@/hooks/useAddRepoCollaborator"
 import useRemoveRepoCollaborator from "@/hooks/useRemoveRepoCollaborator"
 import { getName } from "@/util/students"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import type { Student } from "@/types/classroom"
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
+
+// Turn a rejected add/remove into a human-readable reason. GitHub's status
+// codes mean very different things here, so collapsing everything into "bad
+// username" misleads users (e.g. a 429 rate limit or a 403 permission error).
+const describeFailure = (reason: unknown): string | null => {
+  if (reason instanceof GitHubAPIError) {
+    if (reason.isRateLimited)
+      return "GitHub rate limit hit — wait a moment and try again."
+    if (reason.status === 403)
+      return "You don't have permission to change collaborators on this repository."
+    if (reason.status === 404)
+      return "Username not found, or not a member of the GitHub organization."
+    if (reason.status === 422)
+      return "Already a collaborator, or the request was rejected by GitHub."
+    return reason.message
+  }
+  return reason instanceof Error ? reason.message : null
+}
 
 type GroupCollaboratorsModalProps = {
   open: boolean
@@ -101,12 +120,22 @@ export function GroupCollaboratorsModal({
     [collaborators, ownerLoginResolved],
   )
 
-  // Sync the editable draft to the live collaborators whenever they (re)load or
-  // the modal reopens. While the modal is closed we leave the draft alone.
+  // Seed the editable draft from the live collaborators once per open, and again
+  // when the underlying repo changes (the shared modal in the teacher table
+  // switches between groups without closing). A background refetch — e.g.
+  // refetchOnWindowFocus — must NOT reseed, or it would clobber unsaved edits;
+  // so we key the seed on `open` + `repoName`, not on the collaborators identity.
+  const seededKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      seededKeyRef.current = null
+      return
+    }
+    if (loadingCollaborators) return
+    if (seededKeyRef.current === repoName) return
+    seededKeyRef.current = repoName
     setDraftCollaborators(initialCollaborators)
-  }, [open, initialCollaborators])
+  }, [open, repoName, loadingCollaborators, initialCollaborators])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -183,6 +212,19 @@ export function GroupCollaboratorsModal({
     const toAdd = [...nextSet].filter((username) => !previous.has(username))
     const toRemove = [...previous].filter((username) => !nextSet.has(username))
 
+    // Removes run before adds so a member swap at max group size frees a slot
+    // before the replacement is added.
+    const removeResults = await Promise.allSettled(
+      toRemove.map(async (username) => {
+        await removeCollaboratorMutation.mutateAsync({
+          org,
+          repo: repoName,
+          username,
+        })
+        return username
+      }),
+    )
+
     const addResults = await Promise.allSettled(
       toAdd.map(async (username) => {
         await addCollaboratorMutation.mutateAsync({
@@ -190,17 +232,6 @@ export function GroupCollaboratorsModal({
           repo: repoName,
           username,
           permission: "push",
-        })
-        return username
-      }),
-    )
-
-    const removeResults = await Promise.allSettled(
-      toRemove.map(async (username) => {
-        await removeCollaboratorMutation.mutateAsync({
-          org,
-          repo: repoName,
-          username,
         })
         return username
       }),
@@ -221,17 +252,27 @@ export function GroupCollaboratorsModal({
     if (failedAdds.length || failedRemoves.length) {
       setInvalidCollaborators(new Set(failedAdds.map(normalizeUsername)))
 
+      const firstReason =
+        [...addResults, ...removeResults].find(
+          (r) => r.status === "rejected",
+        ) ?? null
+      const detail =
+        firstReason && firstReason.status === "rejected"
+          ? describeFailure(firstReason.reason)
+          : null
+      const suffix = detail ? ` ${detail}` : ""
+
       if (failedAdds.length && failedRemoves.length) {
         setSubmitError(
-          "Some collaborators could not be added or removed. Check the highlighted usernames and try again.",
+          `Some collaborators could not be added or removed. Check the highlighted usernames and try again.${suffix}`,
         )
       } else if (failedAdds.length) {
         setSubmitError(
-          "Some collaborators could not be added. Check the highlighted usernames and try again.",
+          `Some collaborators could not be added. Check the highlighted usernames and try again.${suffix}`,
         )
       } else {
         setSubmitError(
-          "Some collaborators could not be removed. Refresh and try again.",
+          `Some collaborators could not be removed. Refresh and try again.${suffix}`,
         )
       }
 

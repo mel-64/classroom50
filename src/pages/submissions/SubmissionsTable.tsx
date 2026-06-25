@@ -468,6 +468,7 @@ const SubmissionsTable = ({
 
       {isGroup && (
         <GroupCollaboratorsModal
+          key={manageOwner ?? "none"}
           open={manageOwner !== null}
           onClose={() => setManageOwner(null)}
           org={org}

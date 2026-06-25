@@ -13,7 +13,11 @@ import type {
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
-import { COLLECT_SCORES_WORKFLOW, createTeam, getErrorMessage } from "./mutations"
+import {
+  COLLECT_SCORES_WORKFLOW,
+  createTeam,
+  getErrorMessage,
+} from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
@@ -31,6 +35,9 @@ export const githubKeys = {
 
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
+
+  collaborators: (org: string, repo: string) =>
+    [...githubKeys.all, "collaborators", org, repo] as const,
 
   openPulls: (owner: string, repo: string) =>
     [...githubKeys.all, "open-pulls", owner, repo] as const,
@@ -56,7 +63,12 @@ export const githubKeys = {
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
 
   collectScoresRun: (owner: string, sinceRunId: number | null) =>
-    [...githubKeys.all, "collect-scores-run", owner, sinceRunId ?? "none"] as const,
+    [
+      ...githubKeys.all,
+      "collect-scores-run",
+      owner,
+      sinceRunId ?? "none",
+    ] as const,
 
   lastCollectScoresRun: (owner: string) =>
     [...githubKeys.all, "last-collect-scores-run", owner] as const,
@@ -829,7 +841,12 @@ export async function getRepoPermissionForUser(params: {
 async function listLatestCollectScoresRun(
   client: GitHubClient,
   org: string,
-  filters: { event?: string; since?: string; status?: string; perPage?: number },
+  filters: {
+    event?: string
+    since?: string
+    status?: string
+    perPage?: number
+  },
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun[]> {
   const params = new URLSearchParams({
@@ -867,7 +884,8 @@ export async function getCollectScoresRunAfterId(
 
   // runs come newest-first; the run we triggered is the oldest one newer than
   // the pre-dispatch baseline.
-  const newer = sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
+  const newer =
+    sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
   return newer.length > 0 ? newer[newer.length - 1] : null
 }
 
