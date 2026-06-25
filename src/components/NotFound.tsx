@@ -9,11 +9,9 @@ import { FileQuestion } from "lucide-react"
 const NotFound = ({
   title = "Page not found",
   message = "This page doesn't exist, or you don't have access to it.",
-  homeHref = "/",
 }: {
   title?: string
   message?: string
-  homeHref?: string
 }) => {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-10 text-center">
@@ -24,7 +22,7 @@ const NotFound = ({
         <h1 className="text-2xl font-bold">{title}</h1>
         <p className="mt-1 max-w-md text-base-content/60">{message}</p>
       </div>
-      <Link to={homeHref} className="btn btn-primary btn-sm">
+      <Link to="/" className="btn btn-primary btn-sm">
         Go to dashboard
       </Link>
     </div>

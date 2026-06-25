@@ -142,6 +142,31 @@ const Tip = ({ label, children }: { label: string; children: ReactNode }) => {
   )
 }
 
+// The repeated inner markup of a sidebar nav row: the styled <li> with its
+// active border, the leading icon, and the label (hidden when collapsed).
+// Callers keep their own typed <Link to params> wrapping this (so router type
+// inference stays intact) and the <Tip> for the collapsed tooltip.
+const SidebarItemBody = ({
+  label,
+  icon,
+  active,
+}: {
+  label: string
+  icon: ReactNode
+  active: boolean
+}) => {
+  const { collapsed } = useSidebarCollapse()
+  return (
+    <li
+      aria-current={active ? "page" : undefined}
+      className={navItemClass(active, collapsed)}
+    >
+      <span className="shrink-0">{icon}</span>
+      {!collapsed && <span className="truncate">{label}</span>}
+    </li>
+  )
+}
+
 export const ClassroomLogo = () => {
   const { collapsed, toggle } = useSidebarCollapse()
 
@@ -263,10 +288,14 @@ const AssignmentSidebarMenu = ({
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
   const matchRoute = useMatchRoute()
 
-  // Resolve the display name from whichever source the role can read.
+  // Resolve the display name from whichever source the role can read. The
+  // teacher config-repo source is gated on role so a student doesn't fire a
+  // guaranteed 404; the public Pages source covers the student (and is a
+  // teacher fallback before Pages publishes).
   const { data: teacherAssignments } = useGetClassroomAssignments(
     org,
     classroom,
+    { enabled: showTeacherUi },
   )
   const { assignment: publicAssignment } = useGetPublicAssignment(
     org,
@@ -283,34 +312,17 @@ const AssignmentSidebarMenu = ({
   // settings entry rather than route them to a dead-end.
   const isGroupAssignment = publicAssignment?.mode === "group"
 
-  const onSubmissions = Boolean(
-    matchRoute({
-      to: "/$org/$classroom/assignments/$assignment/submissions",
-      fuzzy: false,
-    }) ||
-    matchRoute({
-      to: "/$org/$classroom/assignments/$assignment",
-      fuzzy: false,
-    }),
+  const onRoute = (to: Parameters<typeof matchRoute>[0]["to"]) =>
+    Boolean(matchRoute({ to, fuzzy: false }))
+
+  const onSubmissions =
+    onRoute("/$org/$classroom/assignments/$assignment/submissions") ||
+    onRoute("/$org/$classroom/assignments/$assignment")
+  const onSubmission = onRoute(
+    "/$org/$classroom/assignments/$assignment/submission",
   )
-  const onSubmission = Boolean(
-    matchRoute({
-      to: "/$org/$classroom/assignments/$assignment/submission",
-      fuzzy: false,
-    }),
-  )
-  const onSettings = Boolean(
-    matchRoute({
-      to: "/$org/$classroom/assignments/$assignment/edit",
-      fuzzy: false,
-    }),
-  )
-  const onAccept = Boolean(
-    matchRoute({
-      to: "/$org/$classroom/assignments/$assignment/accept",
-      fuzzy: false,
-    }),
-  )
+  const onSettings = onRoute("/$org/$classroom/assignments/$assignment/edit")
+  const onAccept = onRoute("/$org/$classroom/assignments/$assignment/accept")
 
   // Students only: surface "Accept assignment" until they have their repo.
   // Resolved best-effort; while loading we don't show it (avoids a flash that
@@ -368,15 +380,11 @@ const AssignmentSidebarMenu = ({
                   to="/$org/$classroom/assignments/$assignment/submissions"
                   params={{ org, classroom, assignment }}
                 >
-                  <li
-                    aria-current={onSubmissions ? "page" : undefined}
-                    className={navItemClass(onSubmissions, collapsed)}
-                  >
-                    <UsersRound className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate">Submissions</span>
-                    )}
-                  </li>
+                  <SidebarItemBody
+                    label="Submissions"
+                    icon={<UsersRound />}
+                    active={onSubmissions}
+                  />
                 </Link>
               </Tip>
               <Tip label="Assignment Settings">
@@ -384,15 +392,11 @@ const AssignmentSidebarMenu = ({
                   to="/$org/$classroom/assignments/$assignment/edit"
                   params={{ org, classroom, assignment }}
                 >
-                  <li
-                    aria-current={onSettings ? "page" : undefined}
-                    className={navItemClass(onSettings, collapsed)}
-                  >
-                    <Settings className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate">Assignment Settings</span>
-                    )}
-                  </li>
+                  <SidebarItemBody
+                    label="Assignment Settings"
+                    icon={<Settings />}
+                    active={onSettings}
+                  />
                 </Link>
               </Tip>
             </>
@@ -404,15 +408,11 @@ const AssignmentSidebarMenu = ({
                     to="/$org/$classroom/assignments/$assignment/accept"
                     params={{ org, classroom, assignment }}
                   >
-                    <li
-                      aria-current={onAccept ? "page" : undefined}
-                      className={navItemClass(onAccept, collapsed)}
-                    >
-                      <FilePlus2 className="shrink-0" />
-                      {!collapsed && (
-                        <span className="truncate">Accept Assignment</span>
-                      )}
-                    </li>
+                    <SidebarItemBody
+                      label="Accept Assignment"
+                      icon={<FilePlus2 />}
+                      active={onAccept}
+                    />
                   </Link>
                 </Tip>
               )}
@@ -421,15 +421,11 @@ const AssignmentSidebarMenu = ({
                   to="/$org/$classroom/assignments/$assignment/submission"
                   params={{ org, classroom, assignment }}
                 >
-                  <li
-                    aria-current={onSubmission ? "page" : undefined}
-                    className={navItemClass(onSubmission, collapsed)}
-                  >
-                    <FileCheck2 className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate">My Submission</span>
-                    )}
-                  </li>
+                  <SidebarItemBody
+                    label="My Submission"
+                    icon={<FileCheck2 />}
+                    active={onSubmission}
+                  />
                 </Link>
               </Tip>
               {isGroupAssignment && (
@@ -438,15 +434,11 @@ const AssignmentSidebarMenu = ({
                     to="/$org/$classroom/assignments/$assignment/edit"
                     params={{ org, classroom, assignment }}
                   >
-                    <li
-                      aria-current={onSettings ? "page" : undefined}
-                      className={navItemClass(onSettings, collapsed)}
-                    >
-                      <UsersRound className="shrink-0" />
-                      {!collapsed && (
-                        <span className="truncate">Manage Group</span>
-                      )}
-                    </li>
+                    <SidebarItemBody
+                      label="Manage Group"
+                      icon={<UsersRound />}
+                      active={onSettings}
+                    />
                   </Link>
                 </Tip>
               )}
@@ -469,20 +461,17 @@ export const TeacherSidebarMenu = ({
 }) => {
   // Placeholder while pending so items never flash in then out.
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
-  const { collapsed } = useSidebarCollapse()
 
   return (
     <div className="py-4">
       <ul className="flex flex-col gap-1">
         <Tip label="Assignments">
           <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
-            <li
-              aria-current={selected === "assignments" ? "page" : undefined}
-              className={navItemClass(selected === "assignments", collapsed)}
-            >
-              <BookText className="shrink-0" />
-              {!collapsed && <span className="truncate">Assignments</span>}
-            </li>
+            <SidebarItemBody
+              label="Assignments"
+              icon={<BookText />}
+              active={selected === "assignments"}
+            />
           </Link>
         </Tip>
         {!roleResolved ? (
@@ -501,24 +490,20 @@ export const TeacherSidebarMenu = ({
                   to="/$org/$classroom/students"
                   params={{ org, classroom }}
                 >
-                  <li
-                    aria-current={selected === "students" ? "page" : undefined}
-                    className={navItemClass(selected === "students", collapsed)}
-                  >
-                    <UsersRound className="shrink-0" />
-                    {!collapsed && <span className="truncate">Students</span>}
-                  </li>
+                  <SidebarItemBody
+                    label="Students"
+                    icon={<UsersRound />}
+                    active={selected === "students"}
+                  />
                 </Link>
               </Tip>
               <Tip label="Settings">
                 <Link to="/$org/$classroom/edit" params={{ org, classroom }}>
-                  <li
-                    aria-current={selected === "settings" ? "page" : undefined}
-                    className={navItemClass(selected === "settings", collapsed)}
-                  >
-                    <Settings className="shrink-0" />
-                    {!collapsed && <span className="truncate">Settings</span>}
-                  </li>
+                  <SidebarItemBody
+                    label="Settings"
+                    icon={<Settings />}
+                    active={selected === "settings"}
+                  />
                 </Link>
               </Tip>
             </>
@@ -704,7 +689,6 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
 export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
-  const { collapsed } = useSidebarCollapse()
   const onSettings = settings || selected === "settings"
   if (!org) return null
 
@@ -720,26 +704,22 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
         ) : (
           <Tip label={classesLabel}>
             <Link to="/$org" params={{ org }}>
-              <li
-                aria-current={!onSettings ? "page" : undefined}
-                className={navItemClass(!onSettings, collapsed)}
-              >
-                <BookText className="shrink-0" />
-                {!collapsed && <span className="truncate">{classesLabel}</span>}
-              </li>
+              <SidebarItemBody
+                label={classesLabel}
+                icon={<BookText />}
+                active={!onSettings}
+              />
             </Link>
           </Tip>
         )}
         {showTeacherUi && (
           <Tip label="Settings">
             <Link to="/$org/settings" params={{ org }}>
-              <li
-                aria-current={onSettings ? "page" : undefined}
-                className={navItemClass(onSettings, collapsed)}
-              >
-                <Settings className="shrink-0" />
-                {!collapsed && <span className="truncate">Settings</span>}
-              </li>
+              <SidebarItemBody
+                label="Settings"
+                icon={<Settings />}
+                active={onSettings}
+              />
             </Link>
           </Tip>
         )}
@@ -749,19 +729,16 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
 }
 
 export const MyOrgs = ({ settings = false }) => {
-  const { collapsed } = useSidebarCollapse()
   return (
     <div className="py-4">
       <ul className="flex flex-col gap-1">
         <Tip label="Organizations">
           <Link to="/">
-            <li
-              aria-current={!settings ? "page" : undefined}
-              className={navItemClass(!settings, collapsed)}
-            >
-              <BookText className="shrink-0" />
-              {!collapsed && <span className="truncate">Organizations</span>}
-            </li>
+            <SidebarItemBody
+              label="Organizations"
+              icon={<BookText />}
+              active={!settings}
+            />
           </Link>
         </Tip>
       </ul>
