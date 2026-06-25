@@ -5,6 +5,8 @@ const IdentitySchema = z.object({
   username: z.string().min(1),
   // Immutable numeric GitHub user id; nullable when unresolved.
   id: z.number().nullable().optional(),
+  // UTC instant of the accept commit (the owner is the acceptor).
+  accepted_at: z.string().optional(),
 })
 
 const Classroom50YamlSchema = z.object({
@@ -14,11 +16,11 @@ const Classroom50YamlSchema = z.object({
   classroom: z.string().min(1),
   assignment: z.string().min(1),
   owner: IdentitySchema.optional(),
-  accepted_by: IdentitySchema.optional(),
-  accepted_at: z.string().optional(),
   source: z
     .object({
       owner: z.string().min(1),
+      // Template owner's immutable id (org or user); nullable when unresolved.
+      owner_id: z.number().nullable().optional(),
       repo: z.string().optional(),
       branch: z.string().optional(),
     })

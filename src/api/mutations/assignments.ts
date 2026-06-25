@@ -2,6 +2,7 @@ import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
+import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
@@ -984,14 +985,14 @@ function createClassroom50Yaml(params: {
   assignment: string
   // Repo owner identity. `id` is GitHub's immutable numeric user id, recorded
   // so the repo<->student binding survives a username rename (classroom50-cli#185).
+  // `accepted_at` is the UTC instant of the accept commit (the owner is the acceptor).
   ownerUsername: string
   ownerId?: number | null
-  // Who performed the accept (equals owner for individual assignments).
-  acceptedByUsername?: string
-  acceptedById?: number | null
   acceptedAt?: string
   // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
+  // owner_id is the template owner's immutable id (org or user).
   sourceOwner?: string
+  sourceOwnerId?: number | null
   sourceRepo?: string
   sourceBranch?: string
 }) {
@@ -1000,13 +1001,16 @@ function createClassroom50Yaml(params: {
     assignment,
     ownerUsername,
     ownerId,
-    acceptedByUsername,
-    acceptedById,
     acceptedAt,
     sourceOwner,
+    sourceOwnerId,
     sourceRepo,
     sourceBranch,
   } = params
+
+  // id is a number (or null) — never quote it as a string.
+  const idValue = (id: number | null | undefined) =>
+    typeof id === "number" ? String(id) : "null"
 
   const lines = [
     `schema: "classroom50/repo-config/v1"`,
@@ -1014,26 +1018,18 @@ function createClassroom50Yaml(params: {
     `assignment: ${JSON.stringify(assignment)}`,
     `owner:`,
     `  username: ${JSON.stringify(ownerUsername)}`,
-    // id is a number (or null) — never quote it.
-    `  id: ${typeof ownerId === "number" ? ownerId : "null"}`,
+    `  id: ${idValue(ownerId)}`,
   ]
 
-  if (acceptedByUsername) {
-    lines.push(
-      `accepted_by:`,
-      `  username: ${JSON.stringify(acceptedByUsername)}`,
-      `  id: ${typeof acceptedById === "number" ? acceptedById : "null"}`,
-    )
-  }
-
   if (acceptedAt) {
-    lines.push(`accepted_at: ${JSON.stringify(acceptedAt)}`)
+    lines.push(`  accepted_at: ${JSON.stringify(acceptedAt)}`)
   }
 
   if (sourceOwner && sourceRepo) {
     lines.push(
       `source:`,
       `  owner: ${JSON.stringify(sourceOwner)}`,
+      `  owner_id: ${idValue(sourceOwnerId)}`,
       `  repo: ${JSON.stringify(sourceRepo)}`,
       `  branch: ${JSON.stringify(sourceBranch ?? "main")}`,
     )
@@ -1380,6 +1376,17 @@ export async function acceptAssignment(params: {
   const sourceRepo = assignment.template?.repo
   const sourceBranch = assignment.template?.branch ?? "main"
 
+  // Best-effort: resolve the template owner's immutable id (org or user). Never
+  // fail accept over this — a missing id is recorded as null.
+  let sourceOwnerId: number | null = null
+  if (sourceOwner) {
+    try {
+      sourceOwnerId = (await getUser(client, sourceOwner)).id
+    } catch {
+      sourceOwnerId = null
+    }
+  }
+
   const autogradeYaml = await withAcceptStep(
     {
       id: "autograder",
@@ -1400,13 +1407,12 @@ export async function acceptAssignment(params: {
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
-    // The accepting user owns the repo they create, so owner == accepted_by.
+    // The accepting user owns the repo they create.
     ownerUsername: username,
     ownerId: user.id,
-    acceptedByUsername: username,
-    acceptedById: user.id,
     acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     sourceOwner,
+    sourceOwnerId,
     sourceRepo,
     sourceBranch,
   })
