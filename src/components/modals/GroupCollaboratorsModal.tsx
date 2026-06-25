@@ -374,8 +374,21 @@ export function GroupCollaboratorsModal({
               {ownerDisplayLogin && (
                 <div className="flex items-center gap-2 rounded-2xl border border-base-200 bg-base-50 p-2 pl-4">
                   <GitHub className="size-6 shrink-0" />
-                  <span className="flex-1 truncate text-sm">
-                    {getName(ownerDisplayLogin, students) || ownerDisplayLogin}
+                  <span className="min-w-0 flex-1 leading-tight">
+                    {getName(ownerDisplayLogin, students) ? (
+                      <>
+                        <span className="block truncate text-sm font-medium">
+                          {getName(ownerDisplayLogin, students)}
+                        </span>
+                        <span className="block truncate font-mono text-xs text-base-content/60">
+                          @{ownerDisplayLogin}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="block truncate font-mono text-sm">
+                        @{ownerDisplayLogin}
+                      </span>
+                    )}
                   </span>
                   <span className="badge badge-primary badge-soft">Owner</span>
                 </div>
@@ -409,8 +422,21 @@ export function GroupCollaboratorsModal({
                             ].join(" ")}
                           />
 
-                          <span className="min-w-0 flex-1 truncate text-sm">
-                            {name ? `${name} (${username})` : username}
+                          <span className="min-w-0 flex-1 leading-tight">
+                            {name ? (
+                              <>
+                                <span className="block truncate text-sm font-medium">
+                                  {name}
+                                </span>
+                                <span className="block truncate font-mono text-xs text-base-content/60">
+                                  @{username}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block truncate font-mono text-sm">
+                                @{username}
+                              </span>
+                            )}
                           </span>
 
                           {canManage && (
@@ -459,7 +485,7 @@ export function GroupCollaboratorsModal({
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <input
                       className="input input-bordered flex-1"
-                      placeholder="GitHub username"
+                      placeholder="GitHub username (e.g. octocat)"
                       value={newCollaborator}
                       onChange={(e) => setNewCollaborator(e.target.value)}
                       onKeyDown={(e) => {
