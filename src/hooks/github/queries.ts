@@ -515,6 +515,56 @@ export async function getClassroom50Yaml(
   return decodeBase64Utf8(file.content)
 }
 
+// Read a file from an arbitrary repo's default branch. Used by onboarding
+// reconciliation to read the self-report YAML out of each onboarding repo.
+export async function getRepoFile(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<string> {
+  const file = await client.request<{
+    type: "file"
+    encoding: "base64"
+    content: string
+  }>(`/repos/${org}/${repo}/contents/${path}`)
+
+  if (file.type !== "file") {
+    throw new Error(`${path} is not a file in ${repo}`)
+  }
+
+  return decodeBase64Utf8(file.content)
+}
+
+// The GitHub user ids that authored/committed the most recent change to `path`
+// in a repo. Used by onboarding reconciliation to verify the self-report was
+// actually written by the account it claims to be (the onboarding repo name is
+// a guessable function of the email, so a member could pre-create it with a
+// forged payload; the commit author/committer is GitHub-attested and cannot be
+// spoofed by a non-admin). Returns the numeric ids present on the latest commit
+// touching the path.
+export async function getFileCommitAuthorIds(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<number[]> {
+  const commits = await client.request<
+    {
+      author: { id: number } | null
+      committer: { id: number } | null
+    }[]
+  >(`/repos/${org}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=1`)
+
+  const latest = commits[0]
+  if (!latest) return []
+
+  const ids: number[] = []
+  if (latest.author?.id != null) ids.push(latest.author.id)
+  if (latest.committer?.id != null) ids.push(latest.committer.id)
+  return ids
+}
+
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   return client.request<GitHubUser[]>(
     `/orgs/${org}/members?per_page=100&page=${page}`,
@@ -843,6 +893,26 @@ export async function getRepo(
       return null
     }
     throw err
+  }
+}
+
+// Whether `username` is a member of the org team `teamSlug`. GET .../memberships
+// 404s when they're not a member (or the team/slug is unknown) -> false. Any
+// other error also degrades to false so a transient read can't misroute the
+// onboarding repo-naming decision toward the team path.
+export async function isTeamMember(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+  username: string,
+): Promise<boolean> {
+  try {
+    const membership = await client.request<{ state?: string }>(
+      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+    )
+    return membership.state === "active"
+  } catch {
+    return false
   }
 }
 

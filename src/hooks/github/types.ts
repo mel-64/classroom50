@@ -70,6 +70,7 @@ export type GitHubRepo = {
   is_template?: boolean
   default_branch: string
   visibility?: "public" | "private" | "internal"
+  archived?: boolean
   description?: string | null
   owner?: {
     login: string

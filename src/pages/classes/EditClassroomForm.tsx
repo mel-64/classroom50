@@ -10,11 +10,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Trash2 } from "lucide-react"
 import { useState } from "react"
-import type { Classroom } from "@/types/classroom"
+import {
+  DEFAULT_ONBOARDING_CLEANUP,
+  type Classroom,
+  type OnboardingCleanupMode,
+} from "@/types/classroom"
 
 export type EditClassroomFormValues = {
   name: string
   term: string
+  onboarding_cleanup: OnboardingCleanupMode
 }
 
 type EditClassroomFormProps = {
@@ -90,6 +95,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
     defaultValues: {
       name: cl?.name || cl?.short_name || "",
       term: cl?.term || "",
+      onboarding_cleanup: cl?.onboarding_cleanup ?? DEFAULT_ONBOARDING_CLEANUP,
     } satisfies EditClassroomFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -110,6 +116,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
       await onSubmit({
         name: value.name.trim(),
         term: value.term.trim(),
+        onboarding_cleanup: value.onboarding_cleanup,
       })
       setSubmitted(true)
     },
@@ -205,6 +212,39 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                   {field.state.meta.errors[0]}
                 </p>
               )}
+            </>
+          )}
+        </form.Field>
+
+        <form.Field name="onboarding_cleanup">
+          {(field) => (
+            <>
+              <label htmlFor={field.name} className="label font-bold">
+                Onboarding repo cleanup
+              </label>
+              <p className="text-sm text-base-content/60 mb-2">
+                What to do with a student&apos;s onboarding repository once
+                their GitHub identity is reconciled into the roster.
+              </p>
+
+              <select
+                id={field.name}
+                name={field.name}
+                className="select w-full mb-4"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(e) =>
+                  field.handleChange(e.target.value as OnboardingCleanupMode)
+                }
+              >
+                <option value="delete">
+                  Delete (default; removes the repo after reconcile)
+                </option>
+                <option value="archive">
+                  Archive (reversible; hides the repo)
+                </option>
+                <option value="keep">Keep (leave the repo untouched)</option>
+              </select>
             </>
           )}
         </form.Field>

@@ -13,6 +13,8 @@ import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
+import type { OnboardingCleanupMode } from "@/types/classroom"
+import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
@@ -43,8 +45,12 @@ const createClassroomMetadata = (
   ...(secret ? { secret } : {}),
 })
 
-const STUDENTS_CSV_HEADER =
-  "username,first_name,last_name,email,section,github_id\n"
+// Seed header for a new classroom's empty students.csv. Derived from the
+// single source of truth (STUDENT_CSV_FIELDS in src/api/mutations/students.ts)
+// so it can't drift; computed lazily (not at module-eval time) to avoid the
+// students.ts <-> mutations.ts circular-import TDZ. The parser is header-based,
+// so an older 6-column roster still parses and the extra columns default to "".
+const studentsCsvHeader = () => STUDENT_CSV_FIELDS.join(",") + "\n"
 const createClassroomBody = (
   base_tree: string,
   org: string,
@@ -70,7 +76,7 @@ const createClassroomBody = (
         path: `${classroom}/students.csv`,
         mode,
         type,
-        content: STUDENTS_CSV_HEADER,
+        content: studentsCsvHeader(),
       },
       {
         path: `${classroom}/scores.json`,
@@ -561,21 +567,31 @@ export async function removeUserFromTeam(
   }
 }
 
-// POST /orgs/{org}/invitations. Mirrors the CLI: body is invitee_id + role only
-// (no team_ids/email). invitee_id must be a number (a string 422s). Owner-only.
-function createOrgInvitation(
+// POST /orgs/{org}/invitations. Mirrors the CLI for the id path: body is
+// invitee_id + role (no team_ids). invitee_id must be a number (a string 422s).
+// Also supports inviting by email (GitHub matches it to a verified account at
+// accept time) for the email-first enrolment flow. Exactly one of invitee_id /
+// email must be provided. Owner-only.
+export function createOrgInvitation(
   client: GitHubClient,
   input: {
     org: string
-    invitee_id: number
+    invitee_id?: number
+    email?: string
     role?: "direct_member" | "admin"
   },
 ) {
-  const { org, invitee_id, role = "direct_member" } = input
+  const { org, invitee_id, email, role = "direct_member" } = input
+
+  if (invitee_id === undefined && !email) {
+    throw new Error("createOrgInvitation requires invitee_id or email")
+  }
+
+  const body = email !== undefined ? { email, role } : { invitee_id, role }
 
   return client.request(`/orgs/${org}/invitations`, {
     method: "POST",
-    body: { invitee_id, role },
+    body,
   })
 }
 
@@ -619,6 +635,51 @@ export async function removeOrgMembership(
 }
 
 export type OrgMembershipState = "active" | "pending"
+
+// PATCH /repos/{owner}/{repo} { archived: true }. Reversible and covered by the
+// existing `repo` scope (unlike deletion, which needs delete_repo and a re-auth).
+// Used to retire an onboarding repo once its identity is reconciled into the
+// roster. 404 treated as success (already gone).
+export async function archiveRepo(
+  client: GitHubClient,
+  input: { owner: string; repo: string },
+): Promise<void> {
+  const { owner, repo } = input
+
+  try {
+    await client.request(`/repos/${owner}/${repo}`, {
+      method: "PATCH",
+      body: { archived: true },
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+// DELETE /repos/{owner}/{repo}. Needs the delete_repo OAuth scope (now in
+// DEFAULT_GITHUB_SCOPE). A token granted before delete_repo was requested (an
+// older session) still 403s, so callers that want "delete if possible, else
+// archive" should catch the 403. 404 treated as success (already gone).
+export async function deleteRepo(
+  client: GitHubClient,
+  input: { owner: string; repo: string },
+): Promise<void> {
+  const { owner, repo } = input
+
+  try {
+    await client.request(`/repos/${owner}/${repo}`, {
+      method: "DELETE",
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
 
 // GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
 export async function getOrgMembershipState(
@@ -2108,6 +2169,7 @@ export type EditClassroomInput = {
   slug: string
   term: string
   name: string
+  onboarding_cleanup?: OnboardingCleanupMode
 }
 
 export type EditClassroomResult = Awaited<ReturnType<typeof editClassroom>>
@@ -2116,7 +2178,7 @@ export async function editClassroom(
   client: GitHubClient,
   input: EditClassroomInput,
 ) {
-  const { org, slug, term, name } = input
+  const { org, slug, term, name, onboarding_cleanup } = input
 
   const ref = await getBranchRef(client, org)
 
@@ -2138,6 +2200,9 @@ export async function editClassroom(
     ...current,
     name,
     term,
+    // Only write the field when explicitly provided, so an edit that doesn't
+    // touch cleanup leaves any existing value (or its absence) intact.
+    ...(onboarding_cleanup !== undefined ? { onboarding_cleanup } : {}),
   }
 
   const blob = await createBlob(client, {

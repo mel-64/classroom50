@@ -19,7 +19,19 @@ export type Classroom = {
   // classroom (off by default), so omitted on unprotected classrooms. Kept
   // in lockstep with the CLI's classroom-v1 schema (`[a-z0-9]{4,64}`).
   secret?: string
+  // How the teacher's onboarding reconciliation disposes of a student's
+  // onboarding repo once its identity is folded into the roster. GUI-managed
+  // (like `secret`), absent on classrooms created before this feature ->
+  // treated as the default "delete". "delete" removes the repo (needs
+  // delete_repo scope, requested by default; falls back to archive + a warning
+  // for an older session that lacks it), "archive" hides it reversibly, "keep"
+  // leaves it untouched.
+  onboarding_cleanup?: OnboardingCleanupMode
 }
+
+export type OnboardingCleanupMode = "delete" | "archive" | "keep"
+
+export const DEFAULT_ONBOARDING_CLEANUP: OnboardingCleanupMode = "delete"
 
 // Inclusive bounds for a group assignment's max_group_size (owner included).
 // The CLI schema enforces the same range; an out-of-range value makes
@@ -92,6 +104,22 @@ export type AssignmentTest = {
   points: number
 }
 
+// Lifecycle for an email-first enrolment. A row may exist before the GitHub
+// account is known: "invited" (email invite sent, no GitHub identity yet),
+// "onboarded" (student self-reported via the onboarding repo, not yet folded
+// into the roster), "reconciled" (username/github_id bound into this row).
+// Legacy rows (pre-feature) carry "" and are treated as already reconciled when
+// they have a github_id, else as invited.
+export type EnrollmentStatus = "invited" | "onboarded" | "reconciled" | ""
+
+// How the student was added to the roster: "github" (added by GitHub username,
+// already has github_id + team access) or "email" (invited by email, identity
+// resolved later via onboarding). "" on legacy rows. A hint for UI/analytics
+// and preferred onboarding-repo lookup order; the repo name is still resolved
+// by trying all candidates, since the student's create-time team access can
+// diverge from the invite method.
+export type EnrollmentMethod = "github" | "email" | ""
+
 export type Student = {
   username: string
   first_name: string
@@ -99,4 +127,19 @@ export type Student = {
   email: string
   section: string
   github_id: string
+  // Email-first onboarding columns (added after the original 6). Optional in
+  // the type so legacy CSVs and existing callers stay valid; the CSV layer
+  // defaults them to "".
+  enrollment_status?: EnrollmentStatus
+  enrollment_method?: EnrollmentMethod
+  // Cached emailHash(email) — the deterministic onboarding-repo key, so the
+  // teacher reconcile loop fetches the repo directly without re-hashing.
+  email_hash?: string
+  // Per-student secure-link token (optional). Present only when the teacher
+  // sent a unique onboarding link; it names the onboarding repo unguessably
+  // (`classroom50-onboarding-tok-<token>`) so only the link holder can create
+  // it. Absent on the classroom-wide-link / username flows.
+  invite_token?: string
+  invited_at?: string
+  reconciled_at?: string
 }

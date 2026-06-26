@@ -90,4 +90,47 @@ describe("buildInviteStatusLookup", () => {
     )
     expect(lookup(student()).status).toBe("member")
   })
+
+  it("treats a reconciled row as member regardless of org lists", () => {
+    const lookup = buildInviteStatusLookup([], [], [])
+    expect(lookup(student({ enrollment_status: "reconciled" })).status).toBe(
+      "member",
+    )
+  })
+
+  it("classifies an invited-but-unreconciled row as onboarding", () => {
+    const lookup = buildInviteStatusLookup([], [], [])
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+    })
+    expect(lookup(emailRow).status).toBe("onboarding")
+  })
+
+  it("shows a username-invited org member as onboarding until reconciled", () => {
+    // Even though the student is an active org member, an unreconciled row is
+    // still awaiting onboarding under the hybrid model.
+    const lookup = buildInviteStatusLookup([member()], [], [])
+    expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
+      "onboarding",
+    )
+  })
+
+  it("surfaces a still-pending invite on an unreconciled row", () => {
+    const lookup = buildInviteStatusLookup([], [invitation()], [])
+    expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
+      "pending",
+    )
+  })
+
+  it("does not treat a plain unmatched row as onboarding", () => {
+    const lookup = buildInviteStatusLookup([], [], [])
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "",
+    })
+    expect(lookup(emailRow).status).toBe("none")
+  })
 })

@@ -1,7 +1,12 @@
 import type { Student } from "@/types/classroom"
 import type { GitHubOrgInvitation, GitHubUser } from "@/hooks/github/types"
 
-export type InviteStatus = "member" | "pending" | "expired" | "none"
+export type InviteStatus =
+  | "member"
+  | "pending"
+  | "expired"
+  | "onboarding"
+  | "none"
 
 export type StudentInviteStatus = {
   status: InviteStatus
@@ -45,7 +50,46 @@ export function buildInviteStatusLookup(
     const login = lower(student.username)
     const email = lower(student.email)
     const githubId = student.github_id?.trim()
+    const enrollment = student.enrollment_status
 
+    // CSV is the source of truth for completeness: a reconciled row is "member"
+    // (complete) regardless of the live org lists.
+    if (enrollment === "reconciled") {
+      return { status: "member" }
+    }
+
+    // Not yet reconciled but invited/onboarded -> "onboarding" (awaiting the
+    // teacher's reconcile), even if the student is already an org member (the
+    // username invite flow). This is the hybrid: org lists no longer decide the
+    // onboarded/complete state; enrollment_status does.
+    if (enrollment === "invited" || enrollment === "onboarded") {
+      // Surface a still-pending/expired GitHub invite (org-list derived) so the
+      // teacher can resend; otherwise it's simply awaiting onboarding.
+      const pendingInvite =
+        (login ? pendingByLogin.get(login) : undefined) ??
+        (email ? pendingByEmail.get(email) : undefined)
+      if (pendingInvite) {
+        return {
+          status: "pending",
+          invitationId: pendingInvite.id,
+          invitedAt: pendingInvite.created_at,
+        }
+      }
+      const failedInvite =
+        (login ? failedByLogin.get(login) : undefined) ??
+        (email ? failedByEmail.get(email) : undefined)
+      if (failedInvite) {
+        return {
+          status: "expired",
+          invitationId: failedInvite.id,
+          invitedAt: failedInvite.created_at,
+        }
+      }
+      return { status: "onboarding" }
+    }
+
+    // Legacy rows (no enrollment_status): fall back to the org-list
+    // classification so pre-feature classrooms still show sensible status.
     if ((githubId && memberIds.has(githubId)) || memberLogins.has(login)) {
       return { status: "member" }
     }
