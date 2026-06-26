@@ -138,7 +138,7 @@ const UnenrollStudentButton = ({
             ) : null}
             {status === "onboarding" ? (
               <span className="mt-2 block">
-                Their onboarding will be reset (their onboarding repository is
+                Their enrollment will be reset (their onboarding repository is
                 removed), so a fresh invite starts over.
               </span>
             ) : null}
@@ -229,7 +229,7 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
     return <span className="badge badge-error badge-soft">Expired invite</span>
   }
   if (status === "onboarding") {
-    return <span className="badge badge-info badge-soft">Onboarding</span>
+    return <span className="badge badge-info badge-soft">Enrolled</span>
   }
   if (status === "none") {
     return <span className="badge badge-ghost badge-soft">Not in org</span>
@@ -583,7 +583,7 @@ const EnrolledStudents = ({
               <RefreshCw
                 className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
               />
-              Reconcile onboarding ({pendingOnboardingCount})
+              Confirm enrollment ({pendingOnboardingCount})
             </button>
           ) : null}
 
@@ -609,9 +609,7 @@ const EnrolledStudents = ({
 
       {reconcileSummary ? (
         <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
-          <span className="text-sm">
-            Onboarding reconcile: {reconcileSummary}
-          </span>
+          <span className="text-sm">Enrollment: {reconcileSummary}</span>
           <button
             type="button"
             className="btn btn-ghost btn-xs"
