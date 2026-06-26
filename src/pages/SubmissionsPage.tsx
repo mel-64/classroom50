@@ -23,6 +23,7 @@ import Drawer, {
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
@@ -55,12 +56,20 @@ const SubmissionsPageContent = () => {
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
+  // This is a teacher-only page, so reading the classroom's capability-URL
+  // secret from the (teacher-readable) classroom.json is fine. When the
+  // classroom is protected, the shared accept link must carry the key as
+  // `?k=<secret>` — otherwise students hit "assignment not found".
+  const { data: classroomMeta } = useGetClassroom(org, classroom)
+  const secret = classroomMeta?.secret
   const scoresLastUpdated =
     scoresUpdatedAt > 0
       ? formatDistanceToNow(scoresUpdatedAt, { addSuffix: true })
       : "never"
 
-  const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+  const assignmentSubmitUrl =
+    `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept` +
+    (secret ? `?k=${secret}` : "")
   const { copied: copiedSubmitLink, copy: copySubmitLink } = useCopyToClipboard(
     assignmentSubmitUrl,
     1500,
@@ -344,6 +353,9 @@ const SubmissionsPageContent = () => {
                     <p className="text-sm text-base-content/60">
                       Share this link with students so they can accept this
                       assignment.
+                      {secret
+                        ? " This classroom is protected, so the link includes the access key — share the full link as-is."
+                        : ""}
                     </p>
                   </div>
                 </div>
