@@ -1,4 +1,5 @@
 import AddByGithubUsername from "@/pages/students/AddByGithubUsername"
+import AddByEmail from "@/pages/students/AddByEmail"
 import Breadcrumb from "@/components/breadcrumb"
 import Drawer, {
   DrawerContent,
@@ -38,6 +39,7 @@ const StudentListContent = ({
             classroom={classroom}
             className="mb-8"
           />
+          <AddByEmail org={org} classroom={classroom} className="mb-8" />
           <UploadRoster org={org} classroom={classroom} client={client} />
         </div>
         <div className="col-span-7 px-4">
