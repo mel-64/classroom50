@@ -15,8 +15,12 @@ import {
   updateRef,
 } from "@/hooks/github/mutations"
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
-import { getRawFile, getRepoFile, getUser } from "@/hooks/github/queries"
-import { getFileCommitAuthorIds } from "@/hooks/github/queries"
+import {
+  getFileCommitAuthorIds,
+  getRawFile,
+  getRepoFile,
+  getUser,
+} from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -200,21 +204,24 @@ export async function addStudentToClassroom(
 
   const nameParts = splitGitHubDisplayName(githubUser.name)
 
+  const studentEmail = input.email?.trim() ?? githubUser.email ?? ""
+
   const student: StudentCsvRow = normalizeStudentRow({
     username: githubUser.login,
     first_name: input.first_name?.trim() ?? nameParts.first_name,
     last_name: input.last_name?.trim() ?? nameParts.last_name,
-    email: input.email?.trim() ?? githubUser.email ?? "",
+    email: studentEmail,
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
     // Even a username-add still onboards (to supply name/email via the
     // onboarding repo), so it starts "invited" and the onboarding reconcile
     // flips it to "reconciled". The email_hash is cached when we know an email
-    // so the email-keyed onboarding repo (if the student onboards before the
-    // teacher reconciles) is still findable.
+    // so the email-keyed onboarding repo (if the student onboards via the
+    // email-hash name before their classroom-team add propagates — see
+    // submitOnboarding's isTeamMember branch) is still findable at reconcile.
     enrollment_status: "invited",
     enrollment_method: "github",
-    email_hash: "",
+    email_hash: studentEmail ? await emailHash(studentEmail) : "",
   })
 
   const nextStudents = [...currentStudents, student]
@@ -439,15 +446,30 @@ export async function reconcileOnboarding(
     deleted: [],
   }
 
-  // Per-classroom cleanup mode (defaults to delete when unset / unreadable).
+  // Per-classroom cleanup mode. A 404 (no classroom.json — a pre-feature
+  // classroom) is a genuine "unset", so we keep the configured default. Any
+  // OTHER read failure is transient (rate limit, 5xx, network) and must NOT be
+  // misread as "unset": defaulting to delete on a blip would irreversibly
+  // delete onboarding repos on a classroom the teacher explicitly set to
+  // keep/archive. So on a non-404 failure fall back to the SAFE "keep" mode and
+  // surface a warning, mirroring resolveClassroomTeamSlug's "a transient read
+  // failure is NOT 'no team'" handling. Cleanup can be retried once the read
+  // recovers; an unwanted deletion cannot be undone.
   let cleanupMode: OnboardingCleanupMode = DEFAULT_ONBOARDING_CLEANUP
   try {
     const classroomJson = await getClassroomJson(client, { org, classroom })
     if (classroomJson.onboarding_cleanup) {
       cleanupMode = classroomJson.onboarding_cleanup
     }
-  } catch {
-    // Keep the default; a read failure shouldn't block reconciliation.
+  } catch (err) {
+    if (!(err instanceof GitHubAPIError && err.isNotFound)) {
+      cleanupMode = "keep"
+      result.cleanupWarning =
+        "Couldn't read the classroom cleanup setting, so onboarding repos were " +
+        "kept (not deleted or archived) to avoid an unintended deletion. " +
+        "Re-run reconcile once the connection recovers to clean them up."
+    }
+    // A 404 means no classroom.json (pre-feature); keep the configured default.
   }
 
   // Read the roster once (outside the retry) to decide which repos to fetch.
@@ -937,16 +959,23 @@ export async function addStudentsToClassroom(
 
       const nameParts = splitGitHubDisplayName(githubUser.name)
 
+      const studentEmail = githubUser.email ?? ""
+
       const student = normalizeStudentRow({
         username: githubUser.login,
         first_name: nameParts.first_name,
         last_name: nameParts.last_name,
-        email: githubUser.email ?? "",
+        email: studentEmail,
         section: "",
         github_id: String(githubUser.id),
         // Still onboards to supply name/email; reconcile flips to "reconciled".
+        // Cache email_hash when GitHub exposes a public email so the email-hash
+        // onboarding repo stays findable at reconcile if the student onboards
+        // before their classroom-team add propagates (submitOnboarding falls
+        // back to the email-hash name when isTeamMember is still false).
         enrollment_status: "invited",
         enrollment_method: "github",
+        email_hash: studentEmail ? await emailHash(studentEmail) : "",
       })
 
       existingUsernameKeys.add(student.username.toLowerCase())
