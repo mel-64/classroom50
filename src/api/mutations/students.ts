@@ -200,10 +200,13 @@ export async function addStudentToClassroom(
     email: input.email?.trim() ?? githubUser.email ?? "",
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
-    // A username-add already has a resolved GitHub identity, so it bypasses the
-    // email-first onboarding lifecycle entirely.
-    enrollment_status: "reconciled",
-    reconciled_at: new Date().toISOString(),
+    // Even a username-add still onboards (to supply name/email via the
+    // onboarding repo), so it starts "invited" and the onboarding reconcile
+    // flips it to "reconciled". The email_hash is cached when we know an email
+    // so the email-keyed onboarding repo (if the student onboards before the
+    // teacher reconciles) is still findable.
+    enrollment_status: "invited",
+    email_hash: "",
   })
 
   const nextStudents = [...currentStudents, student]
@@ -455,7 +458,14 @@ export async function reconcileOnboarding(
   // (github_id when present, else email_hash).
   const resolved = new Map<
     string,
-    { username: string; github_id: string; repo: string }
+    {
+      username: string
+      github_id: string
+      repo: string
+      email: string
+      first_name: string
+      last_name: string
+    }
   >()
 
   for (const row of targets) {
@@ -516,6 +526,9 @@ export async function reconcileOnboarding(
       username: payload.github_username,
       github_id: String(payload.github_id),
       repo,
+      email: payload.email,
+      first_name: payload.first_name,
+      last_name: payload.last_name,
     })
     result.reconciled.push({
       email: row.email || payload.email,
@@ -553,10 +566,15 @@ export async function reconcileOnboarding(
       if (!match || row.enrollment_status === "reconciled") {
         return row
       }
+      // Fill-missing: keep teacher-entered values, fall back to the student's
+      // self-reported name/email so the roster ends up complete.
       return normalizeStudentRow({
         ...row,
         username: match.username,
         github_id: match.github_id,
+        email: row.email || match.email,
+        first_name: row.first_name || match.first_name,
+        last_name: row.last_name || match.last_name,
         enrollment_status: "reconciled",
         reconciled_at: now,
       })
@@ -878,9 +896,8 @@ export async function addStudentsToClassroom(
         email: githubUser.email ?? "",
         section: "",
         github_id: String(githubUser.id),
-        // Resolved GitHub identity at add time -> bypasses email-first onboarding.
-        enrollment_status: "reconciled",
-        reconciled_at: new Date().toISOString(),
+        // Still onboards to supply name/email; reconcile flips to "reconciled".
+        enrollment_status: "invited",
       })
 
       existingUsernameKeys.add(student.username.toLowerCase())

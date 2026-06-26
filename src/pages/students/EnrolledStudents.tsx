@@ -432,13 +432,15 @@ const EnrolledStudents = ({
     mutationFn: (student: Student) => resendForStudent(student),
   })
 
-  // Rows still awaiting onboarding reconciliation (email invited, GitHub
-  // identity not yet bound). Drives whether to show the Reconcile button.
+  // Rows still awaiting onboarding reconciliation (invited/onboarded, not yet
+  // reconciled). Matches reconcileOnboarding's target filter (a row is
+  // reconcilable when it has a github_id or an email_hash to look up by).
   const pendingOnboardingCount = useMemo(
     () =>
       students.filter(
         (student) =>
-          student.enrollment_status !== "reconciled" && student.email_hash,
+          student.enrollment_status !== "reconciled" &&
+          (student.email_hash || student.github_id),
       ).length,
     [students],
   )

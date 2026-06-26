@@ -131,6 +131,8 @@ const OnboardingPage = () => {
   const search = useSearch({ strict: false }) as { email?: string }
   const prefilledEmail = typeof search.email === "string" ? search.email : ""
   const [email, setEmail] = useState(prefilledEmail)
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
   const client = useGitHubClient()
 
   const { user } = useGithubAuth()
@@ -152,6 +154,8 @@ const OnboardingPage = () => {
   })
 
   const emailValid = isValidEmail(email)
+  const nameValid = firstName.trim().length > 0 && lastName.trim().length > 0
+  const formValid = emailValid && nameValid
 
   const onboardMutation = useMutation({
     mutationFn: () =>
@@ -159,6 +163,8 @@ const OnboardingPage = () => {
         org: org ?? "",
         classroom: classroom ?? "",
         email: email.trim(),
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
       }),
   })
 
@@ -234,6 +240,43 @@ const OnboardingPage = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor="onboard-first-name"
+                className="text-sm font-medium text-base-content"
+              >
+                First name
+              </label>
+              <input
+                id="onboard-first-name"
+                type="text"
+                value={firstName}
+                placeholder="Ada"
+                className="input w-full mt-2"
+                disabled={onboardMutation.isPending}
+                onChange={(e) => setFirstName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="onboard-last-name"
+                className="text-sm font-medium text-base-content"
+              >
+                Last name
+              </label>
+              <input
+                id="onboard-last-name"
+                type="text"
+                value={lastName}
+                placeholder="Lovelace"
+                className="input w-full mt-2"
+                disabled={onboardMutation.isPending}
+                onChange={(e) => setLastName(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div>
             <label
               htmlFor="onboard-email"
@@ -275,7 +318,7 @@ const OnboardingPage = () => {
           <button
             type="button"
             className="btn btn-primary w-full bg-[#4e80ee]"
-            disabled={onboardMutation.isPending || !emailValid}
+            disabled={onboardMutation.isPending || !formValid}
             onClick={() => onboardMutation.mutate()}
           >
             {onboardMutation.isPending ? (

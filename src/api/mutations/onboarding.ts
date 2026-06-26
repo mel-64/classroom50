@@ -36,9 +36,15 @@ export type OnboardingResult = {
 // "already-onboarded" (the teacher reconcile reads whatever payload is present).
 export async function submitOnboarding(
   client: GitHubClient,
-  input: { org: string; classroom: string; email: string },
+  input: {
+    org: string
+    classroom: string
+    email: string
+    first_name: string
+    last_name: string
+  },
 ): Promise<OnboardingResult> {
-  const { org, classroom, email } = input
+  const { org, classroom, email, first_name, last_name } = input
 
   const user = await getAuthenticatedUser(client)
 
@@ -53,6 +59,8 @@ export async function submitOnboarding(
 
   const payload: OnboardingPayload = {
     email: email.trim(),
+    first_name: first_name.trim(),
+    last_name: last_name.trim(),
     github_username: user.login,
     github_id: user.id,
     classroom,

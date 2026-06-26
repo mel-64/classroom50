@@ -57,6 +57,11 @@ export function parseClassroom50Yaml(source: string): Classroom50Yaml {
 // GitHub-attested (from the authenticated session); email is claimed.
 const OnboardingYamlSchema = z.object({
   email: z.string().min(1),
+  // Student-supplied display name. Optional for back-compat with payloads
+  // written before name collection; default to "" so reconcile can fill the
+  // roster when present and leave it untouched when absent.
+  first_name: z.string().optional().default(""),
+  last_name: z.string().optional().default(""),
   github_username: z.string().min(1),
   github_id: z.number(),
   classroom: z.string().min(1),
