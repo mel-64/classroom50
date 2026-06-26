@@ -12,6 +12,7 @@ import {
 } from "@/hooks/github/queries"
 import type { GitHubRepo } from "@/hooks/github/types"
 import { getAuthenticatedUser } from "@/api/queries/users"
+import { acceptPendingOrgInvite } from "@/api/mutations/users"
 import {
   ONBOARDING_YAML_PATH,
   onboardingRepoName,
@@ -36,6 +37,15 @@ export async function submitOnboarding(
   const { org, classroom, email } = input
 
   const user = await getAuthenticatedUser(client)
+
+  // The membership gate accepts both "pending" and "active" invites, so a
+  // student who hasn't accepted yet can reach here — and a pending invitee is
+  // NOT a member, so the repo create below 403s ("need admin access to add a
+  // repository"). Activate the invite with the student's own token first so
+  // they're a real member before creating their onboarding repo. Best-effort:
+  // if they're already active this is a no-op, and any genuine problem surfaces
+  // on the repo create with a clearer message.
+  await acceptPendingOrgInvite(client, org)
 
   const payload: OnboardingPayload = {
     email: email.trim(),
@@ -66,6 +76,18 @@ export async function submitOnboarding(
     if (err instanceof GitHubAPIError && err.status === 422) {
       repo = await client.request<GitHubRepo>(`/repos/${org}/${repoName}`)
       status = "already-onboarded"
+    } else if (err instanceof GitHubAPIError && err.isForbidden) {
+      // Reached here despite the accept attempt above: either the org invite
+      // couldn't be activated, or the org restricts member repo creation (an
+      // owner-only setting). Replace GitHub's opaque "need admin access" text
+      // with something the student/instructor can act on.
+      throw new Error(
+        `Couldn't create your onboarding repository in ${org}. Make sure you have ` +
+          `accepted the ${org} organization invitation (check your email), then ` +
+          `try again. If this keeps happening, your instructor may need to allow ` +
+          `members to create repositories in the organization settings.`,
+        { cause: err },
+      )
     } else {
       throw err
     }
