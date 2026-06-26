@@ -297,89 +297,15 @@ function ClassroomResources({
               <span>
                 This classroom is protected: its resources are served under an
                 unguessable secret path segment. The URL itself is the access
-                token — anyone with a full URL below can read that file.
+                token — anyone with a full URL below can read that file. Share
+                the per-assignment accept link or CLI command (with the key)
+                from each assignment&apos;s page.
               </span>
             </div>
-          )}
-          {secret && (
-            <StudentAccessInstructions
-              org={org}
-              classroom={classroom}
-              secret={secret}
-              assignments={(assignments ?? []).map((a) => ({
-                slug: a.slug,
-                name: a.name || a.slug,
-              }))}
-            />
           )}
           {resources.map((r) => (
             <ResourceRow key={r.url} resource={r} />
           ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// For a protected classroom, the access key isn't discoverable, so students
-// need it handed to them. This surfaces the two ways to share it: the GUI
-// accept link (`?k=`) and the `gh student accept --key` CLI command, per
-// assignment, with copy buttons. Without this, an enabled secret would be a
-// dead end for students.
-function StudentAccessInstructions({
-  org,
-  classroom,
-  secret,
-  assignments,
-}: {
-  org: string
-  classroom: string
-  secret: string
-  assignments: { slug: string; name: string }[]
-}) {
-  const appOrigin = typeof window !== "undefined" ? window.location.origin : ""
-
-  return (
-    <div className="rounded-lg border border-base-200 bg-base-200/40 p-4">
-      <div className="text-sm font-semibold">How students accept</div>
-      <p className="mt-1 text-xs text-base-content/60">
-        This classroom is protected, so the access key{" "}
-        <code className="font-mono">{secret}</code> must be shared with
-        students. Send them either link below (the key is included). It can also
-        be supplied to the CLI with{" "}
-        <code className="font-mono">--key {secret}</code>.
-      </p>
-
-      {assignments.length === 0 ? (
-        <p className="mt-3 text-xs text-base-content/50">
-          No assignments published yet. Once you add one, its student accept
-          link and command will appear here.
-        </p>
-      ) : (
-        <div className="mt-3 flex flex-col gap-4">
-          {assignments.map((a) => {
-            const acceptUrl = `${appOrigin}/${org}/${classroom}/assignments/${a.slug}/accept?k=${secret}`
-            const cliCmd = `gh student accept ${org} ${classroom} ${a.slug} --key ${secret}`
-            return (
-              <div key={a.slug} className="min-w-0">
-                <div className="text-xs font-medium text-base-content/80">
-                  {a.name}
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <code className="block min-w-0 flex-1 truncate rounded bg-base-100 px-2 py-1 text-xs">
-                    {acceptUrl}
-                  </code>
-                  <CopyButton value={acceptUrl} />
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <code className="block min-w-0 flex-1 truncate rounded bg-base-100 px-2 py-1 text-xs">
-                    {cliCmd}
-                  </code>
-                  <CopyButton value={cliCmd} />
-                </div>
-              </div>
-            )
-          })}
         </div>
       )}
     </div>

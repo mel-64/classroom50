@@ -70,8 +70,17 @@ const SubmissionsPageContent = () => {
   const assignmentSubmitUrl =
     `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept` +
     (secret ? `?k=${secret}` : "")
+  // The CLI equivalent students can run instead of the browser link.
+  // Includes --key only for a protected classroom.
+  const assignmentSubmitCli =
+    `gh student accept ${org} ${classroom} ${assignment}` +
+    (secret ? ` --key ${secret}` : "")
   const { copied: copiedSubmitLink, copy: copySubmitLink } = useCopyToClipboard(
     assignmentSubmitUrl,
+    1500,
+  )
+  const { copied: copiedSubmitCli, copy: copySubmitCli } = useCopyToClipboard(
+    assignmentSubmitCli,
     1500,
   )
 
@@ -349,12 +358,12 @@ const SubmissionsPageContent = () => {
                   </div>
 
                   <div>
-                    <h2 className="font-bold">Assignment accept link</h2>
+                    <h2 className="font-bold">How students accept</h2>
                     <p className="text-sm text-base-content/60">
-                      Share this link with students so they can accept this
-                      assignment.
+                      Share either of these with students to accept this
+                      assignment — a browser link or the CLI command.
                       {secret
-                        ? " This classroom is protected, so the link includes the access key — share the full link as-is."
+                        ? " This classroom is protected, so both include the access key — share them as-is."
                         : ""}
                     </p>
                   </div>
@@ -369,8 +378,33 @@ const SubmissionsPageContent = () => {
                   type="button"
                   className={`btn ${copiedSubmitLink ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
                   onClick={copySubmitLink}
+                  aria-label="Copy accept link"
+                  title="Copy accept link"
                 >
                   {copiedSubmitLink ? (
+                    <>
+                      <Check className="size-4" />
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
+                <pre className="overflow-x-auto px-4 py-3 text-sm">
+                  <code>{assignmentSubmitCli}</code>
+                </pre>
+                <button
+                  type="button"
+                  className={`btn ${copiedSubmitCli ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+                  onClick={copySubmitCli}
+                  aria-label="Copy CLI command"
+                  title="Copy CLI command"
+                >
+                  {copiedSubmitCli ? (
                     <>
                       <Check className="size-4" />
                     </>
