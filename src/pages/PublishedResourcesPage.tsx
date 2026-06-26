@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useParams } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -21,6 +21,7 @@ import RequireTeacher from "@/components/RequireTeacher"
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
+import { classroomPagesSegment } from "@/util/secret"
 
 // The Pages base for an org's classroom50 config repo. The `classroom50`
 // path segment is the fixed repo name, not the org name. Single-sourced
@@ -80,6 +81,36 @@ function useResourceStatus(url: string, enabled: boolean) {
   })
 }
 
+// Reports whether `ref` has entered the viewport at least once. Used to defer
+// the per-resource reachability probe until the row is actually visible, so a
+// teacher with many classrooms/assignments doesn't fire dozens of simultaneous
+// anonymous github.io requests on mount (which edge rate-limits would surface
+// as false "Unreachable" badges). Once seen, it stays true so the status
+// doesn't flip back to "Checking" on scroll-out.
+function useInView<T extends Element>(ref: RefObject<T | null>): boolean {
+  // Fail open when IntersectionObserver is unavailable (jsdom/older browsers):
+  // start visible so the probe still runs rather than hanging on "Checking".
+  const [inView, setInView] = useState(
+    () => typeof IntersectionObserver === "undefined",
+  )
+  useEffect(() => {
+    const el = ref.current
+    if (!el || inView) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "200px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref, inView])
+  return inView
+}
+
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -109,11 +140,19 @@ function CopyButton({ value }: { value: string }) {
 }
 
 function StatusBadge({ url }: { url: string }) {
-  const { data: status, isLoading } = useResourceStatus(url, true)
+  const ref = useRef<HTMLSpanElement>(null)
+  const inView = useInView(ref)
+  const { data: status, isLoading } = useResourceStatus(url, inView)
 
-  if (isLoading) {
+  // Before the row scrolls into view the probe is disabled (so status is
+  // undefined and isLoading is false); show the pending state rather than a
+  // premature "Unreachable".
+  if (!inView || isLoading) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-base-content/50">
+      <span
+        ref={ref}
+        className="inline-flex items-center gap-1 text-xs text-base-content/50"
+      >
         <Loader2 className="size-3.5 animate-spin" />
         Checking
       </span>
@@ -122,7 +161,10 @@ function StatusBadge({ url }: { url: string }) {
 
   if (status === "public") {
     return (
-      <span className="badge badge-success badge-soft badge-sm gap-1">
+      <span
+        ref={ref}
+        className="badge badge-success badge-soft badge-sm gap-1"
+      >
         <Globe className="size-3" />
         Public
       </span>
@@ -131,7 +173,11 @@ function StatusBadge({ url }: { url: string }) {
 
   if (status === "missing") {
     return (
-      <span className="badge badge-ghost badge-sm" title="Not published yet">
+      <span
+        ref={ref}
+        className="badge badge-ghost badge-sm"
+        title="Not published yet"
+      >
         Not published
       </span>
     )
@@ -139,6 +185,7 @@ function StatusBadge({ url }: { url: string }) {
 
   return (
     <span
+      ref={ref}
       className="badge badge-warning badge-soft badge-sm"
       title="Could not reach the URL"
     >
@@ -208,10 +255,9 @@ function ClassroomResources({
   const [open, setOpen] = useState(true)
 
   // When the classroom is protected, everything for it is served under the
-  // capability-URL segment; otherwise the plain classroom path.
-  const classroomBase = secret
-    ? `${base}/${classroom}/${secret}`
-    : `${base}/${classroom}`
+  // capability-URL segment; otherwise the plain classroom path. Same segment
+  // builder the Pages URL helpers use, so the two can't drift.
+  const classroomBase = `${base}/${classroomPagesSegment(classroom, secret)}`
 
   const resources = useMemo<Resource[]>(() => {
     const rows: Resource[] = [

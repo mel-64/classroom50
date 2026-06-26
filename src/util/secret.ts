@@ -28,6 +28,23 @@ export function isValidSecret(secret: string): boolean {
   return SECRET_PATTERN.test(secret)
 }
 
+// classroomPagesSegment builds the Pages path segment for a classroom: the
+// guessable `<classroom>` when no secret is set, or the unlisted
+// `<classroom>/<secret>` capability path when it is. Single source of truth
+// for the invariant every Pages URL builder depends on (the GUI's
+// pagesAssignmentUrl/pagesAutograderUrl and the Published Resources page),
+// so the three consumers can't drift. The secret is encoded defensively —
+// it is already pattern-constrained to `[a-z0-9]` at every trust boundary,
+// but encoding keeps a future, looser source from injecting a path.
+export function classroomPagesSegment(
+  classroom: string,
+  secret?: string,
+): string {
+  return secret
+    ? `${classroom}/${encodeURIComponent(secret)}`
+    : classroom
+}
+
 // generateSecret returns a cryptographically random secret of `length`
 // chars from SECRET_ALPHABET, using rejection sampling so the modulo bias a
 // naive `byte % 36` would introduce is eliminated (matches the CLI's

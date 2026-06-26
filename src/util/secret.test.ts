@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   DEFAULT_SECRET_LENGTH,
   SECRET_PATTERN,
+  classroomPagesSegment,
   generateSecret,
   isValidSecret,
 } from "./secret"
@@ -49,5 +50,28 @@ describe("isValidSecret", () => {
     ]) {
       expect(isValidSecret(s)).toBe(false)
     }
+  })
+
+  it("enforces the 64-char upper bound", () => {
+    expect(isValidSecret("a".repeat(64))).toBe(true)
+    expect(isValidSecret("a".repeat(65))).toBe(false)
+  })
+})
+
+describe("classroomPagesSegment", () => {
+  it("returns the plain classroom path when no secret is set", () => {
+    expect(classroomPagesSegment("cs50")).toBe("cs50")
+    expect(classroomPagesSegment("cs50", undefined)).toBe("cs50")
+    expect(classroomPagesSegment("cs50", "")).toBe("cs50")
+  })
+
+  it("inserts the secret segment when present", () => {
+    expect(classroomPagesSegment("cs50", "a1b2c3d4")).toBe("cs50/a1b2c3d4")
+  })
+
+  it("URL-encodes the secret segment defensively", () => {
+    // A well-formed secret is [a-z0-9] and unaffected by encoding; a value
+    // that slipped past the boundary guards must not break out of the path.
+    expect(classroomPagesSegment("cs50", "a/b")).toBe("cs50/a%2Fb")
   })
 })

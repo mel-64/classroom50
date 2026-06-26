@@ -9,6 +9,7 @@ import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
+import { classroomPagesSegment } from "@/util/secret"
 import { parseRunnerLabels } from "@/util/runners"
 import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
@@ -1152,13 +1153,14 @@ async function patchRepoSurface(
   })
 }
 
-function pagesAutograderUrl(
-  org: string,
-  classroom: string,
-  name: string,
-  secret?: string,
-) {
-  const segment = secret ? `${classroom}/${secret}` : classroom
+function pagesAutograderUrl(params: {
+  org: string
+  classroom: string
+  name: string
+  secret?: string
+}) {
+  const { org, classroom, name, secret } = params
+  const segment = classroomPagesSegment(classroom, secret)
   return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
 }
 
@@ -1183,18 +1185,19 @@ jobs:
 `
 }
 
-export async function resolveAutograderWorkflow(
-  org: string,
-  classroom: string,
-  autograder?: string,
-  secret?: string,
-): Promise<string> {
+export async function resolveAutograderWorkflow(params: {
+  org: string
+  classroom: string
+  autograder?: string
+  secret?: string
+}): Promise<string> {
+  const { org, classroom, autograder, secret } = params
   if (!autograder || autograder === "default") {
     return defaultAutograderWorkflow(org)
   }
 
   const workflow = await fetchTextWithFriendlyErrors(
-    pagesAutograderUrl(org, classroom, autograder, secret),
+    pagesAutograderUrl({ org, classroom, name: autograder, secret }),
     `autograder ${autograder}`,
   )
 
@@ -1422,7 +1425,12 @@ export async function acceptAssignment(params: {
       onStepUpdate,
     },
     () =>
-      resolveAutograderWorkflow(org, classroom, assignment.autograder, secret),
+      resolveAutograderWorkflow({
+        org,
+        classroom,
+        autograder: assignment.autograder,
+        secret,
+      }),
   )
 
   const studentRepoNameValue = studentRepoName(

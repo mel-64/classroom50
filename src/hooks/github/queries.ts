@@ -22,6 +22,7 @@ import {
   getErrorMessage,
 } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
+import { classroomPagesSegment } from "@/util/secret"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
 
@@ -662,7 +663,7 @@ export function pagesAssignmentUrl(
   classroom: string,
   secret?: string,
 ) {
-  const segment = secret ? `${classroom}/${secret}` : classroom
+  const segment = classroomPagesSegment(classroom, secret)
   return `https://${org}.github.io/classroom50/${segment}/assignments.json`
 }
 
