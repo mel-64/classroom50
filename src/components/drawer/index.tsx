@@ -13,7 +13,12 @@ import {
   FilePlus2,
   Globe,
 } from "lucide-react"
-import { Link, useParams, useMatchRoute } from "@tanstack/react-router"
+import {
+  Link,
+  useParams,
+  useMatchRoute,
+  useMatch,
+} from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
@@ -534,6 +539,10 @@ export const SidebarFooter = () => {
   const avatar_img = user?.avatar_url || duck
   const name = user?.name || user?.login || "User"
   const { org } = useParams({ strict: false })
+  const isOrgSetup = !!useMatch({
+    from: "/_authed/$org/setup/",
+    shouldThrow: false,
+  })
   const {
     isTeacher,
     isStudent,
@@ -543,7 +552,7 @@ export const SidebarFooter = () => {
   // transient error rather than guessing.
   const roleLabel = roleLoading
     ? null
-    : isTeacher
+    : isTeacher || isOrgSetup
       ? "Teacher"
       : isStudent
         ? "Student"
