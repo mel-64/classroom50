@@ -4,7 +4,9 @@ import {
   emailHash,
   isValidEmail,
   normalizeEmail,
+  onboardingRepoCandidates,
   onboardingRepoName,
+  onboardingRepoNameByGithubId,
   onboardingRepoNameFromHash,
 } from "./onboarding"
 
@@ -67,5 +69,33 @@ describe("isValidEmail", () => {
     expect(isValidEmail("nope")).toBe(false)
     expect(isValidEmail("a@b")).toBe(false)
     expect(isValidEmail("a @b.com")).toBe(false)
+  })
+})
+
+describe("onboardingRepoCandidates", () => {
+  it("includes the github-id name when github_id is present", () => {
+    expect(onboardingRepoCandidates({ github_id: "583231" })).toEqual([
+      onboardingRepoNameByGithubId("583231"),
+    ])
+  })
+
+  it("includes the email-hash name when only email_hash is present", () => {
+    expect(onboardingRepoCandidates({ email_hash: "abc123" })).toEqual([
+      onboardingRepoNameFromHash("abc123"),
+    ])
+  })
+
+  it("returns both candidates (deduped) when the row has both", () => {
+    const candidates = onboardingRepoCandidates({
+      github_id: "583231",
+      email_hash: "abc123",
+    })
+    expect(candidates).toContain(onboardingRepoNameByGithubId("583231"))
+    expect(candidates).toContain(onboardingRepoNameFromHash("abc123"))
+    expect(candidates).toHaveLength(2)
+  })
+
+  it("returns nothing for a row with neither key", () => {
+    expect(onboardingRepoCandidates({})).toEqual([])
   })
 })

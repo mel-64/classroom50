@@ -49,7 +49,7 @@ const createClassroomMetadata = (
 // header-based, so an older 6-column roster still parses and the extra columns
 // default to "").
 const STUDENTS_CSV_HEADER =
-  "username,first_name,last_name,email,section,github_id,enrollment_status,email_hash,invited_at,reconciled_at\n"
+  "username,first_name,last_name,email,section,github_id,enrollment_status,enrollment_method,email_hash,invited_at,reconciled_at\n"
 const createClassroomBody = (
   base_tree: string,
   org: string,

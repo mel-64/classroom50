@@ -23,8 +23,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { isSameGitHubUser } from "@/util/students"
 import {
   emailHash,
-  onboardingRepoNameByGithubId,
-  onboardingRepoNameFromHash,
+  onboardingRepoCandidates,
   ONBOARDING_YAML_PATH,
 } from "@/util/onboarding"
 import { parseOnboardingYaml } from "@/util/yaml"
@@ -80,6 +79,7 @@ const STUDENT_CSV_FIELDS = [
   // header-based CSVs still parse (missing columns default to "" below) and
   // new columns are additive.
   "enrollment_status",
+  "enrollment_method",
   "email_hash",
   "invited_at",
   "reconciled_at",
@@ -99,6 +99,7 @@ function normalizeStudentRow(
     section: String(row.section ?? "").trim(),
     github_id: String(row.github_id ?? "").trim(),
     enrollment_status: String(row.enrollment_status ?? "").trim(),
+    enrollment_method: String(row.enrollment_method ?? "").trim(),
     email_hash: String(row.email_hash ?? "").trim(),
     invited_at: String(row.invited_at ?? "").trim(),
     reconciled_at: String(row.reconciled_at ?? "").trim(),
@@ -206,6 +207,7 @@ export async function addStudentToClassroom(
     // so the email-keyed onboarding repo (if the student onboards before the
     // teacher reconciles) is still findable.
     enrollment_status: "invited",
+    enrollment_method: "github",
     email_hash: "",
   })
 
@@ -305,6 +307,7 @@ export async function addEmailInviteToClassroom(
     section: input.section?.trim() ?? "",
     github_id: "",
     enrollment_status: "invited",
+    enrollment_method: "email",
     email_hash: await emailHash(normalizedEmail),
     invited_at: new Date().toISOString(),
     reconciled_at: "",
@@ -469,28 +472,46 @@ export async function reconcileOnboarding(
   >()
 
   for (const row of targets) {
-    // Mirror the create-side naming branch: a row that already carries a
-    // github_id (username invite flow) is reconciled by id; an email-only row
-    // by its email hash. Both stay direct-GET (no org scan).
+    // The student may have created the repo under either naming scheme
+    // depending on their team access at onboarding time, so try every
+    // candidate. The first one with a readable payload wins. rowKey keys the
+    // resolved map for the batched write below.
     const byGithubId = Boolean(row.github_id)
-    const repo = byGithubId
-      ? onboardingRepoNameByGithubId(row.github_id)
-      : onboardingRepoNameFromHash(row.email_hash)
     const rowKey = byGithubId
       ? `id:${row.github_id}`
       : `email:${row.email_hash}`
+    const candidates = onboardingRepoCandidates(row)
+
+    let repo: string | undefined
     let payload
-    try {
-      payload = parseOnboardingYaml(
-        await getRepoFile(client, org, repo, ONBOARDING_YAML_PATH),
-      )
-    } catch (err) {
-      // 404 = student hasn't onboarded yet (not an error). Anything else is an
-      // onboarding repo we found but couldn't read/parse — surface it.
-      if (err instanceof GitHubAPIError && err.isNotFound) {
-        result.pending.push(row.email || row.username)
+    let readError: string | undefined
+    for (const candidate of candidates) {
+      try {
+        payload = parseOnboardingYaml(
+          await getRepoFile(client, org, candidate, ONBOARDING_YAML_PATH),
+        )
+        repo = candidate
+        break
+      } catch (err) {
+        // 404 = this candidate doesn't exist; try the next. A non-404 is a real
+        // problem with a repo that DOES exist — remember it but keep trying, so
+        // a readable second candidate still wins.
+        if (!(err instanceof GitHubAPIError && err.isNotFound)) {
+          readError = getErrorMessage(err)
+        }
+      }
+    }
+
+    if (!repo || !payload) {
+      // None of the candidates had a readable payload.
+      if (readError) {
+        result.unmatched.push({
+          repo: candidates[0] ?? rowKey,
+          reason: readError,
+        })
       } else {
-        result.unmatched.push({ repo, reason: getErrorMessage(err) })
+        // All 404 -> student hasn't onboarded yet.
+        result.pending.push(row.email || row.username)
       }
       continue
     }
@@ -899,6 +920,7 @@ export async function addStudentsToClassroom(
         github_id: String(githubUser.id),
         // Still onboards to supply name/email; reconcile flips to "reconciled".
         enrollment_status: "invited",
+        enrollment_method: "github",
       })
 
       existingUsernameKeys.add(student.username.toLowerCase())
@@ -1218,19 +1240,15 @@ export async function unenrollStudent(
   const warnings: string[] = []
 
   // Reset onboarding for a not-yet-reconciled student: delete their onboarding
-  // repo (named by github_id when known, else email hash — mirroring the create
-  // and reconcile branches) so a re-invite starts clean. Only for unreconciled
-  // rows; a reconciled student's repo was already cleaned up at reconcile time.
-  // Best-effort and idempotent (404 = already gone); a failed delete falls back
-  // to archive so the repo doesn't linger as an active onboarding repo.
+  // repo so a re-invite starts clean. The student may have created the repo
+  // under either naming scheme (github-id or email-hash) depending on their
+  // team access at onboarding time, so delete every candidate, not just one.
+  // Only for unreconciled rows; a reconciled student's repo was already cleaned
+  // up at reconcile time. Best-effort and idempotent (404 = already gone); a
+  // failed delete falls back to archive so the repo doesn't linger as a live
+  // onboarding target.
   if (toRemoveStudent.enrollment_status !== "reconciled") {
-    const onboardingRepo = toRemoveStudent.github_id
-      ? onboardingRepoNameByGithubId(toRemoveStudent.github_id)
-      : toRemoveStudent.email_hash
-        ? onboardingRepoNameFromHash(toRemoveStudent.email_hash)
-        : undefined
-
-    if (onboardingRepo) {
+    for (const onboardingRepo of onboardingRepoCandidates(toRemoveStudent)) {
       try {
         await deleteRepo(client, { owner: org, repo: onboardingRepo })
       } catch (err) {

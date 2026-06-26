@@ -70,6 +70,23 @@ export async function onboardingRepoName(email: string): Promise<string> {
   return onboardingRepoNameFromHash(await emailHash(email))
 }
 
+// All plausible onboarding repo names for a roster row. The student picks the
+// name at onboarding time based on classroom-team access (github-id name when
+// on the team, else email-hash name), which can diverge from what the roster
+// row looks like now (e.g. a username-invited student who onboarded before the
+// team-add propagated created the email-hash repo). So callers that must find
+// or delete the repo should try every candidate, not just one. Deduped; order
+// is a hint only.
+export function onboardingRepoCandidates(row: {
+  github_id?: string
+  email_hash?: string
+}): string[] {
+  const names: string[] = []
+  if (row.github_id) names.push(onboardingRepoNameByGithubId(row.github_id))
+  if (row.email_hash) names.push(onboardingRepoNameFromHash(row.email_hash))
+  return Array.from(new Set(names))
+}
+
 // Self-report payload committed to ONBOARDING_YAML_PATH inside the onboarding
 // repo. github_username/github_id come from the authenticated session (GitHub-
 // attested, unforgeable); email and name are student-supplied (claimed).

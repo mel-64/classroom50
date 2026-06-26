@@ -112,6 +112,14 @@ export type AssignmentTest = {
 // they have a github_id, else as invited.
 export type EnrollmentStatus = "invited" | "onboarded" | "reconciled" | ""
 
+// How the student was added to the roster: "github" (added by GitHub username,
+// already has github_id + team access) or "email" (invited by email, identity
+// resolved later via onboarding). "" on legacy rows. A hint for UI/analytics
+// and preferred onboarding-repo lookup order; the repo name is still resolved
+// by trying all candidates, since the student's create-time team access can
+// diverge from the invite method.
+export type EnrollmentMethod = "github" | "email" | ""
+
 export type Student = {
   username: string
   first_name: string
@@ -123,6 +131,7 @@ export type Student = {
   // the type so legacy CSVs and existing callers stay valid; the CSV layer
   // defaults them to "".
   enrollment_status?: EnrollmentStatus
+  enrollment_method?: EnrollmentMethod
   // Cached emailHash(email) — the deterministic onboarding-repo key, so the
   // teacher reconcile loop fetches the repo directly without re-hashing.
   email_hash?: string
