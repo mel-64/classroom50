@@ -1,5 +1,6 @@
 import { parseDocument } from "yaml"
 import { z } from "zod"
+import { SECRET_PATTERN } from "./secret"
 
 const IdentitySchema = z.object({
   username: z.string().min(1),
@@ -17,8 +18,11 @@ const Classroom50YamlSchema = z.object({
   assignment: z.string().min(1),
   // Optional capability-URL secret, present only for a protected classroom.
   // Mirrors the CLI's repo-config-v1 schema; consumers use the
-  // <classroom>/<secret>/ Pages path when it's present.
-  secret: z.string().optional(),
+  // <classroom>/<secret>/ Pages path when it's present. Pattern-checked at the
+  // read boundary so a hand-edited or CLI-desynced value can't flow into a
+  // Pages URL path segment unvalidated; an invalid value degrades to "no
+  // secret" (plain path) rather than failing the whole document parse.
+  secret: z.string().regex(SECRET_PATTERN).optional().catch(undefined),
   owner: IdentitySchema.optional(),
   source: z
     .object({

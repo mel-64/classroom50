@@ -309,7 +309,9 @@ const AssignmentSidebarMenu = ({
     org,
     studentRepoNameForSecret,
   )
-  const { data: classroomMeta } = useGetClassroom(org, classroom)
+  const { data: classroomMeta } = useGetClassroom(org, classroom, {
+    enabled: showTeacherUi,
+  })
   const secret = studentSecret || classroomMeta?.secret
   const { assignment: publicAssignment } = useGetPublicAssignment(
     org,

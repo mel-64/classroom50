@@ -6,6 +6,7 @@ import type { Classroom } from "@/types/classroom"
 const useGetClassroom = (
   org: string | undefined,
   classroom: string | undefined,
+  options?: { enabled?: boolean },
 ) => {
   const client = useGitHubClient()
   return useQuery({
@@ -15,7 +16,10 @@ const useGetClassroom = (
       "classroom50",
       `${classroom ?? ""}/classroom.json`,
     ),
-    enabled: Boolean(org && classroom),
+    // classroom.json lives in the private config repo, so a student fetch is a
+    // guaranteed 404. Callers on student-reachable pages pass enabled:false
+    // (or gate on teacher role); the default stays enabled for teacher views.
+    enabled: Boolean(org && classroom) && (options?.enabled ?? true),
   })
 }
 
