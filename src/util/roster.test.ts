@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   applyReconciledToRoster,
+  isRosterReady,
   partitionRoster,
   removeFromRoster,
   splitName,
@@ -87,6 +88,73 @@ describe("toStudent", () => {
     expect(s.email).toBe("")
     expect(s.username).toBe("x")
   })
+
+  it('coerces the removed legacy "onboarded" status to empty string', () => {
+    // "onboarded" was dropped from EnrollmentStatus; a legacy CSV row carrying
+    // it must not masquerade as a valid status.
+    const s = toStudent({
+      username: "x",
+      enrollment_status: "onboarded",
+    } as unknown as Record<string, string>)
+    expect(s.enrollment_status).toBe("")
+  })
+})
+
+describe("isRosterReady", () => {
+  it("is false while members/invitations are still loading", () => {
+    expect(
+      isRosterReady({
+        statusLoading: true,
+        statusAvailable: true,
+        reportsLoaded: false,
+        reportsErrored: false,
+      }),
+    ).toBe(false)
+  })
+
+  it("is ready for a non-owner once status settles, without waiting on reports", () => {
+    expect(
+      isRosterReady({
+        statusLoading: false,
+        statusAvailable: false,
+        reportsLoaded: false,
+        reportsErrored: false,
+      }),
+    ).toBe(true)
+  })
+
+  it("is ready for an owner once reports load", () => {
+    expect(
+      isRosterReady({
+        statusLoading: false,
+        statusAvailable: true,
+        reportsLoaded: true,
+        reportsErrored: false,
+      }),
+    ).toBe(true)
+  })
+
+  it("is ready (not stuck) when reports error", () => {
+    expect(
+      isRosterReady({
+        statusLoading: false,
+        statusAvailable: true,
+        reportsLoaded: false,
+        reportsErrored: true,
+      }),
+    ).toBe(true)
+  })
+
+  it("is NOT ready for an owner while reports are still pending (the flash case)", () => {
+    expect(
+      isRosterReady({
+        statusLoading: false,
+        statusAvailable: true,
+        reportsLoaded: false,
+        reportsErrored: false,
+      }),
+    ).toBe(false)
+  })
 })
 
 describe("removeFromRoster", () => {
@@ -124,16 +192,19 @@ describe("applyReconciledToRoster", () => {
     expect(next[0].enrollment_status).toBe("enrolled")
   })
 
-  it("flips an email-only row matched by email", () => {
+  it("flips an email-only row matched by email (production shape: reconciled entry carries the attested username)", () => {
     const row = student({
       username: "",
       github_id: "",
       email: "bob@x.io",
       enrollment_status: "invited",
     })
+    // Reconcile always reports a non-empty github_username, even when the row
+    // was bound via the email path. The email-only cached row still has no
+    // local username, so it must match by email.
     const next = applyReconciledToRoster(
       [row],
-      [{ username: "", email: "BOB@x.io" }],
+      [{ username: "bob-gh", email: "BOB@x.io" }],
     )
     expect(next[0].enrollment_status).toBe("enrolled")
   })

@@ -83,16 +83,23 @@ export function applyReconciledToRoster(
   reconciled: { username: string; email: string }[],
 ): Student[] {
   if (reconciled.length === 0) return current
+  // Reconcile always reports a GitHub-attested username per bound row (even for
+  // an email-matched row, where it's the self-report's github_username). So a
+  // username-bearing cached row matches by username. An email-only cached row
+  // (no username yet) matches by the email of a reconciled entry — but only one
+  // it can legitimately own: an entry whose username does NOT already match
+  // some other cached row. That guard reproduces the server's one-self-report-
+  // to-one-row binding and avoids flipping an unrelated email-only row that
+  // merely shares an address with a username-reconciled row.
+  const cachedUsernames = new Set(
+    current.map((s) => s.username.trim().toLowerCase()).filter(Boolean),
+  )
   const byUsername = new Set(
     reconciled.map((r) => r.username.trim().toLowerCase()).filter(Boolean),
   )
-  // Only entries WITHOUT a username contribute an email key. A reconciled entry
-  // that has a username identifies a username-bearing row; its email belongs to
-  // that row, not to email-matching — folding it into byEmail would wrongly
-  // flip an unrelated email-only row that merely shares the address.
-  const byEmail = new Set(
+  const claimableEmails = new Set(
     reconciled
-      .filter((r) => !r.username.trim())
+      .filter((r) => !cachedUsernames.has(r.username.trim().toLowerCase()))
       .map((r) => r.email.trim().toLowerCase())
       .filter(Boolean),
   )
@@ -100,7 +107,8 @@ export function applyReconciledToRoster(
     if (student.enrollment_status === "enrolled") return student
     const matched = student.username
       ? byUsername.has(student.username.toLowerCase())
-      : Boolean(student.email) && byEmail.has(student.email.toLowerCase())
+      : Boolean(student.email) &&
+        claimableEmails.has(student.email.toLowerCase())
     return matched
       ? { ...student, enrollment_status: "enrolled" as const }
       : student
@@ -111,6 +119,24 @@ export type RosterPartition = {
   readyToConfirm: Student[]
   awaitingEnrollment: Student[]
   enrolled: Student[]
+}
+
+// Whether the roster can render without a row flashing in the wrong section.
+// True once everything the partition depends on has settled: members +
+// invitations (statusLoading), and — when status is available — the onboarding
+// self-reports query (loaded or errored; an error surfaces its own warning and
+// must not spin forever). A non-owner never fetches reports, so status settling
+// is enough. Pure so the gate logic is unit-testable independent of the hook.
+export function isRosterReady(input: {
+  statusLoading: boolean
+  statusAvailable: boolean
+  reportsLoaded: boolean
+  reportsErrored: boolean
+}): boolean {
+  return (
+    !input.statusLoading &&
+    (!input.statusAvailable || input.reportsLoaded || input.reportsErrored)
+  )
 }
 
 // Partition the roster into the three teacher-facing sections from each row's

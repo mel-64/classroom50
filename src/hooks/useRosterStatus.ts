@@ -9,6 +9,7 @@ import {
   type StudentInviteStatus,
 } from "@/util/inviteStatus"
 import {
+  isRosterReady,
   partitionRoster,
   studentKey,
   type RosterPartition,
@@ -26,7 +27,6 @@ export type RosterStatus = {
   statusLoading: boolean
   // Owner-only endpoints 403 for non-owners; status is then unavailable.
   statusAvailable: boolean
-  reportsLoaded: boolean
   reportsErrored: boolean
   // True once everything the section partition depends on has settled, so the
   // roster can render without a row briefly landing in the wrong section. The
@@ -44,7 +44,7 @@ const useRosterStatus = (
   students: Student[],
 ): RosterStatus => {
   const client = useGitHubClient()
-  const { members } = useGetOrgMembers(org)
+  const { members, isError: membersErrored } = useGetOrgMembers(org)
   const {
     invitations,
     failedInvitations,
@@ -52,8 +52,15 @@ const useRosterStatus = (
     isForbidden: invitesForbidden,
   } = useGetOrgInvitations(org)
 
-  const statusLoading = members === undefined || invitesLoading
-  const statusAvailable = !invitesForbidden
+  // members === undefined means "still loading" ONLY while the query hasn't
+  // errored; a terminal members failure also leaves it undefined, so treat that
+  // as settled (not loading) to avoid hanging the roster on a spinner forever.
+  const statusLoading =
+    (members === undefined && !membersErrored) || invitesLoading
+  // Status is unavailable for a non-owner (invitations 403) OR when the members
+  // listing terminally failed — either way we can't classify, so the roster
+  // renders without the live status rather than waiting on data that won't come.
+  const statusAvailable = !invitesForbidden && !membersErrored
 
   const {
     data: onboardedReports,
@@ -101,15 +108,18 @@ const useRosterStatus = (
   // has resolved (loaded or errored — an error surfaces its own warning and
   // shouldn't spin forever). For a non-owner we never fetch reports, so status
   // settling is enough.
-  const rosterReady =
-    !statusLoading && (!statusAvailable || reportsLoaded || reportsErrored)
+  const rosterReady = isRosterReady({
+    statusLoading,
+    statusAvailable,
+    reportsLoaded,
+    reportsErrored,
+  })
 
   return {
     statusByKey,
     getStatus,
     statusLoading,
     statusAvailable,
-    reportsLoaded,
     reportsErrored,
     rosterReady,
     partition,
