@@ -22,10 +22,10 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
-  githubKeys,
   invalidateInviteQueries as invalidateInviteQueriesForOrg,
   listOnboardingSelfReports,
 } from "@/hooks/github/queries"
+import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import useGetOrgInvitations from "@/hooks/useGetOrgInvitations"
 import { useGitHubViewer } from "@/hooks/github/hooks"
@@ -398,6 +398,7 @@ const EnrolledStudents = ({
 }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const updateRosterCache = useUpdateRosterCache(org, classroom)
   // Keyed by username so a clean unenroll can't clobber another student's
   // unread warning.
   const [teamWarnings, setTeamWarnings] = useState<Record<string, string>>({})
@@ -557,13 +558,41 @@ const EnrolledStudents = ({
           ? `${summary}. ${result.cleanupWarning}`
           : summary,
       )
-      queryClient.invalidateQueries({
-        queryKey: githubKeys.csvFile(
-          org,
-          "classroom50",
-          `${classroom}/students.csv`,
-        ),
-      })
+      // Optimistically flip the just-confirmed rows to "enrolled" so they move
+      // from "Ready for confirmation" to "Enrolled" immediately. We do NOT
+      // invalidate the roster CSV query here: GitHub's Contents API can still
+      // serve the pre-commit students.csv for a few seconds, so an immediate
+      // refetch would overwrite this authoritative update with stale rows and
+      // revert the UI. A natural refetch later reconciles.
+      if (result.reconciled.length > 0) {
+        const byUsername = new Set(
+          result.reconciled
+            .map((r) => r.username.trim().toLowerCase())
+            .filter(Boolean),
+        )
+        const byEmail = new Set(
+          result.reconciled
+            .map((r) => r.email.trim().toLowerCase())
+            .filter(Boolean),
+        )
+        updateRosterCache((current) =>
+          current.map((student) => {
+            if (student.enrollment_status === "enrolled") return student
+            // A row that already carries a username is identified by username;
+            // only an email-only row (no username yet) is matched by email.
+            // This avoids flipping an unrelated email-only row that merely
+            // shares an email with a username-reconciled row (the server binds
+            // each self-report to exactly one row; mirror that precision).
+            const matched = student.username
+              ? byUsername.has(student.username.toLowerCase())
+              : Boolean(student.email) &&
+                byEmail.has(student.email.toLowerCase())
+            return matched
+              ? { ...student, enrollment_status: "enrolled" as const }
+              : student
+          }),
+        )
+      }
       // Reconcile deletes/archives onboarding repos, so the ready-to-confirm
       // self-report set is now stale.
       queryClient.invalidateQueries({
@@ -773,13 +802,14 @@ const EnrolledStudents = ({
               if (warning) {
                 setWarning(username, warning)
               }
-              queryClient.invalidateQueries({
-                queryKey: githubKeys.csvFile(
-                  org,
-                  "classroom50",
-                  `${classroom}/students.csv`,
-                ),
-              })
+              // Drop the row from the cached roster immediately. GitHub's
+              // Contents API can still serve the pre-commit students.csv for a
+              // few seconds, so an invalidate-driven refetch would re-add the
+              // just-removed row until a later refresh. Match by the same stable
+              // studentKey the rest of the roster keys on.
+              updateRosterCache((current) =>
+                current.filter((s) => studentKey(s) !== rowKey),
+              )
               // Unenroll may cancel a pending invite or remove a member.
               invalidateInviteQueries()
             }}

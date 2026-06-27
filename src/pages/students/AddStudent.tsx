@@ -1,14 +1,16 @@
 import { Mail, UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
-import { useForm } from "@tanstack/react-form"
+import { revalidateLogic, useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
-import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
+import { invalidateInviteQueries } from "@/hooks/github/queries"
+import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { inviteStudentByEmail } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { isValidEmail } from "@/util/onboarding"
+import type { Student } from "@/types/classroom"
 
 type AddStudentProps = {
   className?: string
@@ -24,7 +26,7 @@ type AddStudentFormValues = {
 
 const splitName = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean)
-  return { first_name: parts.at(0), last_name: parts.slice(1).join(" ") }
+  return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
 }
 
 // Single add/invite form. The teacher provides any of name, GitHub username,
@@ -36,18 +38,9 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
+  const updateRosterCache = useUpdateRosterCache(org, classroom)
   const [warning, setWarning] = useState("")
-
-  const invalidateRoster = () => {
-    queryClient.invalidateQueries({
-      queryKey: githubKeys.csvFile(
-        org,
-        "classroom50",
-        `${classroom}/students.csv`,
-      ),
-    })
-    invalidateInviteQueries(queryClient, org)
-  }
+  const [success, setSuccess] = useState("")
 
   const addMutation = useMutation({
     mutationFn: async (value: AddStudentFormValues) => {
@@ -65,7 +58,11 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           last_name,
           email: email || undefined,
         })
-        return result?.teamWarning ?? ""
+        return {
+          label: username,
+          warning: result?.teamWarning ?? "",
+          student: result.student as Student,
+        }
       }
 
       // Email-only -> email invite. A unique per-student invite token is always
@@ -78,11 +75,24 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         first_name,
         last_name,
       })
-      return result?.inviteWarning ?? ""
+      return {
+        label: email,
+        warning: result?.inviteWarning ?? "",
+        student: result.student as Student,
+      }
     },
-    onSuccess: (warningMessage) => {
+    onSuccess: ({ label, warning: warningMessage, student }) => {
       setWarning(warningMessage)
-      invalidateRoster()
+      // Confirm the add and clear the form so the next student starts clean
+      // (and a stray re-click can't resubmit the same row into a duplicate
+      // error). A non-fatal warning still shows alongside the confirmation.
+      setSuccess(`Added ${label}.`)
+      form.reset()
+      // Show the new row immediately. GitHub's Contents API can still serve the
+      // pre-commit students.csv for a few seconds, so an invalidate-driven
+      // refetch alone would leave the roster looking unchanged until refresh.
+      updateRosterCache((current) => [...current, student])
+      invalidateInviteQueries(queryClient, org)
     },
   })
 
@@ -92,8 +102,14 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       username: "",
       email: "",
     } satisfies AddStudentFormValues,
+    // Validate on submit, then re-validate on every change after the first
+    // submit attempt. Without this, a failed form-level validation leaves
+    // canSubmit=false and the form-level validator never re-runs on change, so
+    // the disabled submit button never recovers (the form is dead until
+    // remount). onDynamic runs in both phases under revalidateLogic.
+    validationLogic: revalidateLogic(),
     validators: {
-      onSubmit: ({ value }) => {
+      onDynamic: ({ value }) => {
         const errors: Partial<Record<keyof AddStudentFormValues, string>> = {}
         const username = value.username.trim()
         const email = value.email.trim()
@@ -110,6 +126,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
     },
     onSubmit: async ({ value }) => {
       setWarning("")
+      setSuccess("")
       await addMutation.mutateAsync(value)
     },
   })
@@ -133,6 +150,12 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           {warning && (
             <div className="alert alert-warning alert-soft mb-2 text-sm">
               {warning}
+            </div>
+          )}
+
+          {success && (
+            <div className="alert alert-success alert-soft mb-2 text-sm">
+              {success}
             </div>
           )}
 
@@ -170,7 +193,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
                 </div>
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-error text-sm mt-1">
-                    {field.state.meta.errors[0]}
+                    {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
               </div>
@@ -194,7 +217,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
                 </div>
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-error text-sm mt-1">
-                    {field.state.meta.errors[0]}
+                    {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
               </div>
