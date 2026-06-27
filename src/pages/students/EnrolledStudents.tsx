@@ -14,26 +14,23 @@ import { formatInvitedAt } from "@/util/formatDate"
 import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
 import { ConfirmModal } from "@/components/modals"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { reconcileOnboarding, unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import {
-  invalidateInviteQueries as invalidateInviteQueriesForOrg,
-  listOnboardingSelfReports,
-} from "@/hooks/github/queries"
+import { invalidateInviteQueries as invalidateInviteQueriesForOrg } from "@/hooks/github/queries"
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
-import useGetOrgMembers from "@/hooks/useGetOrgMembers"
-import useGetOrgInvitations from "@/hooks/useGetOrgInvitations"
+import useRosterStatus from "@/hooks/useRosterStatus"
 import { useGitHubViewer } from "@/hooks/github/hooks"
+import { type InviteStatus } from "@/util/inviteStatus"
 import {
-  buildInviteStatusLookup,
-  type InviteStatus,
-  type StudentInviteStatus,
-} from "@/util/inviteStatus"
+  applyReconciledToRoster,
+  removeFromRoster,
+  studentKey,
+} from "@/util/roster"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 const UnenrollStudentButton = ({
@@ -410,65 +407,14 @@ const EnrolledStudents = ({
     new Set(),
   )
 
-  const { members } = useGetOrgMembers(org)
   const { data: viewer } = useGitHubViewer()
   const {
-    invitations,
-    failedInvitations,
-    isLoading: invitesLoading,
-    isForbidden: invitesForbidden,
-  } = useGetOrgInvitations(org)
-
-  const statusLoading = members === undefined || invitesLoading
-  // Owner-only endpoints 403 for non-owners; hide status and explain instead.
-  const statusAvailable = !invitesForbidden
-
-  // Onboarding self-reports that currently exist (one per onboarding repo), used
-  // to tell a student who has onboarded ("ready to confirm") apart from one who
-  // hasn't yet ("awaiting"). The empty list is only authoritative once the query
-  // SUCCEEDS — while it's loading or after it errors (e.g. the org repo listing
-  // is access-limited), we must not treat "no reports" as fact, or every
-  // onboarded student would be mislabeled "awaiting" and hidden from the
-  // Ready-to-confirm section. We pass the reports only when loaded.
-  const {
-    data: onboardedReports,
-    isSuccess: reportsLoaded,
-    isError: reportsErrored,
-  } = useQuery({
-    queryKey: ["github", "onboarding-reports", org, classroom],
-    queryFn: () => listOnboardingSelfReports(client, org, classroom),
-    enabled: Boolean(org && classroom && statusAvailable),
-    staleTime: 30 * 1000,
-  })
-
-  const getStatus = useMemo(
-    () =>
-      buildInviteStatusLookup(
-        members ?? [],
-        invitations,
-        failedInvitations,
-        // Only authoritative once loaded; undefined keeps "ready" unresolved.
-        reportsLoaded ? (onboardedReports ?? []) : undefined,
-      ),
-    [members, invitations, failedInvitations, reportsLoaded, onboardedReports],
-  )
-
-  // Stable, position-independent per-row identity. github_id is the most stable
-  // (survives a username rename); fall back to username, then email. Rows always
-  // carry at least one of these (parseStudentsCsv filters out fully-empty rows),
-  // so no index fallback is needed — and an index would desync statusByKey
-  // (built over the full array) from the section-local render indices.
-  const studentKey = (student: Student) =>
-    student.github_id || student.username || student.email
-
-  const statusByKey = useMemo(() => {
-    const map = new Map<string, StudentInviteStatus>()
-    if (statusLoading || !statusAvailable) return map
-    students.forEach((student) => {
-      map.set(studentKey(student), getStatus(student))
-    })
-    return map
-  }, [students, getStatus, statusLoading, statusAvailable])
+    statusByKey,
+    getStatus,
+    statusAvailable,
+    reportsErrored,
+    partition: { readyToConfirm, awaitingEnrollment, enrolled },
+  } = useRosterStatus(org, classroom, students)
 
   // Every non-member who still needs an invite re-sent: pending, expired, or
   // never invited. Excludes students who've onboarded (ready) or are simply
@@ -564,35 +510,9 @@ const EnrolledStudents = ({
       // serve the pre-commit students.csv for a few seconds, so an immediate
       // refetch would overwrite this authoritative update with stale rows and
       // revert the UI. A natural refetch later reconciles.
-      if (result.reconciled.length > 0) {
-        const byUsername = new Set(
-          result.reconciled
-            .map((r) => r.username.trim().toLowerCase())
-            .filter(Boolean),
-        )
-        const byEmail = new Set(
-          result.reconciled
-            .map((r) => r.email.trim().toLowerCase())
-            .filter(Boolean),
-        )
-        updateRosterCache((current) =>
-          current.map((student) => {
-            if (student.enrollment_status === "enrolled") return student
-            // A row that already carries a username is identified by username;
-            // only an email-only row (no username yet) is matched by email.
-            // This avoids flipping an unrelated email-only row that merely
-            // shares an email with a username-reconciled row (the server binds
-            // each self-report to exactly one row; mirror that precision).
-            const matched = student.username
-              ? byUsername.has(student.username.toLowerCase())
-              : Boolean(student.email) &&
-                byEmail.has(student.email.toLowerCase())
-            return matched
-              ? { ...student, enrollment_status: "enrolled" as const }
-              : student
-          }),
-        )
-      }
+      updateRosterCache((current) =>
+        applyReconciledToRoster(current, result.reconciled),
+      )
       // Reconcile deletes/archives onboarding repos, so the ready-to-confirm
       // self-report set is now stale.
       queryClient.invalidateQueries({
@@ -680,34 +600,6 @@ const EnrolledStudents = ({
       )
     }
   }
-
-  // Partition the roster into the three teacher-facing sections, driven by the
-  // computed invite status so each section matches the row badges exactly:
-  //  - readyToConfirm: onboarded, repo exists -> confirmable now ("ready").
-  //  - awaitingEnrollment: invited but not yet onboarded ("pending"/"expired"/
-  //    "onboarding"/"none") — not yet enrolled, nothing to confirm yet.
-  //  - enrolled: completed enrollment ("member") or enrolled-but-since-removed
-  //    ("removed").
-  const { readyToConfirm, awaitingEnrollment, enrolled } = useMemo(() => {
-    const ready: Student[] = []
-    const awaiting: Student[] = []
-    const done: Student[] = []
-    students.forEach((student) => {
-      const status = statusByKey.get(studentKey(student))?.status
-      if (status === "ready") {
-        ready.push(student)
-      } else if (status === "member" || status === "removed") {
-        done.push(student)
-      } else {
-        awaiting.push(student)
-      }
-    })
-    return {
-      readyToConfirm: ready,
-      awaitingEnrollment: awaiting,
-      enrolled: done,
-    }
-  }, [students, statusByKey])
 
   const renderStudentRow = (student: Student) => {
     const rowKey = studentKey(student)
@@ -805,11 +697,9 @@ const EnrolledStudents = ({
               // Drop the row from the cached roster immediately. GitHub's
               // Contents API can still serve the pre-commit students.csv for a
               // few seconds, so an invalidate-driven refetch would re-add the
-              // just-removed row until a later refresh. Match by the same stable
-              // studentKey the rest of the roster keys on.
-              updateRosterCache((current) =>
-                current.filter((s) => studentKey(s) !== rowKey),
-              )
+              // just-removed row until a later refresh. Keyed by the same stable
+              // studentKey the rest of the roster uses.
+              updateRosterCache((current) => removeFromRoster(current, rowKey))
               // Unenroll may cancel a pending invite or remove a member.
               invalidateInviteQueries()
             }}

@@ -11,10 +11,11 @@ import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import useGetStudents, { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import useRosterStatus from "@/hooks/useRosterStatus"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
-import type { Student } from "@/types/classroom"
+import { toStudent } from "@/util/roster"
 
 const StudentListContent = ({
   org,
@@ -28,14 +29,19 @@ const StudentListContent = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
-
-  // "Enrolled" is the CSV's authoritative completed-enrollment signal; awaiting
-  // and ready-to-confirm rows are on the roster but not yet enrolled, so the
-  // total roster size would over-count. (EnrolledStudents refines this set into
-  // member/removed by live membership, but the count of the set is the same.)
-  const enrolledCount = students.filter(
-    (student) => student.enrollment_status === "enrolled",
-  ).length
+  // Count from the same live partition the Enrolled section uses, so the header
+  // and the section badge always agree. While status is still loading or
+  // unavailable (non-owner), fall back to the CSV "enrolled" signal rather than
+  // flashing 0.
+  const { statusAvailable, statusLoading, partition } = useRosterStatus(
+    org,
+    classroom,
+    students,
+  )
+  const enrolledCount =
+    statusAvailable && !statusLoading
+      ? partition.enrolled.length
+      : students.filter((s) => s.enrollment_status === "enrolled").length
   const className = classData?.name || classData?.short_name || "Untitled class"
 
   return (
@@ -58,7 +64,7 @@ const StudentListContent = ({
               if (result.addedStudents.length > 0) {
                 updateRosterCache((current) => [
                   ...current,
-                  ...(result.addedStudents as Student[]),
+                  ...result.addedStudents.map(toStudent),
                 ])
               }
               invalidateInviteQueries(queryClient, org)

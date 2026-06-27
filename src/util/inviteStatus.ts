@@ -94,7 +94,7 @@ export function buildInviteStatusLookup(
     // (state 2). Otherwise they haven't created their onboarding repo yet —
     // surface a still-pending/expired GitHub invite so the teacher can resend,
     // else "onboarding" (invited, nothing to confirm yet = state 1).
-    if (enrollment === "invited" || enrollment === "onboarded") {
+    if (enrollment === "invited") {
       const hasOnboarded =
         (Boolean(githubId) && onboardedIds.has(githubId)) ||
         (Boolean(email) && onboardedEmails.has(email))

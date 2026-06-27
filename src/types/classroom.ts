@@ -105,8 +105,8 @@ export type AssignmentTest = {
 }
 
 // Lifecycle for an enrolment. A row may exist before the GitHub account is
-// known: "invited" (invite sent, no GitHub identity yet), "onboarded" (student
-// self-reported via the onboarding repo, not yet folded into the roster),
+// known: "invited" (invite sent, no GitHub identity bound yet — covers a
+// student who has self-reported via onboarding but not yet been confirmed),
 // "enrolled" (username/github_id bound into this row and confirmed by the
 // teacher). Legacy rows (pre-feature) carry "" and are treated as already
 // enrolled when they have a github_id, else as invited.
@@ -116,7 +116,7 @@ export type AssignmentTest = {
 // column "reconciled_at" -> "enrolled_at"; there is intentionally NO back-compat
 // for the old names, so the CLI must be updated to the new schema in lockstep
 // (tracked in foundation50/classroom50-cli#195).
-export type EnrollmentStatus = "invited" | "onboarded" | "enrolled" | ""
+export type EnrollmentStatus = "invited" | "enrolled" | ""
 
 // How the student was added to the roster: "github" (added by GitHub username,
 // already has github_id + team access) or "email" (invited by email, identity

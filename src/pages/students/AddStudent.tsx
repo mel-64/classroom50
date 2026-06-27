@@ -10,7 +10,7 @@ import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { inviteStudentByEmail } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { isValidEmail } from "@/util/onboarding"
-import type { Student } from "@/types/classroom"
+import { splitName, toStudent } from "@/util/roster"
 
 type AddStudentProps = {
   className?: string
@@ -22,11 +22,6 @@ type AddStudentFormValues = {
   name: string
   username: string
   email: string
-}
-
-const splitName = (name: string) => {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
 }
 
 // Single add/invite form. The teacher provides any of name, GitHub username,
@@ -61,7 +56,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         return {
           label: username,
           warning: result?.teamWarning ?? "",
-          student: result.student as Student,
+          student: toStudent(result.student),
         }
       }
 
@@ -78,7 +73,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       return {
         label: email,
         warning: result?.inviteWarning ?? "",
-        student: result.student as Student,
+        student: toStudent(result.student),
       }
     },
     onSuccess: ({ label, warning: warningMessage, student }) => {
