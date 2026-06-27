@@ -117,9 +117,7 @@ const OnboardingStatus = ({
           </div>
           <div className={`rounded-2xl border p-5 ${toneClasses.box}`}>
             <div className="flex gap-3">
-              <CheckCircle2
-                className={`size-6 shrink-0 ${toneClasses.icon}`}
-              />
+              <CheckCircle2 className={`size-6 shrink-0 ${toneClasses.icon}`} />
               <p className="text-sm text-base-content/70">{message}</p>
             </div>
           </div>
