@@ -55,13 +55,12 @@ const UnenrollStudentButton = ({
   const [open, setOpen] = useState(false)
   const [removeFromOrg, setRemoveFromOrg] = useState(false)
 
-  // Only an active member offers the org-removal choice. Pending invites are
-  // always cancelled, non-members have nothing to remove, and the signed-in
-  // account can't remove itself here.
+  // Only an active member offers the org-removal choice; pending invites are
+  // cancelled, non-members have nothing to remove, and self can't remove itself.
   const isMember = status === "member"
   const canRemoveFromOrg = isMember && !isSelf
-  // Email-invited rows have no username yet; show the email so the button and
-  // dialog are identifiable before reconciliation.
+  // Email-invited rows have no username yet; show the email so the row is
+  // identifiable before reconciliation.
   const label = student.username || student.email
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -93,8 +92,8 @@ const UnenrollStudentButton = ({
         removeFromOrg: canRemoveFromOrg ? removeFromOrg : false,
       })
       // Key the warning by a stable identity (username, else email): this button
-      // unmounts on roster refetch, and keying stops a concurrent clean unenroll
-      // from clobbering it.
+      // unmounts on refetch, and keying stops a concurrent clean unenroll from
+      // clobbering it.
       onRemoveStudent(student.username || student.email, result.teamWarning)
       setOpen(false)
       setRemoveFromOrg(false)
@@ -226,8 +225,8 @@ const UnenrollStudentButton = ({
   )
 }
 
-// The native GitHub org-invite link, shown behind an expandable toggle (the
-// in-app onboarding link is the primary path). Same org-wide URL for everyone.
+// Native GitHub org-invite link, behind an expandable toggle (the in-app
+// onboarding link is the primary path). Same org-wide URL for everyone.
 const InviteLink = ({
   org,
   expanded,
@@ -295,11 +294,9 @@ const InviteLink = ({
   )
 }
 
-// Per-student secure onboarding link (icon-only). Carries the student's email
-// prefill plus the unguessable invite token, so reconcile can bind the
-// self-report to this exact row. The teacher copies it and emails that one
-// student. Shown only for a pending-invite student (icon-only to reduce
-// clutter; the green check confirms a copy).
+// Per-student secure onboarding link (icon-only): carries the email prefill and
+// unguessable invite token so reconcile binds the self-report to this row. Shown
+// only for a pending-invite student.
 const SecureLinkButton = ({
   org,
   classroom,
@@ -334,8 +331,7 @@ const SecureLinkButton = ({
 }
 
 // Classroom-wide onboarding link. Students open it after accepting the org
-// invite, enter their email, and self-report their GitHub identity (which the
-// teacher folds in via "Confirm enrollment"). Same URL for everyone; the
+// invite and self-report their GitHub identity. Same URL for everyone; the
 // student supplies the email, so no per-student token is needed.
 const OnboardingLink = ({
   org,
@@ -396,12 +392,10 @@ const EnrolledStudents = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
-  // Keyed by username so a clean unenroll can't clobber another student's
-  // unread warning.
+  // Keyed by username so a clean unenroll can't clobber another student's warning.
   const [teamWarnings, setTeamWarnings] = useState<Record<string, string>>({})
   const [confirmResendAllOpen, setConfirmResendAllOpen] = useState(false)
-  // The native GitHub org-invite link is secondary (most teachers use the
-  // in-app onboarding link); keep it behind an expandable toggle.
+  // Native GitHub org-invite link is secondary; keep it behind a toggle.
   const [showGithubInvite, setShowGithubInvite] = useState(false)
   const [resendingUsernames, setResendingUsernames] = useState<Set<string>>(
     new Set(),
@@ -417,9 +411,8 @@ const EnrolledStudents = ({
     partition: { readyToConfirm, awaitingEnrollment, enrolled },
   } = useRosterStatus(org, classroom, students)
 
-  // Every non-member who still needs an invite re-sent: pending, expired, or
-  // never invited. Excludes students who've onboarded (ready) or are simply
-  // awaiting onboarding — they've accepted and don't need another invite.
+  // Non-members still needing an invite re-sent: pending, expired, or never
+  // invited. Excludes onboarded/awaiting rows — they've accepted.
   const nonMemberStudents = useMemo(
     () =>
       students.filter((student) => {
@@ -447,11 +440,9 @@ const EnrolledStudents = ({
   const invalidateInviteQueries = () =>
     invalidateInviteQueriesForOrg(queryClient, org)
 
-  // Resend (or first-time invite for "none"). Returns true on success. "expired"
-  // carries an invitation id we cancel first; "none" is a plain create.
-  // What the resend actually did, so callers don't over-report: "invited" = a
-  // fresh invite sent; "pending"/"active" = no-op (still valid / already member);
-  // "skipped" = couldn't attempt (missing id).
+  // Resend (or first-time invite for "none"). "expired" carries an invitation id
+  // we cancel first; "none" is a plain create. Outcome distinguishes what
+  // happened: "invited" = sent; "pending"/"active" = no-op; "skipped" = missing id.
   type ResendOutcome = "invited" | "pending" | "active" | "skipped"
 
   const resendForStudent = async (student: Student): Promise<ResendOutcome> => {
@@ -505,12 +496,9 @@ const EnrolledStudents = ({
           ? `${summary}. ${result.cleanupWarning}`
           : summary,
       )
-      // Optimistically flip the just-confirmed rows to "enrolled" so they move
-      // from "Ready for confirmation" to "Enrolled" immediately. We do NOT
-      // invalidate the roster CSV query here: GitHub's Contents API can still
-      // serve the pre-commit students.csv for a few seconds, so an immediate
-      // refetch would overwrite this authoritative update with stale rows and
-      // revert the UI. A natural refetch later reconciles.
+      // Optimistically flip just-confirmed rows to "enrolled" so they move to
+      // Enrolled immediately. Don't invalidate the roster CSV query (see
+      // useUpdateRosterCache); a natural refetch reconciles later.
       updateRosterCache((current) =>
         applyReconciledToRoster(current, result.reconciled),
       )
@@ -547,7 +535,7 @@ const EnrolledStudents = ({
   }
 
   // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
-  // Stops early on a rate-limit error to avoid burning the cap further.
+  // Stops early on a rate-limit error.
   const handleResendAll = async () => {
     let resent = 0
     let alreadyValid = 0
@@ -560,8 +548,7 @@ const EnrolledStudents = ({
       try {
         const outcome = await resendForStudent(student)
         if (outcome === "invited") resent++
-        // "pending"/"active" = already has a valid invite / is a member; no
-        // invite was re-sent, but it isn't a failure either.
+        // "pending"/"active" = already valid / a member; not a failure.
         else if (outcome === "pending" || outcome === "active") alreadyValid++
         else failures.push(student.username)
       } catch (err) {
@@ -606,13 +593,9 @@ const EnrolledStudents = ({
     const rowKey = studentKey(student)
     const statusEntry = statusByKey.get(rowKey)
     const status = statusEntry?.status
-    // Per-row invite (re)send: offered for an outstanding GitHub invite the
-    // teacher may want to re-trigger (pending or expired), or a roster row that
-    // was never invited (none). Onboarded ("ready") / awaiting ("onboarding") /
-    // enrolled ("member") rows don't need an invite. Resend targets a GitHub org
-    // invite, which needs a github_id; an email-only row (no github_id yet)
-    // can't be org-resent — it just needs the onboarding link — so skip it (this
-    // also avoids an empty-username key collision across email rows below).
+    // Per-row invite (re)send: offered for an outstanding invite (pending/expired)
+    // or a never-invited row (none). An email-only row (no github_id) can't be
+    // org-resent — skip it (also avoids an empty-username key collision below).
     const showResend =
       (status === "pending" || status === "expired" || status === "none") &&
       Boolean(student.github_id)
@@ -623,7 +606,7 @@ const EnrolledStudents = ({
         : null
     const isSelf = isSameGitHubUser(viewer, student)
     // Email-only rows have no username yet; show the email so the row is
-    // identifiable before reconciliation fills in the GitHub handle.
+    // identifiable before reconciliation.
     const displayName = student.username
       ? getName(student.username, students)
       : student.email
@@ -695,11 +678,8 @@ const EnrolledStudents = ({
               if (warning) {
                 setWarning(username, warning)
               }
-              // Drop the row from the cached roster immediately. GitHub's
-              // Contents API can still serve the pre-commit students.csv for a
-              // few seconds, so an invalidate-driven refetch would re-add the
-              // just-removed row until a later refresh. Keyed by the same stable
-              // studentKey the rest of the roster uses.
+              // Drop the row from the cached roster immediately (see
+              // useUpdateRosterCache). Keyed by the same stable studentKey.
               updateRosterCache((current) => removeFromRoster(current, rowKey))
               // Unenroll may cancel a pending invite or remove a member.
               invalidateInviteQueries()
@@ -712,10 +692,8 @@ const EnrolledStudents = ({
 
   return (
     <div className="flex w-full flex-col gap-6">
-      {/* Action results (confirm enrollment, resend, unenroll) surface here at
-          the top: the section that triggered them often changes or unmounts
-          afterward (e.g. confirming empties the Ready section), so a page-level
-          notification region is the reliable place for the user to see them. */}
+      {/* Action results surface here at the top: the triggering section often
+          unmounts afterward (e.g. confirming empties the Ready section). */}
       {reconcileSummary || Object.keys(teamWarnings).length > 0 ? (
         <div className="flex w-full flex-col gap-2">
           {reconcileSummary ? (
@@ -750,11 +728,9 @@ const EnrolledStudents = ({
         </div>
       ) : null}
 
-      {/* Hold the status-driven sections until everything the partition depends
-          on (members, invitations, onboarding self-reports) has settled, so an
-          onboarded student doesn't flash in "Awaiting enrollment" before
-          jumping to "Ready for enrollment confirmation". The Invite students
-          card still renders below so links are available while status loads. */}
+      {/* Wait on all partition queries to avoid an onboarded student flashing in
+          "Awaiting enrollment" before jumping to "Ready". The Invite card still
+          renders below so links are available while status loads. */}
       {!rosterReady ? (
         <div className="card card-border w-full bg-base-100 shadow-sm">
           <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/50">
@@ -764,8 +740,7 @@ const EnrolledStudents = ({
         </div>
       ) : null}
 
-      {/* Ready for enrollment confirmation (state 2) — the teacher's first
-          priority: confirm students who have onboarded. */}
+      {/* Ready for enrollment confirmation (state 2). */}
       {rosterReady && readyToConfirm.length > 0 ? (
         <div className="card card-border w-full overflow-hidden border-info/30 bg-info/5 shadow-sm">
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-info/20">
@@ -833,8 +808,7 @@ const EnrolledStudents = ({
         ) : null}
       </div>
 
-      {/* Awaiting enrollment (state 1): invited, not yet onboarded. Bulk
-          "Resend invites" lives here, where the outstanding invitations are. */}
+      {/* Awaiting enrollment (state 1): invited, not yet onboarded. */}
       {rosterReady && awaitingEnrollment.length > 0 ? (
         <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">

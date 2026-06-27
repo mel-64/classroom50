@@ -24,11 +24,9 @@ type AddStudentFormValues = {
   email: string
 }
 
-// Single add/invite form. The teacher provides any of name, GitHub username,
-// and email. When a username is given we enroll via GitHub (resolve the user,
-// add to team, send the org invite) and still store the email on the row; with
-// only an email we send an email invite. Either way the student completes their
-// roster row (name/email) through onboarding.
+// Single add/invite form. A username enrolls via GitHub (resolve, add to team,
+// send org invite) and still stores the email; email-only sends an email invite.
+// Either way the student completes their roster row through onboarding.
 const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
@@ -60,9 +58,8 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         }
       }
 
-      // Email-only -> email invite. A unique per-student invite token is always
-      // minted, so the secure per-student onboarding link is available from the
-      // roster regardless; the shared classroom-wide link also works.
+      // Email-only -> email invite. A per-student invite token is always minted,
+      // so the secure per-student onboarding link is available too.
       const result = await inviteStudentByEmail(githubClient, {
         org,
         classroom,
@@ -78,14 +75,11 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
     },
     onSuccess: ({ label, warning: warningMessage, student }) => {
       setWarning(warningMessage)
-      // Confirm the add and clear the form so the next student starts clean
-      // (and a stray re-click can't resubmit the same row into a duplicate
-      // error). A non-fatal warning still shows alongside the confirmation.
+      // Clear the form so the next student starts clean and a stray re-click
+      // can't resubmit into a duplicate error. A warning still shows alongside.
       setSuccess(`Added ${label}.`)
       form.reset()
-      // Show the new row immediately. GitHub's Contents API can still serve the
-      // pre-commit students.csv for a few seconds, so an invalidate-driven
-      // refetch alone would leave the roster looking unchanged until refresh.
+      // Show the new row immediately (see useUpdateRosterCache).
       updateRosterCache((current) => [...current, student])
       invalidateInviteQueries(queryClient, org)
     },
@@ -98,10 +92,8 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       email: "",
     } satisfies AddStudentFormValues,
     // Validate on submit, then re-validate on every change after the first
-    // submit attempt. Without this, a failed form-level validation leaves
-    // canSubmit=false and the form-level validator never re-runs on change, so
-    // the disabled submit button never recovers (the form is dead until
-    // remount). onDynamic runs in both phases under revalidateLogic.
+    // attempt. Without this, a failed form-level validation leaves canSubmit
+    // false and the validator never re-runs, so the button never recovers.
     validationLogic: revalidateLogic(),
     validators: {
       onDynamic: ({ value }) => {

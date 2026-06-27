@@ -5,10 +5,9 @@ import type {
 } from "@/types/classroom"
 import type { InviteStatus } from "@/util/inviteStatus"
 
-// Stable, position-independent per-row identity. github_id is the most stable
-// (survives a username rename); fall back to username, then email. Rows always
-// carry at least one of these (parseStudentsCsv filters out fully-empty rows),
-// so no index fallback is needed.
+// Stable, position-independent per-row identity. Prefer github_id (survives a
+// rename), then username, then email. Rows always carry at least one
+// (parseStudentsCsv drops fully-empty rows), so no index fallback is needed.
 export function studentKey(student: Student): string {
   return student.github_id || student.username || student.email
 }
@@ -20,11 +19,9 @@ const ENROLLMENT_STATUSES: readonly EnrollmentStatus[] = [
 ]
 const ENROLLMENT_METHODS: readonly EnrollmentMethod[] = ["github", "email", ""]
 
-// Narrow a raw CSV row (all-string fields, StudentCsvRow-shaped) into a typed
-// Student. The enrollment_status / enrollment_method columns are string-literal
-// unions on Student; coerce unknown values to "" rather than letting an
-// off-list string masquerade as a valid union member (closes the
-// `StudentCsvRow as Student` boundary the mutations used to cast across).
+// Narrow a raw CSV row into a typed Student. enrollment_status/method are
+// string-literal unions; coerce unknown values to "" rather than letting an
+// off-list string masquerade as a valid union member.
 export function toStudent(row: Record<string, string>): Student {
   const status = ENROLLMENT_STATUSES.includes(
     row.enrollment_status as EnrollmentStatus,
@@ -52,8 +49,7 @@ export function toStudent(row: Record<string, string>): Student {
   }
 }
 
-// Split a free-text full name into first/last. First token is the first name;
-// everything after is the last name. Empty/whitespace input yields empty parts.
+// Split a full name: first token is first name, the rest is last name.
 export function splitName(name: string): {
   first_name: string
   last_name: string
@@ -62,35 +58,25 @@ export function splitName(name: string): {
   return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
 }
 
-// Remove the row matching `key` (a studentKey value) from the roster. Used for
-// the optimistic unenroll update. Removes ALL rows that collapse to the same
-// key: a duplicate-key roster (e.g. two email-only rows sharing an email, or
-// two rows with the same github_id) is mirrored by the server's own match
-// predicate, and a later refetch restores any survivor.
+// Remove rows matching `key` for the optimistic unenroll update. Removes ALL
+// rows that collapse to the same key (mirroring the server's match predicate);
+// a later refetch restores any survivor.
 export function removeFromRoster(current: Student[], key: string): Student[] {
   return current.filter((student) => studentKey(student) !== key)
 }
 
-// Flip the rows the teacher just confirmed to "enrolled" for the optimistic
-// reconcile update. reconciled carries { username, email } per bound row. A
-// row that already has a username is identified by username; an email-only row
-// (no username yet) is matched by email. This mirrors the server binding each
-// self-report to exactly one row and avoids flipping an unrelated email-only
-// row that merely shares an email with a username-reconciled row. Already
-// "enrolled" rows are left untouched.
+// Flip reconciled rows to "enrolled" for the optimistic update. Username-bearing
+// rows match by username; email-only rows match by email. Already-enrolled rows
+// untouched.
 export function applyReconciledToRoster(
   current: Student[],
   reconciled: { username: string; email: string }[],
 ): Student[] {
   if (reconciled.length === 0) return current
-  // Reconcile always reports a GitHub-attested username per bound row (even for
-  // an email-matched row, where it's the self-report's github_username). So a
-  // username-bearing cached row matches by username. An email-only cached row
-  // (no username yet) matches by the email of a reconciled entry — but only one
-  // it can legitimately own: an entry whose username does NOT already match
-  // some other cached row. That guard reproduces the server's one-self-report-
-  // to-one-row binding and avoids flipping an unrelated email-only row that
-  // merely shares an address with a username-reconciled row.
+  // An email-only cached row may only claim a reconciled entry whose username
+  // does NOT already match another cached row. That guard reproduces the
+  // server's one-self-report-to-one-row binding and avoids flipping an unrelated
+  // email-only row that merely shares an address with a username-reconciled row.
   const cachedUsernames = new Set(
     current.map((s) => s.username.trim().toLowerCase()).filter(Boolean),
   )
@@ -122,11 +108,10 @@ export type RosterPartition = {
 }
 
 // Whether the roster can render without a row flashing in the wrong section.
-// True once everything the partition depends on has settled: members +
-// invitations (statusLoading), and — when status is available — the onboarding
-// self-reports query (loaded or errored; an error surfaces its own warning and
-// must not spin forever). A non-owner never fetches reports, so status settling
-// is enough. Pure so the gate logic is unit-testable independent of the hook.
+// True once members + invitations (statusLoading) have settled and — when
+// status is available — the self-reports query has loaded or errored (an error
+// surfaces its own warning, must not spin forever). Non-owners never fetch
+// reports, so status settling is enough. Pure for unit-testability.
 export function isRosterReady(input: {
   statusLoading: boolean
   statusAvailable: boolean
@@ -140,10 +125,9 @@ export function isRosterReady(input: {
 }
 
 // Partition the roster into the three teacher-facing sections from each row's
-// computed invite status, so the sections and the row badges agree exactly:
-//  - readyToConfirm: onboarded, repo exists -> confirmable now ("ready").
-//  - enrolled:       completed ("member") or enrolled-but-since-removed
-//                    ("removed").
+// invite status, so sections and row badges agree exactly:
+//  - readyToConfirm: onboarded, confirmable now ("ready").
+//  - enrolled:       "member" or enrolled-but-since-removed ("removed").
 //  - awaitingEnrollment: everything else (invited, not yet onboarded).
 export function partitionRoster(
   students: Student[],

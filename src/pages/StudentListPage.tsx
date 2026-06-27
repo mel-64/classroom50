@@ -29,10 +29,9 @@ const StudentListContent = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
-  // Count from the same live partition the Enrolled section uses, so the header
-  // and the section badge always agree. While status is still loading or
-  // unavailable (non-owner), fall back to the CSV "enrolled" signal rather than
-  // flashing 0.
+  // Count from the same live partition the Enrolled section uses, so header and
+  // badge agree. While status is loading/unavailable (non-owner), fall back to
+  // the CSV "enrolled" signal rather than flashing 0.
   const { statusAvailable, statusLoading, partition } = useRosterStatus(
     org,
     classroom,
@@ -59,8 +58,7 @@ const StudentListContent = ({
             classroom={classroom}
             client={client}
             onSuccess={(result) => {
-              // Show the imported rows immediately (GitHub's Contents API may
-              // still serve the pre-commit students.csv for a few seconds).
+              // Show imported rows immediately (see useUpdateRosterCache).
               if (result.addedStudents.length > 0) {
                 updateRosterCache((current) => [
                   ...current,

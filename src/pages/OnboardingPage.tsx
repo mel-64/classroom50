@@ -133,18 +133,11 @@ const OnboardingStatus = ({
 
 const OnboardingPage = () => {
   const { org, classroom } = useParams({ strict: false })
-  // The invited email may travel in the link as a prefill (an individual link
-  // the teacher sent). On the generic classroom-wide link it's absent and the
-  // student types it. Either way it's an untrusted value: it only seeds the
-  // claimed-email field; the authenticated session is what actually authorizes
-  // everything, and reconciliation re-verifies the commit author against the
-  // claimed identity.
+  // Untrusted: only seeds the claimed-email field; the session authorizes.
   const search = useSearch({ strict: false }) as { email?: string; t?: string }
   const prefilledEmail = typeof search.email === "string" ? search.email : ""
-  // Secure-link token: written into the self-report YAML (it does NOT name the
-  // repo), where reconcile uses it as the strongest match key. Validated before
-  // use; an absent/garbage value just degrades to the classroom-wide flow
-  // (reconcile then matches by github_id, else email).
+  // Secure-link token: reconcile's strongest match key. Absent/garbage degrades
+  // to the classroom-wide flow (reconcile then matches by github_id, else email).
   const inviteToken =
     typeof search.t === "string" && isValidInviteToken(search.t)
       ? search.t.trim()
@@ -158,10 +151,8 @@ const OnboardingPage = () => {
   const { data: orgMembership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
-  // Repo-based "in progress" detection that survives a page reload: the student
-  // already created an onboarding repo for this classroom (awaiting the
-  // teacher's reconcile). This is the unambiguous "submitted, nothing more to
-  // do" signal.
+  // Repo-based "submitted" detection that survives reload: an onboarding repo
+  // for this classroom exists (awaiting the teacher's reconcile).
   const { data: hasOnboarded, isLoading: loadingOnboarded } = useQuery({
     queryKey: ["github", "onboarding-progress", org, classroom, user?.id],
     queryFn: () =>
@@ -174,18 +165,12 @@ const OnboardingPage = () => {
     enabled: Boolean(org && classroom && user?.id && orgMembership),
   })
 
-  // "Has access" signal: active membership of the classroom team. Both invite
-  // flows put the student on the team (username at invite time; email via the
-  // invite's team_ids), so this means "you can already work in this classroom"
-  // — NOT necessarily fully enrolled. We use it to replace a misleading
-  // repeated form on revisit with a clean "you're all set" page.
+  // "Has access" signal: active classroom-team membership (means "can work
+  // here", NOT fully enrolled). Used to swap the form for a "you're all set" page.
   //
-  // Slug caveat: the authoritative team slug lives in the private classroom50
-  // config repo, which a student can't read, so we derive `classroom50-
-  // <classroom>`. On a GitHub name collision the real slug can differ; the
-  // failure mode is intentionally safe — isTeamMember degrades any miss/error to
-  // false, so the worst case is showing the form to an already-enrolled student
-  // (a re-submit is idempotent and harmless), never granting false access.
+  // Slug caveat: derived as `classroom50-<classroom>` since the authoritative
+  // slug lives in a config repo students can't read. On a name collision it
+  // degrades safely to the form (re-submit is idempotent), never false access.
   const teamSlug = `classroom50-${classroom}`
   const { data: onClassroomTeam, isLoading: loadingTeam } = useQuery({
     queryKey: ["github", "team-membership", org, teamSlug, user?.login],
@@ -224,19 +209,14 @@ const OnboardingPage = () => {
   }
 
   // Gate on having a membership record at all. A "pending" invite still lets
-  // the student through to the form: submitOnboarding self-heals by accepting
-  // the invite (acceptPendingOrgInvite) before creating the repo, so requiring
-  // "active" here would wrongly block an invited student who simply hasn't
-  // clicked accept in email yet. Only a genuinely missing membership (the
-  // query 404s -> undefined) means they were never invited.
+  // through: submitOnboarding self-heals by accepting the invite before creating
+  // the repo. Only a missing membership (query 404s) means never invited.
   if (!orgMembership) {
     return <NotOrgMember org={org} classroom={classroom} />
   }
 
-  // A just-submitted onboarding (this session) OR a previously-created
-  // onboarding repo for this classroom found on revisit means the process
-  // kicked off and is awaiting the teacher's reconcile. Unambiguous "submitted,
-  // nothing more to do" — show it before the form.
+  // Just-submitted (this session) or an existing onboarding repo: awaiting
+  // reconcile. Show it before the form.
   if (onboardMutation.isSuccess || hasOnboarded) {
     return (
       <OnboardingStatus
@@ -248,9 +228,7 @@ const OnboardingPage = () => {
     )
   }
 
-  // The student already has classroom access (active team member). Show a
-  // clean "you're all set" page rather than the editable form, which is
-  // confusing for someone who's already in.
+  // Already has classroom access: show "you're all set" instead of the form.
   if (onClassroomTeam) {
     return (
       <OnboardingStatus

@@ -17,11 +17,9 @@ const Classroom50YamlSchema = z.object({
   classroom: z.string().min(1),
   assignment: z.string().min(1),
   // Optional capability-URL secret, present only for a protected classroom.
-  // Mirrors the CLI's repo-config-v1 schema; consumers use the
-  // <classroom>/<secret>/ Pages path when it's present. Pattern-checked at the
-  // read boundary so a hand-edited or CLI-desynced value can't flow into a
-  // Pages URL path segment unvalidated; an invalid value degrades to "no
-  // secret" (plain path) rather than failing the whole document parse.
+  // Mirrors the CLI's repo-config-v1 schema. Pattern-checked at the read
+  // boundary so a hand-edited/desynced value can't reach a Pages URL segment;
+  // an invalid value degrades to "no secret" rather than failing the parse.
   secret: z.string().regex(SECRET_PATTERN).optional().catch(undefined),
   owner: IdentitySchema.optional(),
   source: z
@@ -52,23 +50,21 @@ export function parseClassroom50Yaml(source: string): Classroom50Yaml {
   return Classroom50YamlSchema.parse(raw)
 }
 
-// Self-report payload for the email-first onboarding flow, committed to the
-// onboarding repo and read back by the teacher reconcile step. username/id are
-// GitHub-attested (from the authenticated session); email is claimed.
+// Self-report payload for email-first onboarding. username/id are GitHub-
+// attested (from the authenticated session); email is claimed.
 const OnboardingYamlSchema = z.object({
   email: z.string().min(1),
-  // Student-supplied display name. Optional for back-compat with payloads
-  // written before name collection; default to "" so reconcile can fill the
-  // roster when present and leave it untouched when absent.
+  // Student-supplied display name. Optional for back-compat with pre-name
+  // payloads; default to "" so reconcile fills it when present, leaves when not.
   first_name: z.string().optional().default(""),
   last_name: z.string().optional().default(""),
   github_username: z.string().min(1),
   github_id: z.number(),
   classroom: z.string().min(1),
   created_at: z.string().optional(),
-  // Teacher-issued secure-link token, present only when the student onboarded
-  // via a unique link. Reconcile's strongest match key; validated loosely here
-  // (any string) and pattern-checked by the consumer before use.
+  // Teacher-issued secure-link token, present only for secure-link onboarding.
+  // Reconcile's strongest match key; validated loosely here (any string) and
+  // pattern-checked by the consumer before use.
   invite_token: z.string().optional(),
 })
 

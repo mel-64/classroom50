@@ -30,26 +30,24 @@ const createClassroomMetadata = (
   secret?: string,
 ) => ({
   schema: "classroom50/classroom/v1",
-  // Fall back to the slug when no display name was supplied, so classroom.json
-  // always carries a non-empty name.
+  // Fall back to the slug when no display name was supplied.
   name: name || classroom,
   short_name: classroom,
   term,
   org,
-  // Written only when a team was provisioned, matching the CLI's `omitempty`
-  // team field. Grants rostered students read on private org templates.
+  // Written only when a team was provisioned (matches the CLI's `omitempty`).
+  // Grants rostered students read on private org templates.
   ...(team ? { team } : {}),
-  // Written only when the teacher opted into protected resources, matching
-  // the CLI's `omitempty` secret field. When present, this classroom's Pages
-  // resources publish under `<classroom>/<secret>/...`.
+  // Written only when the teacher opted into protected resources (CLI
+  // `omitempty`). When present, Pages resources publish under
+  // `<classroom>/<secret>/...`.
   ...(secret ? { secret } : {}),
 })
 
-// Seed header for a new classroom's empty students.csv. Derived from the
-// single source of truth (STUDENT_CSV_FIELDS in src/api/mutations/students.ts)
-// so it can't drift; computed lazily (not at module-eval time) to avoid the
-// students.ts <-> mutations.ts circular-import TDZ. The parser is header-based,
-// so an older 6-column roster still parses and the extra columns default to "".
+// Seed header for a new classroom's empty students.csv. Derived from the single
+// source of truth (STUDENT_CSV_FIELDS) so it can't drift; computed lazily (not
+// at module-eval time) to avoid the students.ts <-> mutations.ts circular-import
+// TDZ. The parser is header-based, so an older roster still parses.
 const studentsCsvHeader = () => STUDENT_CSV_FIELDS.join(",") + "\n"
 const createClassroomBody = (
   base_tree: string,
@@ -304,8 +302,8 @@ export {
   createClassroomFilesWithConflictRetry,
 } from "@/api/mutations/classrooms"
 
-// One entry in a git tree write. GitHub accepts either inline `content` (create
-// or update a blob) or a `sha` (existing blob, or `null` to delete the path).
+// One entry in a git tree write. GitHub accepts either inline `content` or a
+// `sha` (existing blob, or `null` to delete the path).
 export type GitTreeFileMode = "100644" | "100755" | "120000"
 export type GitTreeEntry = {
   path: string
@@ -383,25 +381,23 @@ export function createTeam(client: GitHubClient, input: CreateTeamInput) {
   })
 }
 
-// Minimal team identity persisted in classroom.json. The slug is
-// authoritative for team ops (GitHub may slugify a name differently on
-// collision); the id is the immutable handle. Mirrors the CLI's teamRef.
+// Minimal team identity persisted in classroom.json. The slug is authoritative
+// for team ops (GitHub may slugify a name differently on collision); the id is
+// the immutable handle.
 export type ClassroomTeamRef = {
   id: number
   slug: string
 }
 
 // A short-name with consecutive/trailing hyphens slugifies to something other
-// than `classroom50-<short>`, breaking team ops that re-derive the slug. The
-// GUI's slugify produces canonical slugs; guard defensively to match the CLI.
+// than `classroom50-<short>`, breaking team ops that re-derive the slug.
 function isCanonicalTeamShortName(shortName: string): boolean {
   return !shortName.endsWith("-") && !shortName.includes("--")
 }
 
-// Create (or adopt) the per-classroom `secret` team and return its { id, slug }
-// for classroom.json (later grants rostered students read on private org
-// templates). Mirrors the CLI: idempotent, adopts a same-named team on 422 and
-// reconciles its privacy.
+// Create (or adopt) the per-classroom team and return its { id, slug } for
+// classroom.json. Idempotent: adopts a same-named team on 422 and reconciles
+// its privacy.
 export async function ensureClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -421,7 +417,7 @@ export async function ensureClassroomTeam(
   } catch (err) {
     // 422 = a same-named team already exists. Adopt it (read id/slug, reconcile
     // privacy). `created: false` means it pre-existed and must NOT be deleted on
-    // a create-failure rollback (that would destroy a team we never created).
+    // a create-failure rollback.
     if (err instanceof GitHubAPIError && err.status === 422) {
       const adopted = await adoptClassroomTeam(client, org, classroom)
       return { ...adopted, created: false }
@@ -442,13 +438,11 @@ async function adoptClassroomTeam(
 
   // NOTE: a stale same-slug team left by a failed deleteClassroom can re-grant
   // the prior cohort read on this classroom's private templates. We do NOT
-  // refuse a populated team here: GitHub auto-adds the team creator as a
-  // maintainer, so a freshly-created team (e.g. the winner of a concurrent
-  // same-name create race) already reports members, and refusing on member
-  // count would break the benign adopt the CLI relies on. Distinguishing a
-  // stale-leftover from this classroom's own live team requires the persisted
-  // team id from classroom.json, which isn't available here — left for a
-  // follow-up that reconciles against that id.
+  // refuse a populated team: GitHub auto-adds the creator as a maintainer, so a
+  // freshly-created team already reports members, and refusing on member count
+  // would break the benign adopt. Distinguishing a stale leftover from this
+  // classroom's live team needs the persisted team id from classroom.json,
+  // which isn't available here — left for a follow-up.
   if (existing.privacy !== "secret") {
     await client.request(`/orgs/${org}/teams/${existing.slug}`, {
       method: "PATCH",
@@ -459,10 +453,9 @@ async function adoptClassroomTeam(
   return { id: existing.id, slug: existing.slug }
 }
 
-// Delete the per-classroom team by its persisted slug (mirrors the CLI). As
-// defense against a reused slug, the live team's id is confirmed against the
-// persisted id before deletion (skipped when no id was recorded). 404 =
-// already gone (success); an empty ref is a no-op.
+// Delete the per-classroom team by its persisted slug. As defense against a
+// reused slug, the live team's id is confirmed against the persisted id before
+// deletion (skipped when no id was recorded). 404 = already gone (success).
 export async function deleteClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -541,9 +534,9 @@ export function addUserToTeam(
   )
 }
 
-// Remove a user from a team (mirrors the CLI). 404 = not a member / team gone
-// (success), so removal is idempotent. Org membership is untouched — only the
-// team grant (and the template read it confers) is dropped.
+// Remove a user from a team. 404 = not a member / team gone (success), so it's
+// idempotent. Org membership is untouched — only the team grant (and the
+// template read it confers) is dropped.
 export async function removeUserFromTeam(
   client: GitHubClient,
   input: {
@@ -567,12 +560,10 @@ export async function removeUserFromTeam(
   }
 }
 
-// POST /orgs/{org}/invitations. Supports inviting by invitee_id or by email
-// (GitHub matches the email to a verified account at accept time). An optional
-// team_ids array auto-adds the invitee to those teams on acceptance — so an
-// email invite can land a student directly in the classroom team without a
-// separate team-add (per GitHub's org-invitation docs). Exactly one of
-// invitee_id / email must be provided. Owner-only.
+// POST /orgs/{org}/invitations by invitee_id or email. An optional team_ids
+// array auto-adds the invitee to those teams on acceptance, so an email invite
+// can land a student directly in the classroom team without a separate
+// team-add. Exactly one of invitee_id / email must be provided. Owner-only.
 export function createOrgInvitation(
   client: GitHubClient,
   input: {
@@ -647,9 +638,8 @@ export async function removeOrgMembership(
 export type OrgMembershipState = "active" | "pending"
 
 // PATCH /repos/{owner}/{repo} { archived: true }. Reversible and covered by the
-// existing `repo` scope (unlike deletion, which needs delete_repo and a re-auth).
-// Used to retire an onboarding repo once its identity is reconciled into the
-// roster. 404 treated as success (already gone).
+// existing `repo` scope (unlike deletion, which needs delete_repo and a
+// re-auth). Retires an onboarding repo once reconciled. 404 = success.
 export async function archiveRepo(
   client: GitHubClient,
   input: { owner: string; repo: string },
@@ -669,10 +659,10 @@ export async function archiveRepo(
   }
 }
 
-// DELETE /repos/{owner}/{repo}. Needs the delete_repo OAuth scope (now in
-// DEFAULT_GITHUB_SCOPE). A token granted before delete_repo was requested (an
-// older session) still 403s, so callers that want "delete if possible, else
-// archive" should catch the 403. 404 treated as success (already gone).
+// DELETE /repos/{owner}/{repo}. Needs the delete_repo OAuth scope. A token
+// granted before delete_repo was requested (an older session) still 403s, so
+// callers wanting "delete if possible, else archive" should catch the 403.
+// 404 = success.
 export async function deleteRepo(
   client: GitHubClient,
   input: { owner: string; repo: string },
@@ -713,11 +703,10 @@ type EnsureOrgMembershipResult = {
 }
 
 // Precheck membership, only invite when neither active nor pending, and treat a
-// 422 (already member/invited) as success via a follow-up read. Mirrors the
-// CLI's inviteIfNotMember. Any other 422/error propagates. Optional teamIds are
-// attached to a freshly-created invite so accepting the single org invitation
-// activates team membership atomically (no separate, separately-accepted team
-// invite that could leave the student org-active but team-pending).
+// 422 (already member/invited) as success via a follow-up read. Optional
+// teamIds attach to a fresh invite so accepting the single org invitation
+// activates team membership atomically (no separate team invite that could
+// leave the student org-active but team-pending).
 export async function ensureOrgMembership(
   client: GitHubClient,
   input: {
@@ -752,11 +741,11 @@ export async function ensureOrgMembership(
   }
 }
 
-// Resend an org invite without ever leaving the student invite-less. The old
-// cancel-then-recreate order stranded a student if the recreate failed; instead
-// recreate first and cancel the stale invite only once a replacement exists. If
-// a still-pending invite blocks the recreate (createOrgInvitation 422s), that
-// existing invite is the live one, so leave it in place.
+// Resend an org invite without ever leaving the student invite-less: recreate
+// first, then cancel the stale invite only once a replacement exists (the old
+// cancel-then-recreate order stranded a student if the recreate failed). If a
+// still-pending invite blocks the recreate (422), that existing invite is the
+// live one, so leave it in place.
 export async function resendOrgInvitation(
   client: GitHubClient,
   input: {
@@ -943,18 +932,18 @@ const SKELETON_PATHS = [
   "workflows/autograde-runner.yaml",
   "scripts/collect_scores.py",
   "scripts/runner.py",
-  // Translates assignments.json `tests` blocks into per-assignment
-  // tests.json bundles during publish-pages — without it, declarative
-  // autograding tests silently never grade.
+  // Translates assignments.json `tests` blocks into per-assignment tests.json
+  // bundles during publish-pages; without it, declarative autograding tests
+  // silently never grade.
   "scripts/materialize_tests.py",
-  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml fetches
-  // it from Pages. Without it, feedback_pr assignments can't open their PR.
+  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml fetches it
+  // from Pages. Without it, feedback_pr assignments can't open their PR.
   "scripts/ensure_feedback_pr.py",
 ]
 
-// gh teacher init substitutes this placeholder (publish-pages.yaml's
-// push trigger) with the config repo's default branch at commit time;
-// committing it raw would leave the Pages workflow never firing.
+// gh teacher init substitutes this placeholder (publish-pages.yaml's push
+// trigger) with the config repo's default branch at commit time; committing it
+// raw would leave the Pages workflow never firing.
 const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
 const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
 const ORG_BASE = ".github"
@@ -1051,8 +1040,8 @@ export async function findMissingSkeletonFiles(
     return []
   }
 
-  // The skeleton is committed against the config repo's actual default
-  // branch (org policy can rename `main`), matching gh teacher init.
+  // Committed against the config repo's actual default branch (org policy can
+  // rename `main`), matching gh teacher init.
   const repo = await client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`)
   const defaultBranch = repo.default_branch || "main"
 
@@ -1571,15 +1560,13 @@ export async function encryptSecret(publicKey: string, secret: string) {
 }
 
 /**
- * Validates a fine-grained PAT before storing it as the service token, mirroring
- * the CLI's `servicetoken.ValidateToken`: reads the classroom50 repo's contents
- * *as the supplied token*, exercising `Contents: read`, and maps failures to
- * actionable messages so a bad token is caught here, not later as a failed run.
+ * Validates a fine-grained PAT before storing it as the service token by
+ * reading the classroom50 repo's contents *as the supplied token* (exercising
+ * `Contents: read`), mapping failures to actionable messages.
  *
  * Caveat: this proves the token can read `classroom50`, not the student repos
  * the collect workflow walks (fine-grained PATs don't expose their repo
- * selection via the API). Hence the UI requires "All repositories" and the
- * success copy is scoped to what this check actually proves.
+ * selection via the API). Hence the UI requires "All repositories".
  */
 export async function validateServiceToken(
   token: string,
@@ -1594,8 +1581,7 @@ export async function validateServiceToken(
 
   try {
     // Probes api.github.com directly with the pasted token, relying on GitHub's
-    // permissive CORS on authenticated REST calls; route through any future
-    // CORS-stripping proxy too.
+    // permissive CORS on authenticated REST calls.
     await tokenClient.request(`/repos/${org}/classroom50/contents/`)
   } catch (err) {
     if (err instanceof GitHubAPIError) {
@@ -1618,8 +1604,8 @@ export async function validateServiceToken(
         )
       }
     }
-    // A fetch that never reached GitHub (network/CORS) throws a TypeError, not a
-    // GitHubAPIError — don't blame the token for that.
+    // A fetch that never reached GitHub (network/CORS) throws a TypeError, not
+    // a GitHubAPIError — don't blame the token for that.
     if (err instanceof TypeError) {
       throw new Error(
         `Couldn't reach GitHub to verify the token (network or CORS issue). Check your connection and try again. (${err.message})`,
@@ -1638,12 +1624,12 @@ export async function validateServiceToken(
 export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
 
 /**
- * Dispatches the classroom50 repo's `collect-scores.yaml` workflow — the same
- * nightly job that refreshes `scores.json` — so a teacher can pull fresh
- * submissions on demand. Reads the repo's default branch for the required ref.
+ * Dispatches the classroom50 repo's `collect-scores.yaml` workflow (the same
+ * nightly job that refreshes `scores.json`) so a teacher can pull fresh
+ * submissions on demand.
  *
  * Returns `sinceRunId`: the newest collect-scores dispatch run before this POST
- * (null if none). Since the dispatch API returns no run id, the caller finds the
+ * (null if none). The dispatch API returns no run id, so the caller finds the
  * triggered run as the oldest dispatch run with a larger id — monotonic, so no
  * clock comparison and unambiguous when dispatches race.
  *
@@ -1880,11 +1866,9 @@ type OrgWorkflowPermissions = {
 }
 
 // The opt-in Feedback PR (issue #86), opened by each student repo's autograde
-// workflow, is rejected by GitHub unless the org-level "Allow GitHub Actions to
-// create and approve pull requests" toggle is on (it defaults off). Set only at
-// the org level, so without it a GUI-initialized org hits the
-// `pull-requests: none` failure (discussion #33). Mirrors the CLI; preserves
-// default_workflow_permissions.
+// workflow, is rejected unless the org-level "Allow GitHub Actions to create
+// and approve pull requests" toggle is on (defaults off, settable only at the
+// org level; see discussion #33). Preserves default_workflow_permissions.
 export async function ensureOrgCanCreatePullRequests(
   client: GitHubClient,
   org: string,
@@ -2027,8 +2011,8 @@ export async function initClassroom50({
   })
 
   // configRepo is a hard prerequisite for every step below. If it errored,
-  // continuing only cascades 404s and (since the mutation still resolves) would
-  // report success on a half-initialized org. Stop here.
+  // continuing only cascades 404s and would report success on a half-
+  // initialized org. Stop here.
   if (stepFailed(results.configRepo)) {
     return buildResult("error")
   }
@@ -2081,8 +2065,8 @@ export async function addRepoCollaborator(params: {
   const { client, org, repo, username, permission = "push" } = params
 
   // Only a definitive 404 (not an org member) blocks the add; transient errors
-  // (rate limit, 5xx, private-membership 403) fall through to the authoritative
-  // PUT rather than falsely rejecting a valid member.
+  // (rate limit, 5xx, private-membership 403) fall through to the PUT rather
+  // than falsely rejecting a valid member.
   try {
     await client.requestRaw(
       `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,

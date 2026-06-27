@@ -1,74 +1,53 @@
-// Naming for the onboarding flow. A student self-reports their identity by
-// creating an onboarding repo from inside an authenticated session. The repo
-// name is `classroom50-onboarding-<github-id>-<random-hash>`: the github-id
-// segment ties it to the creator, and the browser-generated random suffix makes
-// the name unguessable (so no other org member can pre-create — "squat" — a
-// victim's onboarding repo) and unique per onboarding (so a student enrolled in
-// multiple classrooms of one org gets a distinct repo each time; no collision).
-//
-// Because the random suffix is not derivable by the teacher, the name is NOT a
-// lookup key: reconcile lists onboarding repos by the shared prefix and matches
-// each self-report back to a roster row purely on the YAML payload contents
-// (invite_token, then github_id, then email). The authoritative identity lives
-// inside .classroom50-onboarding.yaml (GitHub-attested username/id; claimed
-// email; optional teacher-issued invite_token).
+// Onboarding repo name: `classroom50-onboarding-<github-id>-<random-hash>`. The
+// random suffix makes the name unguessable (squat-proof) and unique per
+// onboarding. It's NOT a lookup key (suffix isn't teacher-derivable): reconcile
+// lists by prefix and matches each self-report to a row purely on the YAML
+// payload (invite_token, then github_id, then email).
 
 export const ONBOARDING_REPO_PREFIX = "classroom50-onboarding-"
 
 // Path of the self-report payload committed into the onboarding repo.
 export const ONBOARDING_YAML_PATH = ".classroom50-onboarding.yaml"
 
-// Lowercase hex of a byte array. Shared by the invite-token generator and the
-// email hasher so the Uint8Array -> hex transform lives in one place.
+// Lowercase hex of a byte array.
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
 }
 
-// 16 bytes (128 bits) of cryptographic randomness as 32-char lowercase hex.
-// Backs both the per-student invite token and the onboarding repo suffix:
-// both need an unguessable, collision-proof identifier from the same source.
+// 128 bits of CSPRNG randomness as 32-char lowercase hex (unguessable,
+// collision-proof). Backs both the invite token and the onboarding suffix.
 function random128BitHex(): string {
   const bytes = new Uint8Array(16)
   crypto.getRandomValues(bytes)
   return bytesToHex(bytes)
 }
 
-// Optional per-student invite token. When a teacher sends a student a unique
-// secure onboarding link, we generate this random token and store it on the
-// roster row + the link. Unlike the classroom-wide link, the token is NOT
-// derivable from public info — at onboarding time it is written into the
+// Optional per-student invite token for a teacher-issued secure link. Unlike
+// the classroom-wide link it's not derivable from public info; written into the
 // self-report YAML (NOT the repo name), where reconcile uses it as the
-// strongest match key, binding the self-report to the exact roster row the
-// teacher issued it for. This closes the email-row hijack for students who use
-// the secure link; the classroom-wide link omits it and falls back to
-// github_id / email matching.
+// strongest match key, closing the email-row hijack for secure-link students.
 export function generateInviteToken(): string {
   return random128BitHex()
 }
 
-// Token names are validated before they ever flow into a YAML field or a URL,
-// so a hand-edited/garbage value can't propagate downstream.
+// Validate token names before they flow into a YAML field or URL.
 const INVITE_TOKEN_PATTERN = /^[0-9a-f]{32}$/
 
 export function isValidInviteToken(token: string): boolean {
   return INVITE_TOKEN_PATTERN.test(token.trim())
 }
 
-// Browser-generated random suffix for an onboarding repo name. 16 bytes (128
-// bits) of hex: collision-proof in practice and unguessable, so the resulting
-// repo name can't be pre-squatted by another org member. Generated fresh per
-// onboarding attempt; written nowhere else (the name itself is the only record).
+// Random suffix for an onboarding repo name: unguessable + collision-proof so
+// the name can't be pre-squatted by another org member. Fresh per attempt.
 export function generateOnboardingSuffix(): string {
   return random128BitHex()
 }
 
-// The onboarding repo name: prefix + github-id + random suffix. The github-id
-// segment is the stable, self-attested part (used to scope the reconcile prefix
-// list); the random suffix makes the full name unguessable and unique. Callers
-// that look the repo up later must list by `onboardingRepoPrefixForGithubId`
-// (the exact name is not recomputable without the suffix).
+// Onboarding repo name: prefix + github-id + random suffix. Later lookups must
+// list by `onboardingRepoPrefixForGithubId` (the name isn't recomputable
+// without the suffix).
 export function onboardingRepoName(
   githubId: number | string,
   randomSuffix: string,
@@ -76,50 +55,41 @@ export function onboardingRepoName(
   return `${ONBOARDING_REPO_PREFIX}${githubId}-${randomSuffix}`
 }
 
-// Prefix matching every onboarding repo a given github-id could have created
-// (`classroom50-onboarding-<id>-`). Used to find a student's own repo(s) when
-// the random suffix isn't known (revisit detection, unenroll cleanup).
+// Prefix matching every onboarding repo a github-id could have created. Used to
+// find a student's own repo(s) when the random suffix isn't known.
 export function onboardingRepoPrefixForGithubId(
   githubId: number | string,
 ): string {
   return `${ONBOARDING_REPO_PREFIX}${githubId}-`
 }
 
-// Canonical form for hashing/comparison so the same human inbox maps to one
-// key. Lowercase + trim only: we deliberately do NOT strip Gmail-style `+tags`
-// or dots, because those transforms are provider-specific and would collapse
-// genuinely distinct addresses (rongxinliu.g@ vs rongxinliu-g@) onto one key.
-// The teacher's invited email and the student's self-reported email are both
-// normalized this way, so reconcile's email match compares like for like.
+// Canonical form for hashing/comparison. Lowercase + trim only: deliberately do
+// NOT strip Gmail-style `+tags` or dots, since those are provider-specific and
+// would collapse genuinely distinct addresses onto one key.
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
 }
 
-// Minimal email shape check — a single `@` with non-empty local and domain
-// parts and a dotted domain. Deliberately permissive (GitHub, not us, is the
-// real validator at invite time); this only catches obvious typos before we
-// commit a row and fire an invite.
+// Minimal email shape check. Deliberately permissive (GitHub is the real
+// validator at invite time); only catches obvious typos before committing.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function isValidEmail(email: string): boolean {
   return EMAIL_PATTERN.test(email.trim())
 }
 
-// Lower-cased hex SHA-256 of the normalized email, truncated to 16 chars
-// (64 bits). Cached on the roster row as `email_hash` so the teacher reconcile
-// can match an email-first self-report to its row without storing the raw
-// email twice. Collision risk is negligible for a classroom. Async because Web
-// Crypto's subtle.digest returns a Promise.
+// SHA-256 of the normalized email, truncated to 16 hex chars. Cached on the
+// row as `email_hash` so reconcile can match an email-first self-report without
+// storing the raw email twice. Async per Web Crypto's subtle.digest.
 export async function emailHash(email: string): Promise<string> {
   const data = new TextEncoder().encode(normalizeEmail(email))
   const digest = await crypto.subtle.digest("SHA-256", data)
   return bytesToHex(new Uint8Array(digest)).slice(0, 16)
 }
 
-// A roster row is reconcilable when it isn't already enrolled and carries a
-// key to look its onboarding self-report up by (a github_id or an email to
-// match the YAML payload against). Shared by the UI's pending-count badge so it
-// can't drift from what reconcile will actually resolve.
+// A row is reconcilable when not yet enrolled and carrying a key to look its
+// self-report up by (github_id or email). Shared with the UI's pending-count
+// badge so it can't drift from what reconcile resolves.
 export function isReconcilableRow(row: {
   enrollment_status?: string
   github_id?: string
@@ -131,14 +101,12 @@ export function isReconcilableRow(row: {
   )
 }
 
-// Whether a self-report payload's claimed email matches the email the roster
-// row was invited under. The onboarding repo name is unguessable, but a student
-// could still self-report a DIFFERENT person's email in the YAML; binding the
-// payload email back to the invited row's email_hash (or email) stops a
-// self-report for the wrong person from being folded into someone else's row.
-// This is the last-resort match key (after invite_token and github_id); for a
-// github_id-keyed row with no email on file it falls through to true and the
-// caller relies on the commit-author identity check.
+// Whether a self-report's claimed email matches the invited row's email_hash
+// (or email). The repo name is unguessable, but a student could self-report a
+// DIFFERENT person's email in the YAML; this binding stops a wrong-person
+// self-report being folded into someone else's row. Last-resort key (after
+// invite_token and github_id); falls through to true for a github_id-keyed row
+// with no email, where the caller relies on the commit-author identity check.
 export async function payloadEmailMatchesRow(
   payloadEmail: string,
   row: { email?: string; email_hash?: string },
@@ -150,16 +118,12 @@ export async function payloadEmailMatchesRow(
   if (row.email?.trim()) {
     return normalized === normalizeEmail(row.email)
   }
-  // A github_id-keyed row with no email on file can't be email-checked here;
-  // the caller falls back to the commit-author identity check for those.
   return true
 }
 
-// Self-report payload committed to ONBOARDING_YAML_PATH inside the onboarding
-// repo. github_username/github_id come from the authenticated session (GitHub-
-// attested, unforgeable); email and name are student-supplied (claimed).
-// invite_token is present only when the student onboarded via a teacher-issued
-// secure link; it's the strongest reconcile match key when set.
+// Self-report payload committed to ONBOARDING_YAML_PATH. github_username/
+// github_id are GitHub-attested (unforgeable); email and name are claimed.
+// invite_token is set only for secure-link onboarding — strongest match key.
 export type OnboardingPayload = {
   email: string
   first_name: string

@@ -29,11 +29,10 @@ const useGetStudents = (
 
 // Optimistically patch the cached roster. GitHub's Contents API is eventually
 // consistent per path: right after a commit it often still serves the previous
-// students.csv, so an immediate refetch would overwrite the cache with stale
-// rows and the UI wouldn't reflect the change until a later refresh. The
-// mutations already compute the authoritative post-write rows, so we write them
-// straight into the cache for an instant, correct UI and let a natural refetch
-// reconcile later. Pass a function that maps the current roster to the next one.
+// students.csv, so an immediate refetch would clobber the cache with stale rows
+// until a later refresh. Mutations already compute the authoritative post-write
+// rows, so write them straight in and let a natural refetch reconcile. Pass a
+// function mapping the current roster to the next.
 export const useUpdateRosterCache = (
   org: string | undefined,
   classroom: string | undefined,
@@ -42,12 +41,9 @@ export const useUpdateRosterCache = (
   return (update: (current: Student[]) => Student[]) => {
     if (!org || !classroom) return
     const key = rosterKey(org, classroom)
-    // Cancel any in-flight roster fetch first. A refetch started before the
-    // commit (window-focus/reconnect, default-on in React Query) reads the
-    // pre-commit students.csv and, if it resolves AFTER this setQueryData,
-    // would clobber the optimistic write with stale rows — the very bug this
-    // avoids. Cancelling drops that racing response. (cancelQueries returns a
-    // promise; we don't need to await it to apply the synchronous update.)
+    // Cancel any in-flight roster fetch first: a refetch started before the
+    // commit (window-focus/reconnect) could resolve after this setQueryData and
+    // clobber the optimistic write with stale rows. cancelQueries drops it.
     void queryClient.cancelQueries({ queryKey: key })
     queryClient.setQueryData<Student[]>(key, (current) => update(current ?? []))
   }

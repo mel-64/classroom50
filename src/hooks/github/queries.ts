@@ -99,9 +99,8 @@ export const githubKeys = {
     [...githubKeys.all, "releases", owner, repo] as const,
 }
 
-// Refresh the lists that drive roster invite status after enroll/resend/
-// unenroll: a resend moves an invite between pending and failed, and accepting
-// moves a user into members.
+// Refresh roster invite-status lists after enroll/resend/unenroll: invites
+// move between pending/failed/members.
 export function invalidateInviteQueries(queryClient: QueryClient, org: string) {
   queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
   queryClient.invalidateQueries({
@@ -228,11 +227,10 @@ function isNotFoundError(error: unknown) {
   )
 }
 
-// A freshly-generated/templated repo's git-data APIs lag behind the 200 from
-// POST .../generate: reads 404 and the first write 409s "Git Repository is
-// empty" while GitHub seeds. Both are transient. A bare 409 (no empty-repo
-// message) is a real conflict — e.g. a non-fast-forward updateRef — so the 409
-// branch is gated on the message. Mirrors the CLI's isFreshRepoRetryable.
+// A freshly-generated repo's git-data APIs lag the 200 from POST .../generate:
+// reads 404 and first write 409s "Git Repository is empty" while GitHub seeds.
+// A bare 409 (no empty-repo message) is a real conflict (e.g. non-fast-forward
+// updateRef), so the 409 branch is gated on the message.
 export function isFreshRepoLagError(error: unknown) {
   if (error instanceof GitHubAPIError) {
     if (error.status === 404) {
@@ -254,12 +252,9 @@ export type FreshRepoRetryOptions = {
   shouldRetry?: (error: unknown) => boolean
 }
 
-// Retry `fn` while it hits fresh-repo lag (the window where a just-generated
-// repo's git-data APIs lag behind the 200 from POST .../generate). Single source
-// of truth for the retry/backoff policy — the branch-ref poll and the accept
-// commit sequence both use it. `fn` must re-read its own state each attempt; it
-// may throw a synthetic error to signal lag that isn't an HTTP error (e.g. a 200
-// with a blank SHA). Mirrors the CLI's CommitWithFreshRepoRetry.
+// Retry `fn` while it hits fresh-repo lag. `fn` must re-read its own state each
+// attempt and may throw a synthetic error to signal non-HTTP lag (e.g. a 200
+// with a blank SHA).
 export async function withFreshRepoRetry<T>(
   fn: () => Promise<T>,
   options: FreshRepoRetryOptions = {},
@@ -522,8 +517,8 @@ export async function getClassroom50Yaml(
   return decodeBase64Utf8(file.content)
 }
 
-// Read a file from an arbitrary repo's default branch. Used by onboarding
-// reconciliation to read the self-report YAML out of each onboarding repo.
+// Read a file from an arbitrary repo's default branch (onboarding reconcile
+// reads the self-report YAML out of each onboarding repo).
 export async function getRepoFile(
   client: GitHubClient,
   org: string,
@@ -543,13 +538,10 @@ export async function getRepoFile(
   return decodeBase64Utf8(file.content)
 }
 
-// The GitHub user ids that authored/committed the most recent change to `path`
-// in a repo. Used by onboarding reconciliation to verify the self-report was
-// actually written by the account it claims to be (the onboarding repo name is
-// a guessable function of the email, so a member could pre-create it with a
-// forged payload; the commit author/committer is GitHub-attested and cannot be
-// spoofed by a non-admin). Returns the numeric ids present on the latest commit
-// touching the path.
+// GitHub user ids on the latest commit touching `path`. Onboarding reconcile
+// uses this to verify the self-report's author: the repo name is a guessable
+// function of the email (a member could pre-create it with a forged payload),
+// but the commit author/committer is GitHub-attested and can't be spoofed.
 export async function getFileCommitAuthorIds(
   client: GitHubClient,
   org: string,
@@ -597,10 +589,9 @@ export async function paginateAll<T>(
   return all
 }
 
-// All onboarding repos in the org (names starting with the shared onboarding
-// prefix). Reconcile uses this because the repo name carries a browser-random
-// suffix the teacher can't recompute, so the repo can't be fetched by a derived
-// name — it must be discovered by prefix. Paginated to exhaustion.
+// All onboarding repos in the org (names starting with the shared prefix).
+// Discovered by prefix because the name carries a browser-random suffix the
+// teacher can't recompute, so the repo can't be fetched by a derived name.
 export async function listOnboardingRepos(
   client: GitHubClient,
   org: string,
@@ -904,21 +895,18 @@ export async function getClassroom50OrgSummary(
 }
 
 // Max simultaneous per-repo onboarding reads. Bounded so a large class doesn't
-// fan out into hundreds of concurrent GitHub requests (secondary-rate-limit
-// territory) while still avoiding a slow strictly-sequential loop. Shared by the
-// roster/own-onboarding listings here and by reconcile's read phase.
+// fan out into hundreds of concurrent requests (GitHub secondary-rate-limit
+// territory) while still beating a strictly-sequential loop.
 export const ONBOARDING_READ_CONCURRENCY = 8
 
-// One onboarding repo owned by a github-id, with its parsed self-report when
-// the YAML is readable. `payload` is null when the repo exists but its YAML
-// hasn't committed yet (a half-finished onboarding) or couldn't be parsed.
+// One onboarding repo owned by a github-id. `payload` is null when the repo
+// exists but its YAML hasn't committed yet (half-finished) or couldn't parse.
 type OwnOnboardingRepo = { repo: string; payload: OnboardingYaml | null }
 
-// List the signed-in student's own onboarding repos (by the github-id prefix),
-// reading each one's self-report YAML when present. Throws on a transient list
-// failure so callers can distinguish "no repos" from "couldn't determine" — a
-// silent degrade-to-empty would let submitOnboarding mint a duplicate repo for
-// a student who already has one (the "transient is NOT none" rule).
+// The signed-in student's own onboarding repos (by github-id prefix), each
+// with its self-report YAML when present. Throws on a transient list failure so
+// callers distinguish "no repos" from "couldn't determine" — a silent
+// degrade-to-empty would let submitOnboarding mint a duplicate repo.
 async function listOwnOnboardingRepos(
   client: GitHubClient,
   org: string,
@@ -938,7 +926,7 @@ async function listOwnOnboardingRepos(
         )
         return { repo: repo.name, payload }
       } catch {
-        // Unreadable/missing payload -> repo exists but YAML not committed yet.
+        // Repo exists but YAML not committed yet.
         return { repo: repo.name, payload: null }
       }
     },
@@ -946,12 +934,12 @@ async function listOwnOnboardingRepos(
   return out
 }
 
-// Resolution of the student's onboarding repo for THIS classroom:
-//  - "matched":    a repo whose committed YAML names this classroom -> reuse it.
-//  - "incomplete": exactly one same-prefix repo has no committed YAML yet and no
-//                  matched repo exists -> a half-finished attempt; reuse it so a
-//                  re-submit doesn't strand the first as an orphan. (Ambiguous
-//                  when several lack a YAML -> treat as "none" and mint fresh.)
+// The student's onboarding repo for THIS classroom:
+//  - "matched":    committed YAML names this classroom -> reuse it.
+//  - "incomplete": exactly one same-prefix repo has no committed YAML yet and
+//                  no matched repo exists -> reuse the half-finished attempt so
+//                  a re-submit doesn't strand it. (Ambiguous when several lack
+//                  a YAML -> treat as "none" and mint fresh.)
 //  - "none":       no reusable repo.
 // Throws on a transient list/read failure (propagated from listOwnOnboardingRepos).
 export type OwnOnboardingResolution =
@@ -970,9 +958,9 @@ export async function resolveOwnOnboardingRepo(
   const matched = repos.find((r) => r.payload?.classroom === classroom)
   if (matched) return { status: "matched", repo: matched.repo }
 
-  // Repos that exist but have no committed YAML yet. Reuse one only when it's
-  // unambiguous (exactly one), so a student mid-onboarding in another classroom
-  // can't have that classroom's lagging repo repurposed here.
+  // Repos that exist but have no committed YAML yet. Reuse only when unambiguous
+  // (exactly one), so a student mid-onboarding in another classroom can't have
+  // that classroom's lagging repo repurposed here.
   const incomplete = repos.filter((r) => r.payload === null)
   if (incomplete.length === 1) {
     return { status: "incomplete", repo: incomplete[0].repo }
@@ -980,10 +968,10 @@ export async function resolveOwnOnboardingRepo(
   return { status: "none" }
 }
 
-// Whether the signed-in student has an onboarding repo for THIS classroom
-// (matched committed YAML, or a single in-progress repo whose YAML is still
-// landing). Used by the OnboardingPage status probe to show "pending
-// confirmation" instead of re-presenting the form on a reload.
+// Whether the student has an onboarding repo for THIS classroom (matched YAML,
+// or a single in-progress repo whose YAML is still landing). The OnboardingPage
+// status probe uses this to show "pending confirmation" instead of re-showing
+// the form on reload.
 export async function hasActiveOnboardingForClassroom(
   client: GitHubClient,
   org: string,
@@ -1000,11 +988,9 @@ export async function hasActiveOnboardingForClassroom(
 }
 
 // All onboarding self-reports in the org for a classroom: the GitHub-attested
-// identity (github_id) and claimed email parsed from each onboarding repo's
-// YAML, filtered to this classroom. The teacher roster uses this to tell a
-// student who has onboarded (repo exists -> "ready to confirm") apart from one
-// who hasn't yet ("awaiting onboarding" / a pending or expired invite).
-// Best-effort per repo: an unreadable/missing payload is skipped.
+// github_id and claimed email from each onboarding repo's YAML. The teacher
+// roster uses this to tell a student who has onboarded (repo exists) apart from
+// one who hasn't. Best-effort per repo: an unreadable/missing payload is skipped.
 export async function listOnboardingSelfReports(
   client: GitHubClient,
   org: string,
@@ -1014,8 +1000,8 @@ export async function listOnboardingSelfReports(
     (repo) => !repo.archived,
   )
   // Bounded-parallel per-repo YAML reads: a busy classroom can have dozens of
-  // outstanding onboarding repos, and a strictly sequential loop made the owner
-  // roster render wait on N serial round trips.
+  // outstanding onboarding repos, and a sequential loop made the owner roster
+  // wait on N serial round trips.
   const payloads = await mapWithConcurrency(
     repos,
     ONBOARDING_READ_CONCURRENCY,
