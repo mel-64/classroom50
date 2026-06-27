@@ -791,6 +791,44 @@ const EnrolledStudents = ({
 
   return (
     <div className="flex w-full flex-col gap-6">
+      {/* Action results (confirm enrollment, resend, unenroll) surface here at
+          the top: the section that triggered them often changes or unmounts
+          afterward (e.g. confirming empties the Ready section), so a page-level
+          notification region is the reliable place for the user to see them. */}
+      {reconcileSummary || Object.keys(teamWarnings).length > 0 ? (
+        <div className="flex w-full flex-col gap-2">
+          {reconcileSummary ? (
+            <div role="alert" className="alert alert-info alert-soft">
+              <span className="text-sm">Enrollment: {reconcileSummary}</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => setReconcileSummary("")}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+
+          {Object.entries(teamWarnings).map(([username, warning]) => (
+            <div
+              key={username}
+              role="alert"
+              className="alert alert-warning alert-soft"
+            >
+              <span className="text-sm">{warning}</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => dismissWarning(username)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Ready for enrollment confirmation (state 2) — the teacher's first
           priority: confirm students who have onboarded. */}
       {readyToConfirm.length > 0 ? (
@@ -836,19 +874,6 @@ const EnrolledStudents = ({
           onToggle={() => setShowGithubInvite((prev) => !prev)}
         />
 
-        {reconcileSummary ? (
-          <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
-            <span className="text-sm">Enrollment: {reconcileSummary}</span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs"
-              onClick={() => setReconcileSummary("")}
-            >
-              Dismiss
-            </button>
-          </div>
-        ) : null}
-
         {!statusAvailable ? (
           <div role="alert" className="alert alert-info alert-soft mx-6 my-4">
             <span className="text-sm">
@@ -871,23 +896,6 @@ const EnrolledStudents = ({
             </span>
           </div>
         ) : null}
-
-        {Object.entries(teamWarnings).map(([username, warning]) => (
-          <div
-            key={username}
-            role="alert"
-            className="alert alert-warning alert-soft mx-6 mt-4"
-          >
-            <span className="text-sm">{warning}</span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs"
-              onClick={() => dismissWarning(username)}
-            >
-              Dismiss
-            </button>
-          </div>
-        ))}
       </div>
 
       {/* Awaiting enrollment (state 1): invited, not yet onboarded. Bulk
