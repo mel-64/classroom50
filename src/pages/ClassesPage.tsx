@@ -1,4 +1,5 @@
 import { useParams, Link } from "@tanstack/react-router"
+import { useState } from "react"
 import {
   BookOpen,
   BookText,
@@ -13,6 +14,7 @@ import GitHub from "@/assets/github.svg?react"
 
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetStudents from "@/hooks/useGetStudents"
+import { isClassroomArchived } from "@/types/classroom"
 
 import Drawer, {
   DrawerContent,
@@ -31,12 +33,34 @@ import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 
-const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
+type ClassFilter = "active" | "archived" | "all"
+
+const ClassCard = ({
+  cl,
+  org,
+  filter,
+}: {
+  cl: GitHubFileListing
+  org: string
+  filter: ClassFilter
+}) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
   const { isTeacher } = useCourseTeacherAccess(org)
 
   const canEdit = isTeacher && cl.name
+  const archived = isClassroomArchived(classroomData ?? {})
+
+  // Filter only once the classroom's lifecycle is known. Until classroomData
+  // loads we can't tell active from archived, so hide the card under the
+  // Archived tab (avoid a wrong card flashing in) and show a skeleton slot
+  // under Active/All — never paint an archived card that then self-unmounts.
+  if (!classroomData) {
+    if (filter === "archived") return null
+  } else {
+    if (filter === "active" && archived) return null
+    if (filter === "archived" && !archived) return null
+  }
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -53,11 +77,16 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
       )}
       <div className="card-body gap-4">
         {classroomData ? (
-          <label
-            className={`h-6 badge badge-soft ${classroomData?.active ? "badge-success" : "badge-primary"}`}
-          >
-            {classroomData?.term || "No Term Specified"}
-          </label>
+          <div className="flex items-center gap-2">
+            <label className="h-6 badge badge-soft badge-primary">
+              {classroomData?.term || "No Term Specified"}
+            </label>
+            {archived ? (
+              <span className="h-6 badge badge-soft badge-neutral">
+                Archived
+              </span>
+            ) : null}
+          </div>
         ) : (
           <div className="skeleton w-10 h-6" />
         )}
@@ -351,6 +380,7 @@ const ClassesPage = () => {
     useGetOwnOrgMembership(org)
 
   const isMember = membership?.state === "active"
+  const [filter, setFilter] = useState<ClassFilter>("active")
 
   if (!org) {
     return <MissingParams message="Missing organization." />
@@ -423,11 +453,36 @@ const ClassesPage = () => {
                 <CreateClassroomPane org={org} />
               )}
               {isTeacher && (
-                <div className="grid grid-cols-12 gap-4 mb-6">
-                  {classes.map((cl) => (
-                    <ClassCard key={cl.path} cl={cl} org={org} />
-                  ))}
-                </div>
+                <>
+                  {classes.length > 0 && (
+                    <div className="mb-4 flex justify-end">
+                      <div role="tablist" className="tabs tabs-box tabs-sm">
+                        {(["active", "archived", "all"] as const).map((f) => (
+                          <button
+                            key={f}
+                            role="tab"
+                            type="button"
+                            className={`tab capitalize ${filter === f ? "tab-active" : ""}`}
+                            aria-selected={filter === f}
+                            onClick={() => setFilter(f)}
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-12 gap-4 mb-6">
+                    {classes.map((cl) => (
+                      <ClassCard
+                        key={cl.path}
+                        cl={cl}
+                        org={org}
+                        filter={filter}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
               {isStudent && isMember && <OrgRepos org={org} />}
             </>

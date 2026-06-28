@@ -1,17 +1,20 @@
 import {
   deleteClassroom,
+  editClassroomWithConflictRetry,
   type DeleteClassroomInput,
 } from "@/api/mutations/classrooms"
 import { ConfirmModal } from "@/components/modals"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
 import { githubKeys } from "@/hooks/github/queries"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
-import { Trash2 } from "lucide-react"
+import { Archive, ArchiveRestore, Trash2 } from "lucide-react"
 import { useState } from "react"
 import {
   DEFAULT_ONBOARDING_CLEANUP,
+  isClassroomArchived,
   type Classroom,
   type OnboardingCleanupMode,
 } from "@/types/classroom"
@@ -85,6 +88,116 @@ const DeleteClassroomButton = ({
   )
 }
 
+// Archive / unarchive toggles the classroom's `active` flag (false = archived)
+// via the conflict-retried edit, immediately (not through the Save form), and
+// surfaces the result as a toast. Archived classrooms drop out of the default
+// classes list and refuse new assignments/accepts.
+const ArchiveClassroomButton = ({
+  org,
+  classroom,
+  archived,
+  onToggled,
+}: {
+  org: string
+  classroom: string
+  // Current lifecycle state, so the button shows the opposite action.
+  archived: boolean
+  onToggled: () => void
+}) => {
+  const client = useGitHubClient()
+  const { notify } = useToast()
+  const [open, setOpen] = useState(false)
+
+  // A pure archive/unarchive write: editClassroom now preserves name/term when
+  // they're omitted, so we send only `active` — no refetch, no stale name/term.
+  const archiveMutation = useMutation({
+    mutationFn: (active: boolean) =>
+      editClassroomWithConflictRetry(client, {
+        org,
+        slug: classroom,
+        active,
+      }),
+  })
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        className="btn btn-sm btn-ghost"
+        title={archived ? "Unarchive classroom" : "Archive classroom"}
+      >
+        {archived ? (
+          <>
+            <ArchiveRestore className="size-4" /> Unarchive
+          </>
+        ) : (
+          <>
+            <Archive className="size-4" /> Archive
+          </>
+        )}
+      </button>
+
+      <ConfirmModal
+        open={open}
+        title={archived ? "Unarchive classroom?" : "Archive classroom?"}
+        description={
+          archived ? (
+            <>
+              Restore{" "}
+              <span className="font-semibold text-base-content">
+                {classroom}
+              </span>{" "}
+              to active: it returns to the default classes list and can accept
+              new assignments and students again.
+            </>
+          ) : (
+            <>
+              Archive{" "}
+              <span className="font-semibold text-base-content">
+                {classroom}
+              </span>
+              : it drops out of the default classes list and stops accepting new
+              assignments and students. Its roster and assignments are kept, and
+              you can unarchive it later.
+            </>
+          )
+        }
+        confirmLabel={archived ? "Unarchive" : "Archive"}
+        cancelLabel="Cancel"
+        confirmText=""
+        needsConfirm={false}
+        dangerous={false}
+        onConfirm={async () => {
+          try {
+            // archived -> unarchive (active:true); active -> archive (active:false)
+            await archiveMutation.mutateAsync(archived)
+            notify({
+              tone: "success",
+              durationMs: 5000,
+              message: archived
+                ? `"${classroom}" was unarchived.`
+                : `"${classroom}" was archived.`,
+            })
+            onToggled()
+          } catch (err) {
+            notify({
+              tone: "error",
+              message: `Couldn't ${archived ? "unarchive" : "archive"} "${classroom}": ${
+                err instanceof Error ? err.message : "something went wrong"
+              }`,
+            })
+          }
+        }}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  )
+}
+
 const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -136,16 +249,28 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
       <div className="card-body">
         <div className="flex justify-between">
           <h3 className="text-lg font-bold pb-4">Basic Information</h3>
-          <DeleteClassroomButton
-            org={org}
-            classroom={classroom}
-            onDeleteClassroom={() => {
-              queryClient.invalidateQueries({
-                queryKey: githubKeys.jsonFile(org, "classroom50"),
-              })
-              navigate({ to: "/$org", params: { org } })
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <ArchiveClassroomButton
+              org={org}
+              classroom={classroom}
+              archived={isClassroomArchived(cl ?? {})}
+              onToggled={() => {
+                queryClient.invalidateQueries({
+                  queryKey: githubKeys.jsonFile(org, "classroom50"),
+                })
+              }}
+            />
+            <DeleteClassroomButton
+              org={org}
+              classroom={classroom}
+              onDeleteClassroom={() => {
+                queryClient.invalidateQueries({
+                  queryKey: githubKeys.jsonFile(org, "classroom50"),
+                })
+                navigate({ to: "/$org", params: { org } })
+              }}
+            />
+          </div>
         </div>
 
         <form.Field name="name">

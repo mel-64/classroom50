@@ -1,6 +1,12 @@
 export type Classroom = {
   path: string
-  active: boolean
+  // Archive lifecycle flag. `active: false` means the classroom is ARCHIVED —
+  // it blocks new assignments and new student accepts and drops out of the
+  // default classes list, while preserving its roster/assignments. Reversible
+  // (unarchive sets it back to true). Absent or true = active; legacy
+  // classrooms (no `active` written) therefore read as active. Written via the
+  // omitempty pattern; kept in lockstep with the CLI's classroom-v1 schema.
+  active?: boolean
   term: string
   name: string
   short_name: string
@@ -22,6 +28,11 @@ export type Classroom = {
   // warning when missing), "archive" hides it reversibly, "keep" leaves it.
   onboarding_cleanup?: OnboardingCleanupMode
 }
+
+// A classroom is archived when `active` is explicitly false. Absent or true
+// reads as active, so legacy classrooms (which never wrote `active`) are active.
+export const isClassroomArchived = (cl: { active?: boolean }): boolean =>
+  cl.active === false
 
 export type OnboardingCleanupMode = "delete" | "archive" | "keep"
 

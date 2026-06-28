@@ -149,12 +149,16 @@ const AssignmentsTable = ({
   assignments,
   students = [],
   loading = false,
+  archived = false,
 }: {
   org: string
   classroom: string
   assignments?: Assignment[]
   students?: Student[]
   loading?: boolean
+  // When the classroom is archived, hide the per-row mutating actions
+  // (edit / reuse / delete) — viewing stays available.
+  archived?: boolean
 }) => {
   const queryClient = useQueryClient()
   const { data: scoresData } = useGetScores(org, classroom)
@@ -272,35 +276,43 @@ const AssignmentsTable = ({
                   })()}
                 </td>
                 <td>
-                  <Link
-                    className="btn btn-circle btn-sm btn-ghost"
-                    to="/$org/$classroom/assignments/$assignment/edit"
-                    params={{ org, classroom, assignment: assignment.slug }}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                    }}
-                  >
-                    <Pencil className="size-4" />
-                  </Link>
-                  <ReuseAssignmentButton
-                    org={org}
-                    classroom={classroom}
-                    assignment={assignment}
-                  />
-                  <DeleteAssignmentButton
-                    org={org}
-                    classroom={classroom}
-                    assignment={assignment}
-                    onDeleteAssignment={() =>
-                      queryClient.invalidateQueries({
-                        queryKey: githubKeys.jsonFile(
+                  {archived ? null : (
+                    <>
+                      <Link
+                        className="btn btn-circle btn-sm btn-ghost"
+                        to="/$org/$classroom/assignments/$assignment/edit"
+                        params={{
                           org,
-                          "classroom50",
-                          `${classroom}/assignments.json`,
-                        ),
-                      })
-                    }
-                  />
+                          classroom,
+                          assignment: assignment.slug,
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                        }}
+                      >
+                        <Pencil className="size-4" />
+                      </Link>
+                      <ReuseAssignmentButton
+                        org={org}
+                        classroom={classroom}
+                        assignment={assignment}
+                      />
+                      <DeleteAssignmentButton
+                        org={org}
+                        classroom={classroom}
+                        assignment={assignment}
+                        onDeleteAssignment={() =>
+                          queryClient.invalidateQueries({
+                            queryKey: githubKeys.jsonFile(
+                              org,
+                              "classroom50",
+                              `${classroom}/assignments.json`,
+                            ),
+                          })
+                        }
+                      />
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

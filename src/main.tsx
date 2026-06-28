@@ -6,6 +6,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import "./index.css"
 import { GitHubAuthProvider } from "./auth/useGithubAuth"
 import { GitHubClientProviderFromAuth } from "./context/github/GitHubClientProviderFromAuth"
+import { NotificationProvider } from "./context/notifications/NotificationProvider"
 import App from "./App"
 
 const client = new QueryClient()
@@ -15,7 +16,9 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={client}>
       <GitHubAuthProvider>
         <GitHubClientProviderFromAuth>
-          <App />
+          <NotificationProvider>
+            <App />
+          </NotificationProvider>
           {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
         </GitHubClientProviderFromAuth>
       </GitHubAuthProvider>

@@ -9,15 +9,15 @@ import { Link, useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import { useState } from "react"
 import { githubKeys } from "@/hooks/github/queries"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import {
-  editClassroom,
   type EditClassroomInput,
   type EditClassroomResult,
 } from "@/hooks/github/mutations"
+import { editClassroomWithConflictRetry } from "@/api/mutations/classrooms"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
 import RequireTeacher from "@/components/RequireTeacher"
 
 const EditClassroomContent = ({
@@ -29,43 +29,47 @@ const EditClassroomContent = ({
 }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const { notify } = useToast()
   const { data: cl, isLoading: loadingClassroom } = useGetClassroom(
     org,
     classroom,
   )
-  const [classroomEdited, setClassroomEdited] = useState(false)
 
   const editClassroomMutation = useMutation<
     EditClassroomResult,
     GitHubAPIError,
     EditClassroomInput
   >({
-    mutationFn: (input) => editClassroom(client, input),
+    mutationFn: (input) => editClassroomWithConflictRetry(client, input),
     onError: (err) => {
-      if (err instanceof GitHubAPIError) {
-        switch (err.status) {
-          case 409:
-            // conflict
-            break
-          case 404:
-            // not found
-            break
-          case 422:
-            // validation
-            break
-          default:
-            // unspecified
-            break
-        }
-      } else {
-        console.error("non-GitHub API error:", err)
-      }
+      notify({
+        tone: "error",
+        message:
+          err instanceof GitHubAPIError && err.status === 409
+            ? "Couldn't save — another change landed first. Please try again."
+            : `Couldn't save classroom settings: ${err.message}`,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
       })
-      setClassroomEdited(true)
+      notify({
+        tone: "success",
+        durationMs: 5000,
+        message: (
+          <>
+            Classroom settings saved.{" "}
+            <Link
+              className="underline"
+              to="/$org/$classroom"
+              params={{ org, classroom }}
+            >
+              View classroom
+            </Link>
+          </>
+        ),
+      })
     },
   })
 
@@ -97,23 +101,6 @@ const EditClassroomContent = ({
           </p>
         </div>
       </div>
-      {classroomEdited ? (
-        <div className="alert alert-success mb-4">
-          <div>
-            Your classroom has been edited successfully. Click{" "}
-            <Link
-              className="underline"
-              to="/$org/$classroom"
-              params={{ org, classroom }}
-            >
-              here
-            </Link>{" "}
-            to view your new classroom.
-          </div>
-        </div>
-      ) : (
-        <></>
-      )}
       <div className="flex flex-col">
         <div className="mb-8">
           <EditClassroomForm

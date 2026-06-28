@@ -2,6 +2,7 @@ import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
 import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
+import { isClassroomArchived } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -413,6 +414,8 @@ export async function editAssignment(
 ): Promise<CreateAssignmentResult> {
   const { org, classroom, slug } = input
 
+  await assertClassroomNotArchived(client, org, classroom)
+
   const ref = await getBranchRef(client, org)
   const commit = await getCommit(client, org, ref.object.sha)
 
@@ -741,10 +744,39 @@ async function tryGrantTeamTemplateRead(
   }
 }
 
+// Refuse a write into an archived classroom (active: false). The UI hides the
+// New-assignment / reuse / edit affordances, but the write path is the
+// authoritative guard — a stale tab, a direct API call, or a CLI/agent must not
+// be able to mutate an archived classroom. Reads classroom.json fresh and fails
+// closed before any commit. A genuinely teamless/legacy classroom (no `active`)
+// reads as active, so this never blocks normal use.
+async function assertClassroomNotArchived(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+) {
+  let classroomJson
+  try {
+    classroomJson = await getClassroomJson(client, { org, classroom })
+  } catch (err) {
+    // A missing classroom.json (pre-feature) can't be archived — don't block on
+    // a read failure that isn't a definitive "archived" signal.
+    if (err instanceof GitHubAPIError && err.isNotFound) return
+    throw err
+  }
+  if (isClassroomArchived(classroomJson)) {
+    throw new Error(
+      `Classroom "${classroom}" is archived — changes are disabled. Unarchive it in Classroom Settings first.`,
+    )
+  }
+}
+
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
 ): Promise<CreateAssignmentResult> {
+  await assertClassroomNotArchived(client, input.org, input.classroom)
+
   const { entry: assignmentBody, needsTeamGrant } = await buildAssignmentEntry(
     client,
     input,
@@ -1086,6 +1118,9 @@ export async function copyAssignmentToClassroom(
   input: CopyAssignmentInput,
 ): Promise<CreateAssignmentResult> {
   const { org, source, targetClassroom } = input
+  // Refuse reuse into an archived target classroom (write-path guard).
+  await assertClassroomNotArchived(client, org, targetClassroom)
+
   const entry = buildReusedEntry(source, {
     slug: input.targetSlug ?? source.slug,
     name: input.targetName ?? source.name,

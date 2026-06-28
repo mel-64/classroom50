@@ -7,9 +7,11 @@ import {
   createCommit,
   createTree,
   deleteClassroomTeam,
+  editClassroom,
   ensureClassroomTeam,
   getErrorMessage,
   updateRef,
+  type EditClassroomInput,
   type GitTreeEntry,
   type GitTreeFileMode,
 } from "@/hooks/github/mutations"
@@ -115,6 +117,16 @@ export async function createClassroomFilesWithConflictRetry(
   input: CreateClassroomInput,
 ) {
   return withGitConflictRetry(() => createClassroomFiles(client, input))
+}
+
+// editClassroom does a read-modify-write on the shared classroom50 main branch
+// (re-reading the ref + classroom.json each call), so a concurrent write 409s
+// the updateRef. It is safe to retry — mirror the assignment/student edit paths.
+export async function editClassroomWithConflictRetry(
+  client: GitHubClient,
+  input: EditClassroomInput,
+) {
+  return withGitConflictRetry(() => editClassroom(client, input))
 }
 
 export type DeleteClassroomInput = {

@@ -14,6 +14,7 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
 
 // Split button: primary "Assignment" creates; the caret reveals "Reuse
@@ -112,15 +113,36 @@ const TeacherAssignmentsView = ({
           </h3>
         </div>
         <div className="pt-10">
-          <NewAssignmentButton org={org} classroom={classroom} />
+          {isClassroomArchived(classroomData ?? {}) ? (
+            <span className="badge badge-soft badge-neutral">Archived</span>
+          ) : (
+            <NewAssignmentButton org={org} classroom={classroom} />
+          )}
         </div>
       </div>
+      {isClassroomArchived(classroomData ?? {}) ? (
+        <div role="alert" className="alert alert-info alert-soft mb-4">
+          <span className="text-sm">
+            This classroom is archived — new assignments and student accepts are
+            disabled. Unarchive it from{" "}
+            <Link
+              className="link"
+              to="/$org/$classroom/edit"
+              params={{ org, classroom }}
+            >
+              Classroom Settings
+            </Link>{" "}
+            to make changes.
+          </span>
+        </div>
+      ) : null}
       <AssignmentsTable
         org={org}
         classroom={classroom}
         assignments={classData?.assignments}
         students={students}
         loading={assignmentsLoading}
+        archived={isClassroomArchived(classroomData ?? {})}
       />
     </div>
   )
