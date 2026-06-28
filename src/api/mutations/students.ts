@@ -215,6 +215,7 @@ export async function addStudentToClassroom(
 
   const studentEmail = input.email?.trim() ?? githubUser.email ?? ""
 
+  const now = new Date().toISOString()
   const student: StudentCsvRow = normalizeStudentRow({
     username: githubUser.login,
     first_name: input.first_name?.trim() ?? nameParts.first_name,
@@ -222,15 +223,19 @@ export async function addStudentToClassroom(
     email: studentEmail,
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
-    // Starts "invited"; reconcile flips to "enrolled". email_hash cached so
-    // reconcile can match the self-report by email if needed.
-    enrollment_status: "invited",
+    // Normally starts "invited" and reconcile flips it to "enrolled". When the
+    // student is already an active org member (input.enrolled), write
+    // "enrolled" directly — no invite is sent and no onboarding repo will
+    // exist, so reconcile could never confirm them (#65). email_hash cached so
+    // reconcile can still match a self-report by email if one ever appears.
+    enrollment_status: input.enrolled ? "enrolled" : "invited",
     enrollment_method: "github",
     email_hash: studentEmail ? await emailHash(studentEmail) : "",
     // Unique invite token so a per-student secure onboarding link always exists
     // (reconcile's strongest match key; else falls back to github_id / email).
     invite_token: generateInviteToken(),
-    invited_at: new Date().toISOString(),
+    invited_at: now,
+    enrolled_at: input.enrolled ? now : "",
   })
 
   const nextStudents = [...currentStudents, student]
@@ -921,6 +926,11 @@ type AddStudentToClassroomInput = {
   last_name?: string
   email?: string
   section?: string
+  // When true, write the new row directly as `enrolled` (with enrolled_at)
+  // instead of `invited`. Set by enrollStudentInClassroom when the student is
+  // already an active org member, so an already-member never lands in
+  // "Awaiting enrollment" with no onboarding repo to confirm against (#65).
+  enrolled?: boolean
 }
 export async function enrollStudentInClassroom(
   client: GitHubClient,
@@ -932,7 +942,29 @@ export async function enrollStudentInClassroom(
   // Can reject on a transient read; attach a catch to avoid an unhandled rejection.
   const teamPromise = resolveClassroomTeam(client, org, classroom)
   teamPromise.catch(() => {})
-  const result = await addStudentToClassroomWithConflictRetry(client, input)
+
+  // Pre-check org membership: a student already an active member (e.g. invited
+  // from another classroom in the same org) gets no invite and never creates an
+  // onboarding repo, so reconcile could never confirm them — they'd be stuck in
+  // "Awaiting enrollment" forever. Detecting it here lets the roster row be
+  // written directly as "enrolled" (#65). Best-effort: a failed/forbidden read
+  // falls back to the normal "invited" path.
+  let alreadyMember = false
+  const normalizedUsername = input.username.trim()
+  if (normalizedUsername) {
+    try {
+      alreadyMember =
+        (await getOrgMembershipState(client, org, normalizedUsername)) ===
+        "active"
+    } catch {
+      alreadyMember = false
+    }
+  }
+
+  const result = await addStudentToClassroomWithConflictRetry(client, {
+    ...input,
+    enrolled: alreadyMember,
+  })
 
   // CLI order: roster row -> membership -> team. Membership/team failures are
   // non-fatal warnings since the commit already landed.
@@ -987,6 +1019,141 @@ export async function enrollStudentInClassroom(
     ...result,
     teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
+}
+
+export type MarkStudentEnrolledInput = {
+  org: string
+  classroom: string
+  username: string
+  github_id?: string
+}
+
+// Manually confirm enrollment for a roster row that is a verified live org
+// member but has no onboarding self-report (e.g. a student already in the org
+// via another classroom, or a teacher self-test). This is the per-row teacher
+// action complementing the enroll-time fix: reconcileOnboarding can only
+// confirm rows backed by an onboarding repo, so without this such rows are
+// stuck in "Awaiting enrollment" forever (#65).
+//
+// Security: re-verifies the row's username is a CURRENT active org member
+// before writing, so a manual confirm can never bind a non-member (keeps the
+// #50 autonomous-reconcile trust model unchanged). Writes the same canonical
+// shape reconcile produces (enrollment_status: "enrolled", enrolled_at), no new
+// CSV columns.
+async function markStudentEnrolled(
+  client: GitHubClient,
+  input: MarkStudentEnrolledInput,
+) {
+  const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const normalizedUsername = input.username.trim()
+  if (!normalizedUsername) {
+    throw new Error("GitHub username is required")
+  }
+
+  // Authoritative member re-check (the UI gates on a cached member set; this is
+  // the real guard). Only an active member can be marked enrolled.
+  const state = await getOrgMembershipState(client, org, normalizedUsername)
+  if (state !== "active") {
+    throw new Error(
+      `${normalizedUsername} is not an active member of the ${org} organization, so they can't be marked enrolled.`,
+    )
+  }
+
+  const ref = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, ref.object.sha)
+  const studentsFilePath = `${classroom}/students.csv`
+  const currentCsv = await getRawFile(client, {
+    org,
+    path: studentsFilePath,
+    ref: ref.object.sha,
+  })
+  const currentStudents = parseStudentsCsv(currentCsv)
+
+  // Match the target row by username or github_id (mirrors unenroll's predicate).
+  const sameRow = (student: StudentCsvRow) =>
+    student.username.toLowerCase() === normalizedUsername.toLowerCase() ||
+    (Boolean(input.github_id) &&
+      Boolean(student.github_id) &&
+      student.github_id === input.github_id)
+
+  const target = currentStudents.find(sameRow)
+  if (!target) {
+    throw new Error(`Student ${normalizedUsername} does not exist in roster!`)
+  }
+
+  if (target.enrollment_status === "enrolled") {
+    // Already enrolled — nothing to write; treat as success (idempotent).
+    return { alreadyEnrolled: true, student: target }
+  }
+
+  const now = new Date().toISOString()
+  const enrolledRow = normalizeStudentRow({
+    ...target,
+    enrollment_status: "enrolled",
+    enrolled_at: now,
+  })
+  const nextStudents = currentStudents.map((student) =>
+    sameRow(student) ? enrolledRow : student,
+  )
+  const nextCsv = stringifyStudentsCsv(nextStudents)
+
+  const tree = await createGitTree(client, {
+    org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: studentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: nextCsv,
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org,
+    message: `Mark student enrolled: ${classroom}/${enrolledRow.username}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+
+  await updateRef(client, org, newCommit.sha)
+
+  return { alreadyEnrolled: false, student: enrolledRow }
+}
+
+export async function markStudentEnrolledWithConflictRetry(
+  client: GitHubClient,
+  input: MarkStudentEnrolledInput,
+) {
+  const result = await withGitConflictRetry(() =>
+    markStudentEnrolled(client, input),
+  )
+
+  // Best-effort: ensure the now-enrolled member is on the classroom team (read
+  // on private templates). Non-fatal — the roster write already landed.
+  let teamWarning: string | undefined
+  try {
+    const team = await resolveClassroomTeam(client, input.org, input.classroom)
+    if (team.slug) {
+      await addUserToTeam(client, {
+        org: input.org,
+        teamSlug: team.slug,
+        username: result.student.username,
+        role: "member",
+      })
+    }
+  } catch (err) {
+    console.error("team add failed (mark enrolled):", err)
+    teamWarning =
+      `${result.student.username} was marked enrolled, but adding them to the ` +
+      `classroom team failed; they won't have read on private templates until ` +
+      `it's retried.`
+  }
+
+  return { ...result, teamWarning }
 }
 
 type BulkImportProgress = {
