@@ -23,6 +23,11 @@ export type Toast = {
 
 export type NotifyInput = {
   tone?: ToastTone
+  // Toast content. NOTE: the toast viewport is mounted ABOVE the RouterProvider
+  // (so toasts survive route changes), which means it has NO router context.
+  // Do NOT put a TanStack Router <Link> in here — it throws on render and blanks
+  // the app (the throw escapes the route-level errorComponent). Use plain text,
+  // or a plain <a href> / a button calling router.navigate if a link is needed.
   message: React.ReactNode
   // Optional dedup key: a later notify() with the same key replaces the prior
   // toast in place instead of stacking a duplicate (e.g. repeated retries).

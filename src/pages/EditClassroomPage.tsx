@@ -5,7 +5,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -65,21 +65,15 @@ const EditClassroomContent = ({
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
       })
+      // Plain-text message only: the toast surface (NotificationProvider) is
+      // mounted ABOVE the RouterProvider, so a TanStack <Link> here has no
+      // router context and throws on render, blanking the whole app (the throw
+      // escapes the route-level errorComponent). The settings already update in
+      // place via the invalidations above, so no navigation link is needed.
       notify({
         tone: "success",
         durationMs: 5000,
-        message: (
-          <>
-            Classroom settings saved.{" "}
-            <Link
-              className="underline"
-              to="/$org/$classroom"
-              params={{ org, classroom }}
-            >
-              View classroom
-            </Link>
-          </>
-        ),
+        message: "Classroom settings saved.",
       })
     },
   })
