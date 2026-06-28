@@ -95,6 +95,7 @@ const TeacherAssignmentsView = ({
     org,
     classroom,
   )
+  const archived = isClassroomArchived(classroomData ?? {})
 
   return (
     <div>
@@ -113,14 +114,14 @@ const TeacherAssignmentsView = ({
           </h3>
         </div>
         <div className="pt-10">
-          {isClassroomArchived(classroomData ?? {}) ? (
+          {archived ? (
             <span className="badge badge-soft badge-neutral">Archived</span>
           ) : (
             <NewAssignmentButton org={org} classroom={classroom} />
           )}
         </div>
       </div>
-      {isClassroomArchived(classroomData ?? {}) ? (
+      {archived ? (
         <div role="alert" className="alert alert-info alert-soft mb-4">
           <span className="text-sm">
             This classroom is archived — new assignments and student accepts are
@@ -142,7 +143,7 @@ const TeacherAssignmentsView = ({
         assignments={classData?.assignments}
         students={students}
         loading={assignmentsLoading}
-        archived={isClassroomArchived(classroomData ?? {})}
+        archived={archived}
       />
     </div>
   )

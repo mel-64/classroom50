@@ -173,7 +173,6 @@ const ArchiveClassroomButton = ({
         dangerous={false}
         onConfirm={async () => {
           try {
-            // archived -> unarchive (active:true); active -> archive (active:false)
             await archiveMutation.mutateAsync(archived)
             notify({
               tone: "success",

@@ -121,7 +121,7 @@ export async function createClassroomFilesWithConflictRetry(
 
 // editClassroom does a read-modify-write on the shared classroom50 main branch
 // (re-reading the ref + classroom.json each call), so a concurrent write 409s
-// the updateRef. It is safe to retry — mirror the assignment/student edit paths.
+// the updateRef. It is safe to retry.
 export async function editClassroomWithConflictRetry(
   client: GitHubClient,
   input: EditClassroomInput,

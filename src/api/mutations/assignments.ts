@@ -414,9 +414,13 @@ export async function editAssignment(
 ): Promise<CreateAssignmentResult> {
   const { org, classroom, slug } = input
 
-  await assertClassroomNotArchived(client, org, classroom)
-
-  const ref = await getBranchRef(client, org)
+  // The archive guard is independent of the org ref read, so run them
+  // concurrently — Promise.all rejects on the first rejection, so an archived
+  // classroom still fails closed before any write.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -775,14 +779,15 @@ export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
 ): Promise<CreateAssignmentResult> {
-  await assertClassroomNotArchived(client, input.org, input.classroom)
+  // The archive guard, the assignment-entry build, and the org ref read are
+  // independent, so run them concurrently — Promise.all rejects on the first
+  // rejection, so an archived classroom still fails closed before any write.
+  const [, { entry: assignmentBody, needsTeamGrant }, ref] = await Promise.all([
+    assertClassroomNotArchived(client, input.org, input.classroom),
+    buildAssignmentEntry(client, input),
+    getBranchRef(client, input.org),
+  ])
 
-  const { entry: assignmentBody, needsTeamGrant } = await buildAssignmentEntry(
-    client,
-    input,
-  )
-
-  const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
   const assignmentsFilePath = `${input.classroom}/assignments.json`
@@ -1118,19 +1123,19 @@ export async function copyAssignmentToClassroom(
   input: CopyAssignmentInput,
 ): Promise<CreateAssignmentResult> {
   const { org, source, targetClassroom } = input
-  // Refuse reuse into an archived target classroom (write-path guard).
-  await assertClassroomNotArchived(client, org, targetClassroom)
 
   const entry = buildReusedEntry(source, {
     slug: input.targetSlug ?? source.slug,
     name: input.targetName ?? source.name,
   })
 
-  // The template re-check is independent of the org ref read, so run them
-  // concurrently — one fewer serial round-trip per conflict-retry attempt. The
-  // fail-closed validation below still throws before any write, so a bad
-  // template never produces a commit.
-  const [repo, ref] = await Promise.all([
+  // The archive guard (refuse reuse into an archived target), the template
+  // re-check, and the org ref read are all independent, so run them
+  // concurrently — one fewer serial round-trip per conflict-retry attempt.
+  // Promise.all rejects on the first rejection, so an archived classroom or a
+  // bad template still throws before any write — no commit.
+  const [, repo, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, targetClassroom),
     entry.template
       ? getRepo(client, entry.template.owner, entry.template.repo)
       : Promise.resolve(null),
