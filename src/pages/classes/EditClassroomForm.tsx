@@ -4,6 +4,7 @@ import {
   type DeleteClassroomInput,
 } from "@/api/mutations/classrooms"
 import { ConfirmModal } from "@/components/modals"
+import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { githubKeys } from "@/hooks/github/queries"
@@ -121,7 +122,11 @@ const ArchiveClassroomButton = ({
     onSuccess: (_result, active) => {
       // Optimistically flip the cached classroom.json `active` so the button,
       // the read-only fieldset, and the badges update immediately — GitHub's
-      // contents API is read-after-write eventual. The invalidate reconciles.
+      // contents API is read-after-write eventual, so we do NOT invalidate (and
+      // thus refetch) this exact classroom.json key: an immediate unpinned
+      // refetch can read the pre-write body and clobber the optimistic flip,
+      // reverting the UI until staleTime expires. The optimistic value stays
+      // authoritative and the normal staleTime refetch reconciles later.
       const key = githubKeys.jsonFile(
         org,
         "classroom50",
@@ -132,6 +137,11 @@ const ArchiveClassroomButton = ({
         (prev: Record<string, unknown> | undefined) =>
           prev ? { ...prev, active } : prev,
       )
+      // Repartition the classes list (Active/Archived/All) — this is a
+      // different query than the per-classroom classroom.json above.
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(org, "classroom50"),
+      })
     },
   })
 
@@ -273,19 +283,12 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
               classroom={classroom}
               archived={isClassroomArchived(cl ?? {})}
               onToggled={() => {
-                // Invalidate the exact classroom.json query (a bare
-                // jsonFile(org,"classroom50") prefix won't match — its empty
-                // `path` segment is concrete), plus the classes-list listing.
-                queryClient.invalidateQueries({
-                  queryKey: githubKeys.jsonFile(
-                    org,
-                    "classroom50",
-                    `${classroom}/classroom.json`,
-                  ),
-                })
-                queryClient.invalidateQueries({
-                  queryKey: githubKeys.jsonFile(org, "classroom50"),
-                })
+                // Cache reconciliation is owned by the mutation's onSuccess
+                // (optimistic flip of this classroom.json + listing invalidate).
+                // We deliberately do NOT invalidate the per-classroom
+                // classroom.json key here: an immediate unpinned refetch races
+                // GitHub's read-after-write eventual consistency and can revert
+                // the optimistic archive state. Hook kept for future needs.
               }}
             />
             <DeleteClassroomButton
@@ -302,12 +305,10 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
         </div>
 
         {archived ? (
-          <div role="alert" className="alert alert-info alert-soft mb-2">
-            <span className="text-sm">
-              This classroom is archived — settings are read-only. Use Unarchive
-              above to make changes.
-            </span>
-          </div>
+          <ArchivedClassroomNotice className="mb-2">
+            This classroom is archived — settings are read-only. Use Unarchive
+            above to make changes.
+          </ArchivedClassroomNotice>
         ) : null}
 
         <fieldset disabled={archived} className="m-0 min-w-0 border-0 p-0">

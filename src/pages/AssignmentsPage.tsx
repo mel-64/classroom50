@@ -4,6 +4,7 @@ import { useState } from "react"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
 import Breadcrumb from "@/components/breadcrumb"
+import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -122,20 +123,18 @@ const TeacherAssignmentsView = ({
         </div>
       </div>
       {archived ? (
-        <div role="alert" className="alert alert-info alert-soft mb-4">
-          <span className="text-sm">
-            This classroom is archived — new assignments and student accepts are
-            disabled. Unarchive it from{" "}
-            <Link
-              className="link"
-              to="/$org/$classroom/edit"
-              params={{ org, classroom }}
-            >
-              Classroom Settings
-            </Link>{" "}
-            to make changes.
-          </span>
-        </div>
+        <ArchivedClassroomNotice>
+          This classroom is archived — new assignments and student accepts are
+          disabled. Unarchive it from{" "}
+          <Link
+            className="link"
+            to="/$org/$classroom/edit"
+            params={{ org, classroom }}
+          >
+            Classroom Settings
+          </Link>{" "}
+          to make changes.
+        </ArchivedClassroomNotice>
       ) : null}
       <AssignmentsTable
         org={org}

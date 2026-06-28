@@ -188,7 +188,9 @@ export function createTreeForAssignment(params: {
 
 export function createCommit(
   client: GitHubClient,
-  input: CreateClassroomInput & {
+  input: {
+    org: string
+    classroom: string
     parents: [string]
     tree_sha: string
     message?: string
@@ -2235,9 +2237,15 @@ export async function editClassroom(
     )
   }
 
-  // Archived classrooms are read-only — refuse a settings edit but let a
-  // lifecycle toggle through (active set), since unarchiving re-enables editing.
-  if (active === undefined && isClassroomArchived(current)) {
+  // Archived classrooms are read-only — refuse a settings edit (name / term /
+  // onboarding_cleanup), but let a lifecycle toggle through since unarchiving
+  // re-enables editing. Gate on whether a settings field is actually present
+  // rather than on `active === undefined`, so a payload that bundles a settings
+  // change with `active: false` (a stale tab, a direct API call, or a CLI/agent)
+  // cannot slip an edit past the guard by re-asserting the archived state.
+  const editsSettings =
+    name !== undefined || term !== undefined || onboarding_cleanup !== undefined
+  if (editsSettings && active !== true && isClassroomArchived(current)) {
     throw new Error(
       `Classroom "${slug}" is archived — settings are read-only. Unarchive it first to make changes.`,
     )
@@ -2274,9 +2282,6 @@ export async function editClassroom(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
     classroom: slug,
-    // Use the effective term (provided override, else the persisted value) for
-    // commit metadata — `term` is optional on a pure archive toggle.
-    term: typeof next.term === "string" ? next.term : "",
   })
 
   const updatedRef = await updateRef(client, org, newCommit.sha)

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link, useParams, useRouter } from "@tanstack/react-router"
 import { UsersRound } from "lucide-react"
 import Breadcrumb from "@/components/breadcrumb"
+import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -194,20 +195,18 @@ const EditAssignmentPage = () => {
           )}
           <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
           {isTeacher && archived && (
-            <div role="alert" className="alert alert-info alert-soft mb-4">
-              <span className="text-sm">
-                This classroom is archived — its assignments are read-only.
-                Unarchive it in{" "}
-                <Link
-                  className="link"
-                  to="/$org/$classroom/edit"
-                  params={{ org: org ?? "", classroom: classroom ?? "" }}
-                >
-                  Classroom Settings
-                </Link>{" "}
-                to edit assignments.
-              </span>
-            </div>
+            <ArchivedClassroomNotice>
+              This classroom is archived — its assignments are read-only.
+              Unarchive it in{" "}
+              <Link
+                className="link"
+                to="/$org/$classroom/edit"
+                params={{ org: org ?? "", classroom: classroom ?? "" }}
+              >
+                Classroom Settings
+              </Link>{" "}
+              to edit assignments.
+            </ArchivedClassroomNotice>
           )}
           {isTeacher && org && classroom && assignment && (
             <EditAssignmentForm

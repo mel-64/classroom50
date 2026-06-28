@@ -51,8 +51,19 @@ const EditClassroomContent = ({
       })
     },
     onSuccess: () => {
+      // Refresh the exact classroom.json query useGetClassroom reads (so a
+      // renamed name/term updates in place), plus the classes-list listing.
+      // A bare rawFile("/") key matched no live query — useGetClassroom keys on
+      // jsonFile(org,"classroom50",`${classroom}/classroom.json`).
       queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
+        queryKey: githubKeys.jsonFile(
+          org ?? "",
+          "classroom50",
+          `${classroom}/classroom.json`,
+        ),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
       })
       notify({
         tone: "success",
