@@ -333,11 +333,13 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     email: string,
     username: string,
     id: string,
+    firstName = "",
+    lastName = "",
   ) => {
     const hash = await emailHash(email)
     // Columns: username,first_name,last_name,email,section,github_id,
     // enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at
-    return `${username},,,${email},,${id},enrolled,github,${hash},,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n`
+    return `${username},${firstName},${lastName},${email},sec-other,${id},enrolled,github,${hash},,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n`
   }
 
   it("invite succeeds for a new email -> row stays invited", async () => {
@@ -359,9 +361,10 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     )
   })
 
-  it("422 + email found enrolled in another classroom -> enrolled here with resolved identity", async () => {
+  it("422 + email found enrolled in another classroom -> enrolled here with resolved identity + name backfilled (section not copied)", async () => {
     const otherRoster =
-      HEADER + (await enrolledRowFor("dup@x.edu", "carol", "77"))
+      HEADER +
+      (await enrolledRowFor("dup@x.edu", "carol", "77", "Carol", "Diaz"))
     const { client, rosters } = makeEmailClient({
       rosters: { cs101: HEADER, cs202: otherRoster },
       inviteSucceeds: false, // already a member -> 422
@@ -379,7 +382,34 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     expect(row?.enrollment_status).toBe("enrolled")
     expect(row?.username).toBe("carol")
     expect(row?.github_id).toBe("77")
+    // Name backfilled from the other roster (teacher left it blank here).
+    expect(row?.first_name).toBe("Carol")
+    expect(row?.last_name).toBe("Diaz")
+    // Section is classroom-specific and must NOT be copied from the other roster.
+    expect(row?.section ?? "").not.toBe("sec-other")
     expect(result.student.enrollment_status).toBe("enrolled")
+  })
+
+  it("teacher-entered name wins over the other classroom's name on backfill", async () => {
+    const otherRoster =
+      HEADER + (await enrolledRowFor("dup2@x.edu", "dave", "88", "Old", "Name"))
+    const { client, rosters } = makeEmailClient({
+      rosters: { cs101: HEADER, cs202: otherRoster },
+      inviteSucceeds: false,
+      membershipState: "active",
+    })
+
+    await inviteStudentByEmail(client, {
+      org: "acme",
+      classroom: "cs101",
+      email: "dup2@x.edu",
+      first_name: "Teacher",
+      last_name: "Typed",
+    })
+
+    const row = rowsFromCsv(rosters.cs101).find((r) => r.email === "dup2@x.edu")
+    expect(row?.first_name).toBe("Teacher")
+    expect(row?.last_name).toBe("Typed")
   })
 
   it("422 + email NOT in any other roster -> stub removed + warning", async () => {

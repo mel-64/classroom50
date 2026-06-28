@@ -400,7 +400,12 @@ async function resolveStudentIdentityByEmail(
   email: string,
   excludeClassroom: string,
   ref: string,
-): Promise<{ username: string; github_id: string } | null> {
+): Promise<{
+  username: string
+  github_id: string
+  first_name: string
+  last_name: string
+} | null> {
   const targetHash = await emailHash(email)
 
   let dirs
@@ -416,9 +421,7 @@ async function resolveStudentIdentityByEmail(
   const matches = await mapWithConcurrency(
     otherClassrooms,
     ONBOARDING_READ_CONCURRENCY,
-    async (
-      classroom,
-    ): Promise<{ username: string; github_id: string } | null> => {
+    async (classroom) => {
       let csv: string
       try {
         csv = await getRawFile(client, {
@@ -439,15 +442,21 @@ async function resolveStudentIdentityByEmail(
           (Boolean(row.email_hash) || Boolean(row.email.trim())) &&
           rowMatchesEmailHash(row, email, targetHash),
       )
-      return hit ? { username: hit.username, github_id: hit.github_id } : null
+      // Carry the matched row's name so the new classroom's row stays in sync
+      // with where the student is already enrolled. Section is intentionally NOT
+      // copied — it's classroom-specific.
+      return hit
+        ? {
+            username: hit.username,
+            github_id: hit.github_id,
+            first_name: hit.first_name,
+            last_name: hit.last_name,
+          }
+        : null
     },
   )
 
-  return (
-    matches.find(
-      (m): m is { username: string; github_id: string } => m !== null,
-    ) ?? null
-  )
+  return matches.find((m) => m !== null) ?? null
 }
 
 // Flip an email-only roster row (matched by email) to enrolled, backfilling the
@@ -463,6 +472,8 @@ async function enrollEmailRowWithResolvedIdentity(
     email: string
     username: string
     github_id: string
+    first_name?: string
+    last_name?: string
   },
 ) {
   return withGitConflictRetry(async () => {
@@ -485,6 +496,12 @@ async function enrollEmailRowWithResolvedIdentity(
             ...row,
             username: input.username,
             github_id: input.github_id,
+            // Keep this classroom's row in sync with the student's other
+            // enrollment: backfill name only when the teacher left it blank here
+            // (teacher-entered values win — mirrors reconcile's fill-missing).
+            // Section is NOT synced — it's classroom-specific.
+            first_name: row.first_name?.trim() || (input.first_name ?? ""),
+            last_name: row.last_name?.trim() || (input.last_name ?? ""),
             enrollment_status: "enrolled",
             enrolled_at: now,
           })
@@ -625,6 +642,8 @@ export async function inviteStudentByEmail(
               email: result.student.email,
               username: resolved.username,
               github_id: resolved.github_id,
+              first_name: resolved.first_name,
+              last_name: resolved.last_name,
             })
             return {
               ...result,
@@ -632,6 +651,12 @@ export async function inviteStudentByEmail(
                 ...result.student,
                 username: resolved.username,
                 github_id: resolved.github_id,
+                first_name:
+                  result.student.first_name?.trim() ||
+                  resolved.first_name ||
+                  "",
+                last_name:
+                  result.student.last_name?.trim() || resolved.last_name || "",
                 enrollment_status: "enrolled",
               },
             }
