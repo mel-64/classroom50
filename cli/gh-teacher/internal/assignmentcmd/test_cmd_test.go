@@ -484,6 +484,125 @@ func TestRunAssignmentAdd_ExplicitEmptyAllowedFilesClearsSilently(t *testing.T) 
 	}
 }
 
+// TestPassThresholdFromFlag covers the tri-state flag->pointer mapping that
+// is the entire reason pass_threshold is a *int: omitted (flag unchanged)
+// must stay nil (feature off), while an explicit --pass-threshold 0 must be
+// a non-nil *int(0) (a real 0% bar), distinct from absent.
+func TestPassThresholdFromFlag(t *testing.T) {
+	if got := passThresholdFromFlag(false, 0); got != nil {
+		t.Errorf("unchanged flag = %v, want nil (feature off)", got)
+	}
+	if got := passThresholdFromFlag(false, 70); got != nil {
+		t.Errorf("unchanged flag with stale default = %v, want nil regardless of value", got)
+	}
+	if got := passThresholdFromFlag(true, 0); got == nil || *got != 0 {
+		t.Errorf("--pass-threshold 0 = %v, want explicit *int(0), not nil", got)
+	}
+	if got := passThresholdFromFlag(true, 70); got == nil || *got != 70 {
+		t.Errorf("--pass-threshold 70 = %v, want *int(70)", got)
+	}
+}
+
+// TestRunAssignmentAdd_PassThresholdPersists: an explicit pass_threshold
+// reaches the committed assignments.json (incl. an explicit 0, which must
+// not be confused with absent/off).
+func TestRunAssignmentAdd_PassThresholdPersists(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  int
+	}{
+		{"seventy", 70},
+		{"explicit zero", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, fix := newTestCmdServer(t, helloAssignments(""), false)
+			client := githubtest.NewTestClient(t, server)
+
+			var stdout, stderr bytes.Buffer
+			p := helloAddParams()
+			v := tc.val
+			p.PassThreshold = &v
+			if err := runAssignmentAdd(client, &stdout, &stderr, p); err != nil {
+				t.Fatalf("runAssignmentAdd(pass-threshold): %v", err)
+			}
+			got := decodeCommitted(t, fix).Assignments[0].PassThreshold
+			if got == nil || *got != tc.val {
+				t.Errorf("committed pass_threshold = %v, want %d (explicit, distinct from absent)", got, tc.val)
+			}
+		})
+	}
+}
+
+// TestRunAssignmentAdd_DropsPassThresholdWarns: re-adding an assignment
+// that had a GUI-set pass_threshold, without --pass-threshold, lands the
+// (now threshold-less) entry but warns that the passing bar was dropped —
+// mirroring the tests/template/allowed_files drop warnings.
+func TestRunAssignmentAdd_DropsPassThresholdWarns(t *testing.T) {
+	seeded := `{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "template": { "owner": "cs50", "repo": "hello-template", "branch": "main" },
+      "mode": "individual",
+      "autograder": "default",
+      "pass_threshold": 70
+    }
+  ]
+}`
+	server, fix := newTestCmdServer(t, seeded, false)
+	client := githubtest.NewTestClient(t, server)
+
+	var stdout, stderr bytes.Buffer
+	err := runAssignmentAdd(client, &stdout, &stderr, helloAddParams())
+	if err != nil {
+		t.Fatalf("runAssignmentAdd(re-add without --pass-threshold): %v", err)
+	}
+	if got := decodeCommitted(t, fix).Assignments[0].PassThreshold; got != nil {
+		t.Errorf("replace without --pass-threshold should drop the bar, got %v", got)
+	}
+	if !strings.Contains(stderr.String(), "dropped its pass_threshold (70%)") {
+		t.Errorf("stderr = %q, want a dropped-pass_threshold warning", stderr.String())
+	}
+}
+
+// TestRunAssignmentAdd_ExplicitZeroPassThresholdNotDropped: an explicit
+// --pass-threshold 0 on re-add is a real 0% bar, not an omission, so it
+// must persist and must not warn.
+func TestRunAssignmentAdd_ExplicitZeroPassThresholdNotDropped(t *testing.T) {
+	seeded := `{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "template": { "owner": "cs50", "repo": "hello-template", "branch": "main" },
+      "mode": "individual",
+      "autograder": "default",
+      "pass_threshold": 70
+    }
+  ]
+}`
+	server, fix := newTestCmdServer(t, seeded, false)
+	client := githubtest.NewTestClient(t, server)
+
+	var stdout, stderr bytes.Buffer
+	p := helloAddParams()
+	zero := 0
+	p.PassThreshold = &zero
+	if err := runAssignmentAdd(client, &stdout, &stderr, p); err != nil {
+		t.Fatalf("runAssignmentAdd(explicit 0 pass-threshold): %v", err)
+	}
+	got := decodeCommitted(t, fix).Assignments[0].PassThreshold
+	if got == nil || *got != 0 {
+		t.Errorf("explicit --pass-threshold 0 should persist as 0, got %v", got)
+	}
+	if strings.Contains(stderr.String(), "dropped its pass_threshold") {
+		t.Errorf("stderr = %q, an explicit 0 is not a drop and must not warn", stderr.String())
+	}
+}
+
 func TestRunAssignmentAdd_TestsRejectedWithAutograder(t *testing.T) {
 	server, fix := newTestCmdServer(t, helloAssignments(""), true)
 	client := githubtest.NewTestClient(t, server)

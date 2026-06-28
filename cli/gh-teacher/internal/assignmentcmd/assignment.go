@@ -70,17 +70,18 @@ func NewCmd() *cobra.Command {
 // GitHub-UI invites can bypass it — a documented limitation).
 func assignmentAddCmd() *cobra.Command {
 	var (
-		name         string
-		template     string
-		description  string
-		due          string
-		mode         string
-		maxGroupSize int
-		autograder   string
-		runtimeFile  string
-		testsFile    string
-		feedbackPR   bool
-		allowedFiles []string
+		name          string
+		template      string
+		description   string
+		due           string
+		mode          string
+		maxGroupSize  int
+		autograder    string
+		runtimeFile   string
+		testsFile     string
+		feedbackPR    bool
+		allowedFiles  []string
+		passThreshold int
 	)
 
 	cmd := &cobra.Command{
@@ -167,6 +168,10 @@ func assignmentAddCmd() *cobra.Command {
 			if autograderVal == "" {
 				autograderVal = contract.DefaultAutograderName
 			}
+			// pass_threshold is opt-in: only set the pointer when the flag was
+			// passed, so an omitted flag leaves it nil (feature off) while an
+			// explicit --pass-threshold 0 is a real 0% threshold.
+			passThresholdPtr := passThresholdFromFlag(cmd.Flags().Changed("pass-threshold"), passThreshold)
 			if err := autograderseam.ValidateName(autograderVal); err != nil {
 				return err
 			}
@@ -201,21 +206,22 @@ func assignmentAddCmd() *cobra.Command {
 			}
 			return runAssignmentAdd(client, cmd.OutOrStdout(), cmd.ErrOrStderr(),
 				addAssignmentParams{
-					Org:          org,
-					Classroom:    classroom,
-					Slug:         slug,
-					Name:         nameVal,
-					Description:  strings.TrimSpace(description),
-					Tmpl:         tmplArg,
-					Due:          dueVal,
-					DueMeta:      dueMetaVal,
-					Mode:         modeVal,
-					MaxGroupSize: maxGroupSize,
-					Autograder:   autograderVal,
-					Runtime:      runtime,
-					Tests:        tests,
-					FeedbackPR:   feedbackPR,
-					AllowedFiles: allowedFiles,
+					Org:           org,
+					Classroom:     classroom,
+					Slug:          slug,
+					Name:          nameVal,
+					Description:   strings.TrimSpace(description),
+					Tmpl:          tmplArg,
+					Due:           dueVal,
+					DueMeta:       dueMetaVal,
+					Mode:          modeVal,
+					MaxGroupSize:  maxGroupSize,
+					Autograder:    autograderVal,
+					Runtime:       runtime,
+					Tests:         tests,
+					FeedbackPR:    feedbackPR,
+					AllowedFiles:  allowedFiles,
+					PassThreshold: passThresholdPtr,
 				})
 		},
 	}
@@ -231,6 +237,7 @@ func assignmentAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&testsFile, "tests", "", "Path to a JSON file with a bare array of declarative test specs (io/run/python), or `-` to read from stdin. Sets the assignment's `tests` block; mutually exclusive with a per-assignment autograder.py. See `gh teacher assignment test --help`.")
 	cmd.Flags().BoolVar(&feedbackPR, "feedback-pr", true, "Open one long-lived Feedback pull request per student repo so you can leave inline review comments on the full starter→submission diff. The autograde runner freezes a base branch at the baseline commit and opens the PR on the first submission that has a diff. Default on; pass --feedback-pr=false to disable. Requires `gh teacher init` to have set up the org prerequisites.")
 	cmd.Flags().StringArrayVar(&allowedFiles, "allowed-files", nil, "Ordered .gitignore-style pattern (repeatable, order preserved) defining which files belong to the submission. Last match wins; `!` re-includes. Pass `--allowed-files '*' --allowed-files '!hello.py'` to allow only hello.py. The autograde runner removes disallowed files before grading (control files are always kept); `gh student submit` filters them too. Omit to allow every file.")
+	cmd.Flags().IntVar(&passThreshold, "pass-threshold", 0, "Opt-in passing bar as a percentage of max score (0–100): at/above it a gradebook client shows a submission as passing. Advisory/display-only — it does not change a student's score. Omit to leave it off (no passing concept); pass --pass-threshold 0 for an explicit 0%.")
 	return cmd
 }
 
@@ -432,27 +439,39 @@ func validateModeAndSizeFlags(mode string, maxGroupSize int, sizeProvided bool) 
 	return modeVal, nil
 }
 
+// passThresholdFromFlag maps the --pass-threshold flag to the optional
+// *int the entry stores: an omitted flag stays nil (off), while an explicit
+// --pass-threshold 0 is a non-nil *int(0) — a real 0% bar distinct from off.
+func passThresholdFromFlag(changed bool, value int) *int {
+	if !changed {
+		return nil
+	}
+	v := value
+	return &v
+}
+
 // addAssignmentParams carries the inputs to runAssignmentAdd as named
 // fields rather than a long positional list. Several fields share types
 // (multiple strings, pointers, slices), so positional passing made arg
 // transposition a compile-clean footgun; field names make call sites
 // order-independent and self-documenting.
 type addAssignmentParams struct {
-	Org          string
-	Classroom    string
-	Slug         string
-	Name         string
-	Description  string
-	Tmpl         *templateArg
-	Due          string
-	DueMeta      *assignment.DueMeta
-	Mode         string
-	MaxGroupSize int
-	Autograder   string
-	Runtime      *assignment.RuntimeRef
-	Tests        []assignment.TestSpec
-	FeedbackPR   bool
-	AllowedFiles []string
+	Org           string
+	Classroom     string
+	Slug          string
+	Name          string
+	Description   string
+	Tmpl          *templateArg
+	Due           string
+	DueMeta       *assignment.DueMeta
+	Mode          string
+	MaxGroupSize  int
+	Autograder    string
+	Runtime       *assignment.RuntimeRef
+	Tests         []assignment.TestSpec
+	FeedbackPR    bool
+	AllowedFiles  []string
+	PassThreshold *int
 }
 
 func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssignmentParams) error {
@@ -462,6 +481,7 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 	mode, maxGroupSize, autograder := p.Mode, p.MaxGroupSize, p.Autograder
 	runtime, tests := p.Runtime, p.Tests
 	feedbackPR, allowedFiles := p.FeedbackPR, p.AllowedFiles
+	passThreshold := p.PassThreshold
 	branch, err := configrepo.ResolveConfigRepoBranch(client, org)
 	if err != nil {
 		return err
@@ -495,35 +515,38 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 	}
 
 	entry := assignment.AssignmentEntry{
-		Slug:         slug,
-		Name:         name,
-		Description:  description,
-		Template:     resolved,
-		Due:          due,
-		DueMeta:      dueMetaVal,
-		Mode:         mode,
-		MaxGroupSize: maxGroupSize,
-		Autograder:   autograder,
-		Runtime:      runtime,
-		Tests:        tests,
-		FeedbackPR:   feedbackPR,
-		AllowedFiles: allowedFiles,
+		Slug:          slug,
+		Name:          name,
+		Description:   description,
+		Template:      resolved,
+		Due:           due,
+		DueMeta:       dueMetaVal,
+		Mode:          mode,
+		MaxGroupSize:  maxGroupSize,
+		Autograder:    autograder,
+		Runtime:       runtime,
+		Tests:         tests,
+		FeedbackPR:    feedbackPR,
+		AllowedFiles:  allowedFiles,
+		PassThreshold: passThreshold,
 	}
 	if err := assignment.ValidateAssignmentEntry(entry); err != nil {
 		return err
 	}
 
 	var (
-		action            string
-		lastEncodedSize   int
-		droppedTests      int
-		droppedTemplate   *assignment.TemplateRef
-		droppedAllowedCnt int
+		action               string
+		lastEncodedSize      int
+		droppedTests         int
+		droppedTemplate      *assignment.TemplateRef
+		droppedAllowedCnt    int
+		droppedPassThreshold *int
 	)
 	build := func(parentSHA string) (map[string]string, error) {
 		droppedTests = 0
 		droppedTemplate = nil
 		droppedAllowedCnt = 0
+		droppedPassThreshold = nil
 		// Verify the autograder shim exists at parent SHA before
 		// writing — otherwise the assignment lands successfully and
 		// every student's accept 404s on the Pages fetch later. The
@@ -584,6 +607,14 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		// non-CLI clear path) is treated as deliberate and does not warn.
 		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.AllowedFiles == nil {
 			droppedAllowedCnt = len(file.Assignments[idx].AllowedFiles)
+		}
+		// Wholesale-replace footgun (as with tests/template/allowed_files),
+		// sharper here because pass_threshold is usually authored by the
+		// gradebook GUI, not the CLI: re-adding without --pass-threshold
+		// silently clears it. nil = flag omitted (warn); an explicit 0 is a
+		// non-nil pointer (a real 0% bar) and not a drop.
+		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.PassThreshold == nil && file.Assignments[idx].PassThreshold != nil {
+			droppedPassThreshold = file.Assignments[idx].PassThreshold
 		}
 		updated, replaced := assignment.UpsertAssignment(file.Assignments, entry)
 		if replaced {
@@ -656,6 +687,11 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		_, _ = fmt.Fprintf(errOut,
 			"Warning: replacing %q dropped its %d allowed_files pattern(s) — `assignment add` rewrites the whole entry, and you re-ran it without --allowed-files. Submissions are now unrestricted. Pass --allowed-files to keep the allowlist.\n",
 			slug, droppedAllowedCnt)
+	}
+	if droppedPassThreshold != nil {
+		_, _ = fmt.Fprintf(errOut,
+			"Warning: replacing %q dropped its pass_threshold (%d%%) — `assignment add` rewrites the whole entry, and you re-ran it without --pass-threshold. The passing bar (often set in the gradebook GUI) is now off. Pass --pass-threshold %d to keep it.\n",
+			slug, *droppedPassThreshold, *droppedPassThreshold)
 	}
 	// Heads-up if the encoded file is approaching the GitHub
 	// contents-API behavior change (~1 MiB encoded → encoding:"none",

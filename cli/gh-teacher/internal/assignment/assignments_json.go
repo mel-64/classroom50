@@ -104,20 +104,21 @@ type AssignmentsJSON struct {
 // file. The runner enforces it by removing disallowed files before
 // grading; `gh student submit` applies it best-effort.
 type AssignmentEntry struct {
-	Slug         string           `json:"slug"`
-	Name         string           `json:"name"`
-	Description  string           `json:"description,omitempty"`
-	Template     *TemplateRef     `json:"template,omitempty"`
-	Due          string           `json:"due,omitempty"`
-	DueMeta      *DueMeta         `json:"due_meta,omitempty"`
-	Mode         string           `json:"mode"`
-	Autograder   string           `json:"autograder"`
-	MaxGroupSize int              `json:"max_group_size,omitempty"`
-	Runtime      *RuntimeRef      `json:"runtime,omitempty"`
-	Tests        []TestSpec       `json:"tests,omitempty"`
-	FeedbackPR   bool             `json:"feedback_pr,omitempty"`
-	AllowedFiles []string         `json:"allowed_files,omitempty"`
-	MigratedFrom *MigratedFromRef `json:"migrated_from,omitempty"`
+	Slug          string           `json:"slug"`
+	Name          string           `json:"name"`
+	Description   string           `json:"description,omitempty"`
+	Template      *TemplateRef     `json:"template,omitempty"`
+	Due           string           `json:"due,omitempty"`
+	DueMeta       *DueMeta         `json:"due_meta,omitempty"`
+	Mode          string           `json:"mode"`
+	Autograder    string           `json:"autograder"`
+	MaxGroupSize  int              `json:"max_group_size,omitempty"`
+	Runtime       *RuntimeRef      `json:"runtime,omitempty"`
+	Tests         []TestSpec       `json:"tests,omitempty"`
+	FeedbackPR    bool             `json:"feedback_pr,omitempty"`
+	AllowedFiles  []string         `json:"allowed_files,omitempty"`
+	PassThreshold *int             `json:"pass_threshold,omitempty"`
+	MigratedFrom  *MigratedFromRef `json:"migrated_from,omitempty"`
 }
 
 // MaxGroupSizeCap bounds max_group_size (when set; 0 = unset).
@@ -126,6 +127,30 @@ const MaxGroupSizeCap = 100
 func ValidateMaxGroupSize(n int) error {
 	if n < 0 || n > MaxGroupSizeCap {
 		return fmt.Errorf("max_group_size %d out of range (0 = unset/individual, or 2..%d for group mode)", n, MaxGroupSizeCap)
+	}
+	return nil
+}
+
+// PassThreshold is an opt-in, advisory passing bar: the integer percentage of
+// max score (0..100) at/above which a gradebook client shows a submission as
+// "passing". A *pointer* (not a plain int + omitempty like max_group_size)
+// because 0 is a legal threshold, so unset must stay distinct from 0 — absent
+// means the feature is OFF (no passing concept), not "0%". CLI-unenforced like
+// max_group_size: the autograder/score collection never read it; it exists so
+// clients such as the GUI can display and (optionally) enforce it client-side.
+const (
+	PassThresholdMin = 0
+	PassThresholdMax = 100
+)
+
+// ValidatePassThreshold checks an optional pass_threshold. A nil pointer
+// (absent) is valid — the feature is off; a present value must be 0..100.
+func ValidatePassThreshold(n *int) error {
+	if n == nil {
+		return nil
+	}
+	if *n < PassThresholdMin || *n > PassThresholdMax {
+		return fmt.Errorf("pass_threshold %d out of range (%d..%d)", *n, PassThresholdMin, PassThresholdMax)
 	}
 	return nil
 }
@@ -626,6 +651,9 @@ func ValidateAssignmentEntry(entry AssignmentEntry) error {
 	if err := ValidateAllowedFiles(entry.AllowedFiles); err != nil {
 		return err
 	}
+	if err := ValidatePassThreshold(entry.PassThreshold); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -705,6 +733,9 @@ func ValidateExistingEntry(entry AssignmentEntry) error {
 		}
 	}
 	if err := ValidateAllowedFiles(entry.AllowedFiles); err != nil {
+		return fmt.Errorf("entry %q: %w", entry.Slug, err)
+	}
+	if err := ValidatePassThreshold(entry.PassThreshold); err != nil {
 		return fmt.Errorf("entry %q: %w", entry.Slug, err)
 	}
 	return nil

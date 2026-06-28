@@ -355,6 +355,116 @@ func TestParseAssignments_AllowedFilesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseAssignments_PassThresholdRoundTrip(t *testing.T) {
+	// pass_threshold parses, survives a re-encode/re-parse, an explicit 0
+	// stays 0 (distinct from absent), and an entry without the field decodes
+	// to a nil pointer (feature off).
+	in := []byte(`{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "mode": "individual",
+      "autograder": "default",
+      "pass_threshold": 70
+    },
+    {
+      "slug": "zero",
+      "name": "Zero",
+      "mode": "individual",
+      "autograder": "default",
+      "pass_threshold": 0
+    },
+    {
+      "slug": "off",
+      "name": "Off",
+      "mode": "individual",
+      "autograder": "default"
+    }
+  ]
+}`)
+	file, err := ParseAssignments(in)
+	if err != nil {
+		t.Fatalf("ParseAssignments: %v", err)
+	}
+	if got := file.Assignments[0].PassThreshold; got == nil || *got != 70 {
+		t.Errorf("hello.PassThreshold = %v, want 70", got)
+	}
+	if got := file.Assignments[1].PassThreshold; got == nil || *got != 0 {
+		t.Errorf("zero.PassThreshold = %v, want explicit 0 (not nil)", got)
+	}
+	if file.Assignments[2].PassThreshold != nil {
+		t.Errorf("off.PassThreshold = %v, want nil (field absent)", file.Assignments[2].PassThreshold)
+	}
+
+	encoded, err := EncodeAssignments(file)
+	if err != nil {
+		t.Fatalf("EncodeAssignments: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"pass_threshold": 0`) {
+		t.Errorf("encoded missing explicit pass_threshold 0:\n%s", encoded)
+	}
+	again, err := ParseAssignments(encoded)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if got := again.Assignments[0].PassThreshold; got == nil || *got != 70 {
+		t.Errorf("pass_threshold not stable across round-trip: %v", got)
+	}
+	if got := again.Assignments[1].PassThreshold; got == nil || *got != 0 {
+		t.Errorf("explicit 0 not stable across round-trip: %v", got)
+	}
+	if again.Assignments[2].PassThreshold != nil {
+		t.Errorf("absent pass_threshold should round-trip nil, got %v", again.Assignments[2].PassThreshold)
+	}
+}
+
+func TestValidatePassThreshold(t *testing.T) {
+	ptr := func(n int) *int { return &n }
+	cases := []struct {
+		name    string
+		val     *int
+		wantErr bool
+	}{
+		{"nil (off) is allowed", nil, false},
+		{"0 is allowed", ptr(0), false},
+		{"100 is allowed", ptr(100), false},
+		{"mid-range is allowed", ptr(70), false},
+		{"negative rejected", ptr(-1), true},
+		{"over 100 rejected", ptr(101), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidatePassThreshold(tc.val)
+			if tc.wantErr && err == nil {
+				t.Errorf("ValidatePassThreshold(%v) = nil, want error", tc.val)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("ValidatePassThreshold(%v) = %v, want nil", tc.val, err)
+			}
+		})
+	}
+}
+
+func TestParseAssignments_RejectsOutOfRangePassThreshold(t *testing.T) {
+	in := []byte(`{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "mode": "individual",
+      "autograder": "default",
+      "pass_threshold": 150
+    }
+  ]
+}`)
+	if _, err := ParseAssignments(in); err == nil {
+		t.Fatal("ParseAssignments accepted pass_threshold 150; want range error")
+	}
+}
+
 func TestValidateAllowedFiles(t *testing.T) {
 	cases := []struct {
 		name     string
