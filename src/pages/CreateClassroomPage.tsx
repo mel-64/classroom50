@@ -15,7 +15,6 @@ import MissingParams from "@/components/MissingParams"
 import RequireTeacher from "@/components/RequireTeacher"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
-import { useState } from "react"
 import type {
   CreateClassroomInput,
   CreateClassroomResult,
@@ -27,8 +26,6 @@ const CreateClassroomPage = () => {
   const navigate = useNavigate()
   const { notify } = useToast()
   const { org } = useParams({ strict: false })
-  // Captured in onSubmit so onSuccess can redirect to the created classroom.
-  const [classroomSlug, setClassroomSlug] = useState("")
 
   const createClassroomMutation = useMutation<
     CreateClassroomResult,
@@ -60,13 +57,13 @@ const CreateClassroomPage = () => {
         message: `Couldn't create classroom: ${err.message}`,
       })
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
       })
-      // Success confirmation survives the redirect via a toast (the provider is
-      // mounted above the router). GitHub's contents API is read-after-write
-      // eventual, so the new classroom may take a moment to appear.
+      // Toast before navigating: the provider is mounted above the router, so
+      // the confirmation survives the redirect. GitHub's contents API is
+      // read-after-write eventual, hence "may take a moment to appear".
       notify({
         tone: "success",
         durationMs: 6000,
@@ -74,7 +71,7 @@ const CreateClassroomPage = () => {
       })
       navigate({
         to: "/$org/$classroom",
-        params: { org: org ?? "", classroom: classroomSlug },
+        params: { org: org ?? "", classroom: variables.classroom },
       })
     },
   })
@@ -101,7 +98,6 @@ const CreateClassroomPage = () => {
               <div className="mb-8">
                 <CreateClassroomForm
                   onSubmit={(values) => {
-                    setClassroomSlug(values.slug)
                     createClassroomMutation.mutateAsync({
                       name: values.name,
                       classroom: values.slug,

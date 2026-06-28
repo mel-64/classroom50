@@ -30,12 +30,7 @@ const CreateAssignmentPage = () => {
   const { notify } = useToast()
   const [errorMessage, setErrorMessage] = useState("")
   const [warningMessage, setWarningMessage] = useState("")
-  // The submitted slug, captured in onSubmit so onSuccess (which receives only
-  // the mutation result, not the form values) can redirect to the new assignment.
-  const [createdSlug, setCreatedSlug] = useState("")
 
-  // Existing assignment slugs, for the create form's case-insensitive
-  // uniqueness check.
   const { data: assignmentsData } = useGetClassroomAssignments(org, classroom)
   const takenSlugs = (assignmentsData?.assignments ?? []).map((a) => a.slug)
 
@@ -67,7 +62,7 @@ const CreateAssignmentPage = () => {
       setErrorMessage(err.message)
       window.scrollTo({ top: 0, behavior: "smooth" })
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
           org ?? "",
@@ -82,10 +77,9 @@ const CreateAssignmentPage = () => {
         window.scrollTo({ top: 0, behavior: "smooth" })
         return
       }
-      // Success confirmation survives the redirect via a toast (the provider is
-      // mounted above the router). GitHub's contents API is read-after-write
-      // eventual, so the assignment may take a moment to appear on the landing
-      // page.
+      // Toast before navigating: the provider is mounted above the router, so
+      // the confirmation survives the redirect. GitHub's contents API is
+      // read-after-write eventual, hence "may take a moment to appear".
       notify({
         tone: "success",
         durationMs: 6000,
@@ -96,7 +90,7 @@ const CreateAssignmentPage = () => {
         params: {
           org: org ?? "",
           classroom: classroom ?? "",
-          assignment: createdSlug,
+          assignment: variables.slug,
         },
       })
     },
@@ -153,7 +147,6 @@ const CreateAssignmentPage = () => {
                   onSubmit={(values) => {
                     setErrorMessage("")
                     setWarningMessage("")
-                    setCreatedSlug(values.slug)
                     createClassroomMutation.mutateAsync({
                       name: values.name,
                       slug: values.slug,

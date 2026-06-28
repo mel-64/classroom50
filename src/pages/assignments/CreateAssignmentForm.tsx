@@ -49,8 +49,7 @@ import {
 
 export type CreateAssignmentFormValues = {
   name: string
-  // URL/repo slug for the assignment. Shown editable on create (auto-prefilled
-  // from the name until the teacher edits it); not edited here in edit mode.
+  // URL/repo slug for the assignment (edited on create only).
   slug: string
   description: string
   mode: "group" | "individual"
@@ -80,8 +79,7 @@ export type AssignmentForm = ReturnType<typeof useAssignmentForm>
 const useAssignmentForm = (
   defaultValues: Partial<CreateAssignmentFormValues> | undefined,
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>,
-  // Create-only slug uniqueness: existing assignment slugs in the classroom,
-  // and whether this form is in edit mode (where slug is not validated/edited).
+  // Create-only: slug uniqueness is not validated in edit mode (no rename).
   slugContext?: { takenSlugs?: string[]; edit?: boolean },
 ) =>
   useForm({
@@ -111,7 +109,7 @@ const useAssignmentForm = (
         if (!value.name.trim()) {
           errors.name = "Assignment name is required."
         }
-        // Slug is shown + validated on create only (edit mode does not rename).
+        // edit mode does not rename, so the slug is only validated on create.
         if (!slugContext?.edit) {
           const slug = slugify(value.slug)
           if (!slug) {
@@ -206,8 +204,7 @@ type CreateAssignmentFormProps = {
   // Classroom slug, used by the template pre-flight to check whether the
   // classroom team already has read on an in-org private template.
   classroom?: string
-  // Existing assignment slugs in the classroom, for the create-mode slug
-  // uniqueness check (case-insensitive). Ignored in edit mode.
+  // Existing assignment slugs, for the create-mode uniqueness check.
   takenSlugs?: string[]
 }
 const FormErrors = ({ form }: { form: AssignmentForm }) => (
@@ -516,8 +513,6 @@ const CreateAssignmentForm = ({
                     onBlur={field.handleBlur}
                     onChange={(e) => {
                       field.handleChange(e.target.value)
-                      // Prefill the slug from the name until the teacher edits
-                      // it directly (create mode only).
                       if (!edit && !slugTouched) {
                         form.setFieldValue("slug", slugify(e.target.value))
                       }
