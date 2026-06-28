@@ -8,6 +8,7 @@ import {
   generateSecret,
   isValidSecret,
 } from "@/util/secret"
+import { slugify } from "@/util/slug"
 
 export type CreateClassroomFormValues = {
   name: string
@@ -24,15 +25,6 @@ export type CreateClassroomFormValues = {
 type CreateClassroomFormProps = {
   defaultValues?: Partial<CreateClassroomFormValues>
   onSubmit: (values: CreateClassroomFormValues) => void | Promise<void>
-}
-
-export function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
 }
 
 const CreateClassroomForm = ({

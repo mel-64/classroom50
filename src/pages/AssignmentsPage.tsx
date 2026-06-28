@@ -1,4 +1,6 @@
 import { Link, useParams } from "@tanstack/react-router"
+import { ChevronDown, Copy, Plus } from "lucide-react"
+import { useState } from "react"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
 import Breadcrumb from "@/components/breadcrumb"
@@ -7,11 +9,73 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { ReuseFromClassroomModal } from "@/components/modals/ReuseFromClassroomModal"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import { OrgRepos } from "./ClassesPage"
+
+// Split button: primary "Assignment" creates; the caret reveals "Reuse
+// assignment", which pulls one from another classroom into this one.
+const NewAssignmentButton = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
+  const [reuseOpen, setReuseOpen] = useState(false)
+
+  return (
+    <>
+      <div className="join">
+        <Link
+          to="/$org/$classroom/assignments/new"
+          params={{ org, classroom }}
+          className="btn btn-primary join-item"
+        >
+          <Plus className="size-4" /> Assignment
+        </Link>
+        <div className="dropdown dropdown-end join-item">
+          <button
+            tabIndex={0}
+            className="btn btn-primary join-item border-l border-primary-content/20 px-2"
+            aria-label="More assignment options"
+          >
+            <ChevronDown className="size-4" />
+          </button>
+          <ul
+            tabIndex={0}
+            className="dropdown-content menu z-10 mt-1 w-max rounded-box border border-base-content/5 bg-base-100 p-1 shadow"
+          >
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  // Close the dropdown before opening the modal so focus
+                  // doesn't fight the dialog.
+                  ;(document.activeElement as HTMLElement | null)?.blur()
+                  setReuseOpen(true)
+                }}
+              >
+                <Copy className="size-4" /> Reuse assignment
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      {reuseOpen ? (
+        <ReuseFromClassroomModal
+          org={org}
+          classroom={classroom}
+          onClose={() => setReuseOpen(false)}
+        />
+      ) : null}
+    </>
+  )
+}
 
 const TeacherAssignmentsView = ({
   org,
@@ -48,12 +112,7 @@ const TeacherAssignmentsView = ({
           </h3>
         </div>
         <div className="pt-10">
-          <Link
-            to="/$org/$classroom/assignments/new"
-            params={{ org, classroom }}
-          >
-            <button className="btn btn-primary">+ Assignment</button>
-          </Link>
+          <NewAssignmentButton org={org} classroom={classroom} />
         </div>
       </div>
       <AssignmentsTable

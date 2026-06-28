@@ -13,7 +13,7 @@ import Drawer, {
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { slugify } from "./classes/CreateClassroomForm"
+import { slugify } from "@/util/slug"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
 import type {

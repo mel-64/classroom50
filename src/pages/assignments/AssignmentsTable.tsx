@@ -1,11 +1,12 @@
 import { useNavigate } from "@tanstack/react-router"
-import { Pencil, Trash2, UserRound, UsersRound } from "lucide-react"
+import { Copy, Pencil, Trash2, UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
 import { formatDueDate } from "@/util/formatDate"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ConfirmModal } from "@/components/modals"
+import { ReuseAssignmentModal } from "@/components/modals/ReuseAssignmentModal"
 import { githubKeys } from "@/hooks/github/queries"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
@@ -76,6 +77,44 @@ const DeleteAssignmentButton = ({
         }}
         onClose={() => setOpen(false)}
       />
+    </>
+  )
+}
+
+const ReuseAssignmentButton = ({
+  org,
+  classroom,
+  assignment,
+}: {
+  org: string
+  classroom: string
+  assignment: Assignment
+}) => {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        className="btn btn-circle btn-sm btn-ghost"
+        title="Reuse in another classroom"
+        aria-label="Reuse assignment in another classroom"
+      >
+        <Copy className="size-4" />
+      </button>
+
+      {open ? (
+        <ReuseAssignmentModal
+          org={org}
+          classroom={classroom}
+          assignment={assignment}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </>
   )
 }
@@ -243,6 +282,11 @@ const AssignmentsTable = ({
                   >
                     <Pencil className="size-4" />
                   </Link>
+                  <ReuseAssignmentButton
+                    org={org}
+                    classroom={classroom}
+                    assignment={assignment}
+                  />
                   <DeleteAssignmentButton
                     org={org}
                     classroom={classroom}
