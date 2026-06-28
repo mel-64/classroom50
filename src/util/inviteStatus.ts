@@ -21,6 +21,12 @@ export type StudentInviteStatus = {
 
 const lower = (value: string | null | undefined) => (value ?? "").toLowerCase()
 
+// String github_ids of the org's live members, the key both member-status
+// classification and the "Mark enrolled" gate match a roster row's github_id on.
+export function memberIdSet(members: GitHubUser[]) {
+  return new Set(members.map((member) => String(member.id)))
+}
+
 // Builds lookups once, then classifies each student. Members match on numeric
 // id (login fallback); invitations match on login / email. onboardedReports are
 // the parsed self-reports that currently exist; a not-yet-enrolled student who
@@ -32,7 +38,7 @@ export function buildInviteStatusLookup(
   failedInvitations: GitHubOrgInvitation[],
   onboardedReports: { github_id: string; email: string }[] = [],
 ) {
-  const memberIds = new Set(members.map((member) => String(member.id)))
+  const memberIds = memberIdSet(members)
   const memberLogins = new Set(members.map((member) => lower(member.login)))
 
   // Self-reports indexed by both keys a row can match on: github_id (username-

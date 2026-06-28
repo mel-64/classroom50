@@ -33,7 +33,7 @@ import { invalidateInviteQueries as invalidateInviteQueriesForOrg } from "@/hook
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useRosterStatus from "@/hooks/useRosterStatus"
 import { useGitHubViewer } from "@/hooks/github/hooks"
-import { type InviteStatus } from "@/util/inviteStatus"
+import { type InviteStatus, memberIdSet } from "@/util/inviteStatus"
 import {
   applyReconciledToRoster,
   removeFromRoster,
@@ -414,10 +414,7 @@ const EnrolledStudents = ({
   const { members } = useGetOrgMembers(org)
   // Live member github_ids (cache hit — useRosterStatus already fetched them),
   // for gating the "Mark enrolled" affordance.
-  const memberIds = useMemo(
-    () => new Set((members ?? []).map((m) => String(m.id))),
-    [members],
-  )
+  const memberIds = useMemo(() => memberIdSet(members ?? []), [members])
   const {
     statusByKey,
     getStatus,

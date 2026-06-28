@@ -608,51 +608,47 @@ export async function inviteStudentByEmail(
         result.previousCommitSha,
       ).catch(() => null)
 
-      if (resolved && resolved.username) {
-        const stillActive =
-          (await getOrgMembershipState(
-            client,
-            input.org,
-            resolved.username,
-          ).catch(() => null)) === "active"
-        if (stillActive) {
-          try {
-            await enrollEmailRowWithResolvedIdentity(client, {
-              org: input.org,
-              classroom: input.classroom,
-              email: result.student.email,
+      const stillActive =
+        Boolean(resolved?.username) &&
+        (await getOrgMembershipState(
+          client,
+          input.org,
+          resolved!.username,
+        ).catch(() => null)) === "active"
+
+      if (resolved && stillActive) {
+        try {
+          await enrollEmailRowWithResolvedIdentity(client, {
+            org: input.org,
+            classroom: input.classroom,
+            email: result.student.email,
+            username: resolved.username,
+            github_id: resolved.github_id,
+            first_name: resolved.first_name,
+            last_name: resolved.last_name,
+          })
+          return {
+            ...result,
+            student: {
+              ...result.student,
               username: resolved.username,
               github_id: resolved.github_id,
-              first_name: resolved.first_name,
-              last_name: resolved.last_name,
-            })
-            return {
-              ...result,
-              student: {
-                ...result.student,
-                username: resolved.username,
-                github_id: resolved.github_id,
-                first_name:
-                  result.student.first_name?.trim() ||
-                  resolved.first_name ||
-                  "",
-                last_name:
-                  result.student.last_name?.trim() || resolved.last_name || "",
-                enrollment_status: "enrolled",
-              },
-            }
-          } catch (enrollErr) {
-            console.error(
-              "resolved already-member but enroll write failed:",
-              enrollErr,
-            )
-            // Fall through to the generic warning below (row stays as a stub).
+              first_name:
+                result.student.first_name?.trim() || resolved.first_name || "",
+              last_name:
+                result.student.last_name?.trim() || resolved.last_name || "",
+              enrollment_status: "enrolled",
+            },
           }
+        } catch (enrollErr) {
+          console.error(
+            "resolved already-member but enroll write failed:",
+            enrollErr,
+          )
+          // Fall through to the generic warning below (row stays as a stub).
         }
-      }
-
-      // Member but unidentifiable from any roster — drop the stub and warn.
-      if (!resolved) {
+      } else if (!resolved) {
+        // Member but unidentifiable from any roster — drop the stub and warn.
         await removeEmailRowWithRetry(client, {
           org: input.org,
           classroom: input.classroom,
