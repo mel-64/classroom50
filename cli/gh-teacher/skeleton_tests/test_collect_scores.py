@@ -1165,8 +1165,8 @@ class TestReadStudentsCSV:
         path = tmp_path / "students.csv"
         path.write_text(
             "username,first_name,last_name,email,section,github_id,"
-            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
-            "alice,Alice,A,alice@x,1,111,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n"
+            "alice,Alice,A,alice@x,1,111,enrolled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
             "bob,Bob,B,bob@x,1,222,invited,email,beef0000beef0000,tok123,2026-01-03T00:00:00Z,\n"
         )
         roster = cs.read_students_csv(path)
@@ -1180,7 +1180,7 @@ class TestReadStudentsCSV:
         path = tmp_path / "students.csv"
         path.write_text(
             "\ufeffusername,first_name,last_name,email,section,github_id,"
-            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n"
             "alice,Alice,A,alice@x,1,111,invited,email,abcd,,2026-01-01T00:00:00Z,\n",
             encoding="utf-8",
         )
@@ -1204,7 +1204,7 @@ class TestReadStudentsCSV:
         # this fails, a column or its order drifted between the codebases.
         assert cs.FULL_ROSTER_HEADER == (
             "username,first_name,last_name,email,section,github_id,"
-            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at"
         )
 
     def test_duplicate_extra_column_is_rejected(self, tmp_path):

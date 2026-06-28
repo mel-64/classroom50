@@ -368,8 +368,8 @@ func TestParseImportCSV_RejectsWebWidenedExportWithGuidance(t *testing.T) {
 	// the fix, rather than the generic header error — import is canonical-only
 	// by design (it re-resolves github_id and carries no onboarding state).
 	in := []byte("username,first_name,last_name,email,section,github_id," +
-		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
-		"alice,Alice,A,a@x.edu,s1,123,reconciled,github,abcd,,2026-01-01T00:00:00Z,\n")
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n" +
+		"alice,Alice,A,a@x.edu,s1,123,enrolled,github,abcd,,2026-01-01T00:00:00Z,\n")
 	_, err := ParseImportCSV(in)
 	if err == nil {
 		t.Fatal("expected ParseImportCSV to reject a web-widened export")
@@ -489,8 +489,8 @@ func TestDedupeByUsername_LastWins(t *testing.T) {
 func TestParseRoster_AcceptsAndPreservesOnboardingColumns(t *testing.T) {
 	in := []byte(
 		"username,first_name,last_name,email,section,github_id," +
-			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
-			"alice,Alice,A,alice@x.edu,s1,123,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n" +
+			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n" +
+			"alice,Alice,A,alice@x.edu,s1,123,enrolled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n" +
 			"bob,Bob,B,bob@x.edu,s1,,invited,email,beef0000beef0000,tok123,2026-01-03T00:00:00Z,\n",
 	)
 	rows, err := ParseRoster(in)
@@ -503,8 +503,8 @@ func TestParseRoster_AcceptsAndPreservesOnboardingColumns(t *testing.T) {
 	if rows[0].Username != "alice" || rows[0].GitHubID != 123 || rows[0].Email != "alice@x.edu" {
 		t.Errorf("alice canonical fields wrong: %#v", rows[0])
 	}
-	if rows[0].Extra["enrollment_status"] != "reconciled" {
-		t.Errorf("alice enrollment_status = %q, want reconciled", rows[0].Extra["enrollment_status"])
+	if rows[0].Extra["enrollment_status"] != "enrolled" {
+		t.Errorf("alice enrollment_status = %q, want enrolled", rows[0].Extra["enrollment_status"])
 	}
 	if rows[0].Extra["email_hash"] != "abcd1234ef567890" {
 		t.Errorf("alice email_hash = %q, want abcd1234ef567890", rows[0].Extra["email_hash"])
@@ -512,16 +512,16 @@ func TestParseRoster_AcceptsAndPreservesOnboardingColumns(t *testing.T) {
 	if rows[1].Extra["invite_token"] != "tok123" {
 		t.Errorf("bob invite_token = %q, want tok123", rows[1].Extra["invite_token"])
 	}
-	if rows[1].Extra["reconciled_at"] != "" {
-		t.Errorf("bob reconciled_at = %q, want empty", rows[1].Extra["reconciled_at"])
+	if rows[1].Extra["enrolled_at"] != "" {
+		t.Errorf("bob enrolled_at = %q, want empty", rows[1].Extra["enrolled_at"])
 	}
 }
 
 func TestEncodeRoster_RoundTripsOnboardingColumns(t *testing.T) {
 	in := []byte(
 		"username,first_name,last_name,email,section,github_id," +
-			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
-			"alice,Alice,A,alice@x.edu,s1,123,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n",
+			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n" +
+			"alice,Alice,A,alice@x.edu,s1,123,enrolled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n",
 	)
 	rows, err := ParseRoster(in)
 	if err != nil {
@@ -532,7 +532,7 @@ func TestEncodeRoster_RoundTripsOnboardingColumns(t *testing.T) {
 		t.Fatalf("EncodeRoster: %v", err)
 	}
 	wantHeader := "username,first_name,last_name,email,section,github_id," +
-		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at\n"
 	if !strings.HasPrefix(string(encoded), wantHeader) {
 		t.Fatalf("encoded header drifted.\ngot:\n%s\nwant prefix:\n%s", encoded, wantHeader)
 	}
@@ -575,7 +575,7 @@ func TestUpsertRosterRow_PreservesOnboardingColumns(t *testing.T) {
 	rows := []RosterRow{
 		{
 			Username: "alice", FirstName: "Alice", LastName: "A", Email: "alice@x.edu", Section: "s1", GitHubID: 123,
-			Extra:      map[string]string{"enrollment_status": "reconciled", "email_hash": "abcd1234ef567890"},
+			Extra:      map[string]string{"enrollment_status": "enrolled", "email_hash": "abcd1234ef567890"},
 			ExtraOrder: []string{"enrollment_status", "email_hash"},
 		},
 	}
@@ -588,7 +588,7 @@ func TestUpsertRosterRow_PreservesOnboardingColumns(t *testing.T) {
 	if updated[0].LastName != "Andersson" || updated[0].Email != "alice@new.edu" || updated[0].Section != "s2" {
 		t.Errorf("canonical fields not updated: %#v", updated[0])
 	}
-	if updated[0].Extra["enrollment_status"] != "reconciled" || updated[0].Extra["email_hash"] != "abcd1234ef567890" {
+	if updated[0].Extra["enrollment_status"] != "enrolled" || updated[0].Extra["email_hash"] != "abcd1234ef567890" {
 		t.Errorf("onboarding columns wiped on upsert: %#v", updated[0].Extra)
 	}
 }
@@ -601,9 +601,9 @@ func TestUpsertRosterRow_IncomingExtraWins(t *testing.T) {
 	}
 	updated, _ := UpsertRosterRow(rows, RosterRow{
 		Username: "alice", GitHubID: 1,
-		Extra: map[string]string{"enrollment_status": "reconciled"}, ExtraOrder: []string{"enrollment_status"},
+		Extra: map[string]string{"enrollment_status": "enrolled"}, ExtraOrder: []string{"enrollment_status"},
 	})
-	if updated[0].Extra["enrollment_status"] != "reconciled" {
+	if updated[0].Extra["enrollment_status"] != "enrolled" {
 		t.Errorf("incoming Extra should win, got %#v", updated[0].Extra)
 	}
 }
@@ -661,7 +661,7 @@ func TestParseRoster_RejectsFormulaTriggerExtraColumnName(t *testing.T) {
 // app and the Python fixture in lockstep.
 func TestFullRosterHeader(t *testing.T) {
 	const want = "username,first_name,last_name,email,section,github_id," +
-		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at"
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at"
 	if FullRosterHeader != want {
 		t.Fatalf("FullRosterHeader = %q, want %q", FullRosterHeader, want)
 	}

@@ -193,7 +193,7 @@ func TestRunRosterUpdate(t *testing.T) {
 		onboardingRoster := rosterCSVContent(t,
 			configrepo.RosterRow{
 				Username: "alice", FirstName: "Alice", LastName: "A", Email: "a@x.edu", Section: "s1", GitHubID: 1,
-				Extra:      map[string]string{"enrollment_status": "reconciled", "email_hash": "abcd1234ef567890"},
+				Extra:      map[string]string{"enrollment_status": "enrolled", "email_hash": "abcd1234ef567890"},
 				ExtraOrder: []string{"enrollment_status", "email_hash"},
 			},
 			configrepo.RosterRow{
@@ -230,7 +230,7 @@ func TestRunRosterUpdate(t *testing.T) {
 		if alice.Email != "alice@new.edu" {
 			t.Errorf("alice email = %q, want alice@new.edu", alice.Email)
 		}
-		if alice.Extra["enrollment_status"] != "reconciled" || alice.Extra["email_hash"] != "abcd1234ef567890" {
+		if alice.Extra["enrollment_status"] != "enrolled" || alice.Extra["email_hash"] != "abcd1234ef567890" {
 			t.Errorf("edited row lost onboarding columns: %#v", alice.Extra)
 		}
 		if bob.Extra["enrollment_status"] != "invited" || bob.Extra["invite_token"] != "tok123" {
@@ -279,7 +279,7 @@ func TestRunRosterRemove(t *testing.T) {
 		roster := rosterCSVContent(t,
 			configrepo.RosterRow{
 				Username: "alice", FirstName: "Alice", LastName: "A", Email: "a@x.edu", Section: "s1", GitHubID: 1,
-				Extra:      map[string]string{"enrollment_status": "reconciled"},
+				Extra:      map[string]string{"enrollment_status": "enrolled"},
 				ExtraOrder: []string{"enrollment_status"},
 			},
 			configrepo.RosterRow{

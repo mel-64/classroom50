@@ -30,7 +30,7 @@ var OnboardingColumns = []string{
 	"email_hash",
 	"invite_token",
 	"invited_at",
-	"reconciled_at",
+	"enrolled_at",
 }
 
 // FullRosterHeader is the complete on-disk students.csv header the CLI writes

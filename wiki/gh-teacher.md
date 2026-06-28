@@ -142,7 +142,7 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | --- | --- | --- |
 | `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org`, and a `team` block (`{id, slug}`) recording the classroom's GitHub team |
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
-| `<short-name>/students.csv` | n/a | Header row begins with `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. The Classroom50 web app may append optional onboarding columns after `github_id` (`enrollment_status`, `enrollment_method`, `email_hash`, `invite_token`, `invited_at`, `reconciled_at`); the CLI reads past them and preserves them on edit. |
+| `<short-name>/students.csv` | n/a | Header row begins with `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. The Classroom50 web app may append optional onboarding columns after `github_id` (`enrollment_status`, `enrollment_method`, `email_hash`, `invite_token`, `invited_at`, `enrolled_at`); the CLI reads past them and preserves them on edit. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Scaffolds with an empty `assignments: {}` object -- entries are written by the `collect-scores.yaml` workflow, keyed by assignment slug → `{type, entries[]}`. |
 
 Three things this scaffold does **not** include:

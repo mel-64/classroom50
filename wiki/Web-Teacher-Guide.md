@@ -13,9 +13,10 @@ Welcome to the Classroom 50 Teacher's Guide for the web interface! The web inter
 - [Viewing Organizations](#viewing-organizations)
 - [Setting Up Classroom 50](#setting-up-classroom-50)
 - [Viewing and Creating Classrooms](#viewing-and-creating-classrooms)
-- [Viewing and Adding Students](#viewing-and-adding-students)
 - [Viewing and Creating Assignments](#viewing-and-creating-assignments)
-- [Collecting and Viewing Submissions](#collecting-and-viewing-submissions)
+- [Viewing and Adding Students](#viewing-and-adding-students)
+- [Viewing and Collecting Submissions](#collecting-and-viewing-submissions)
+- [Editing Classroom Settings](#editing-classroom-settings)
 
 > Throughout this documentation, we will do our best to explore all of the features that Classroom 50 has to offer; if you feel like we have missed a desired feature or see areas for improvement, please reach out to us in our [discussion forums](https://github.com/foundation50/classroom50/discussions); we look forward to hearing from you!
 
@@ -195,3 +196,23 @@ That said, an assignment by itself isn't enough; we also need students! To that 
 # Viewing and Adding Students
 
 ![View of Students page with no students](images/web_students_none.png)
+
+On the "Students" page within each classroom, you can add students to your class roster for that classroom, as well as see which students have already been added and which students are pending invitations. All students added here are stored in your `classroom50/<CLASSROOM/` repo folder in `students.csv`. In order to properly function as students within your classroom, students **must be invited to and accept said invitation to your GitHub organization**. We have tried to simplify this process through this interface.
+
+### Add Student
+
+The **Add Student** panel, top left, allows for adding a student via their GitHub username; their name and email may also be optionally provided, in which case that data will be stored alongside the GitHub username (as well as the user's dynamically fetched GitHub user ID) within the `students.csv` file. An email can be provided in place of a GitHub username, in which case that user will have to complete a separate onboarding process (see [below](#enrolled-students) for further information).
+
+### Upload Roster
+
+If you already have a CSV or text file prepared with all of the GitHub usernames of your students, this provides you with a bulk option for adding many students at once.
+
+### Enrolled Students
+
+This is a list of all of your students already added to this classroom. As a convenience, Classroom 50 adds shareable links for teachers to provide their students, one to easily accept their organization invite, the other to onboard students in the event they've been added by email rather than by username. Below these links you can then see all added students sequentially, as well as the status of whether they've successfully joined the GitHub organization itself.
+
+# Viewing and Collecting Submissions
+
+![View of existing assignment with no submissions](images/web_viewing_assignment.png)
+
+# Editing Classroom Settings

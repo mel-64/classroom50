@@ -101,7 +101,7 @@ ROSTER_ONBOARDING_COLUMNS = (
     "email_hash",
     "invite_token",
     "invited_at",
-    "reconciled_at",
+    "enrolled_at",
 )
 
 # FULL_ROSTER_HEADER is the exact on-disk students.csv header written when all
