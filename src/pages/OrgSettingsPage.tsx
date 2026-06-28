@@ -7,6 +7,7 @@ import Drawer, {
 import { useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { githubKeys } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
@@ -115,6 +116,7 @@ export function ServiceTokenHeader() {
 export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const runPat = useSafeSubmit()
   const { org } = useParams({ strict: false })
   const [serviceToken, setServiceToken] = useState("")
   const [savedKind, setSavedKind] = useState<null | "saved" | "updated">(null)
@@ -313,7 +315,8 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           onSubmit={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            if (!patMutation.isPending) patMutation.mutate()
+            if (!patMutation.isPending)
+              void runPat(() => patMutation.mutateAsync())
           }}
         >
           <div className="flex flex-col gap-2 w-full pb-10">

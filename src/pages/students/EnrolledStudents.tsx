@@ -18,6 +18,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { reconcileOnboarding, unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -470,6 +471,7 @@ const EnrolledStudents = ({
   })
 
   const [reconcileSummary, setReconcileSummary] = useState("")
+  const runReconcile = useSafeSubmit()
 
   const reconcileMutation = useMutation({
     mutationFn: () => reconcileOnboarding(client, { org, classroom }),
@@ -763,7 +765,9 @@ const EnrolledStudents = ({
             <button
               type="button"
               className="btn btn-sm btn-primary shrink-0"
-              onClick={() => reconcileMutation.mutate()}
+              onClick={() =>
+                void runReconcile(() => reconcileMutation.mutateAsync())
+              }
               disabled={reconcileMutation.isPending}
             >
               <RefreshCw

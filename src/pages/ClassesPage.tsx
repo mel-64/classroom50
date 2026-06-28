@@ -15,6 +15,7 @@ import GitHub from "@/assets/github.svg?react"
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetStudents from "@/hooks/useGetStudents"
 import { isClassroomArchived } from "@/types/classroom"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 
 import Drawer, {
   DrawerContent,
@@ -139,6 +140,7 @@ const CreateClassroomPane = ({ org }: { org: string }) => (
 const JoinOrgCard = ({ org }: { org: string }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const run = useSafeSubmit()
 
   const mutation = useMutation({
     mutationFn: () => acceptPendingOrgInvite(client, org),
@@ -176,7 +178,7 @@ const JoinOrgCard = ({ org }: { org: string }) => {
             type="button"
             className="btn btn-primary"
             disabled={mutation.isPending}
-            onClick={() => mutation.mutate()}
+            onClick={() => void run(() => mutation.mutateAsync())}
           >
             {mutation.isPending ? (
               <span className="loading loading-spinner loading-sm" />

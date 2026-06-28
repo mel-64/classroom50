@@ -1,4 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 
 import Drawer, {
   DrawerContent,
@@ -87,6 +88,7 @@ const OrgSteps = ({
   stage?: number
   setStage?: (num: number) => void
 }) => {
+  const runSetup = useSafeSubmit()
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-5">
@@ -107,7 +109,7 @@ const OrgSteps = ({
               <button
                 disabled={mutation.isPending}
                 className="btn btn-primary ml-auto"
-                onClick={mutation.mutateAsync}
+                onClick={() => void runSetup(() => mutation.mutateAsync())}
               >
                 {mutation.isPending ? (
                   <span className="loading loading-spinner" />

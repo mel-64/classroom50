@@ -1,8 +1,9 @@
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { createClassroomFilesWithConflictRetry } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import Drawer, {
   DrawerContent,
@@ -23,8 +24,10 @@ import type {
 const CreateClassroomPage = () => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { notify } = useToast()
   const { org } = useParams({ strict: false })
-  const [classroomCreated, setClassroomCreated] = useState(false)
+  // Captured in onSubmit so onSuccess can redirect to the created classroom.
   const [classroomSlug, setClassroomSlug] = useState("")
 
   const createClassroomMutation = useMutation<
@@ -52,12 +55,27 @@ const CreateClassroomPage = () => {
       } else {
         console.error("non-GitHub API error:", err)
       }
+      notify({
+        tone: "error",
+        message: `Couldn't create classroom: ${err.message}`,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
+        queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
       })
-      setClassroomCreated(true)
+      // Success confirmation survives the redirect via a toast (the provider is
+      // mounted above the router). GitHub's contents API is read-after-write
+      // eventual, so the new classroom may take a moment to appear.
+      notify({
+        tone: "success",
+        durationMs: 6000,
+        message: "Classroom created. It may take a moment to appear.",
+      })
+      navigate({
+        to: "/$org/$classroom",
+        params: { org: org ?? "", classroom: classroomSlug },
+      })
     },
   })
 
@@ -79,24 +97,6 @@ const CreateClassroomPage = () => {
                 </h1>
               </div>
             </div>
-            {classroomCreated ? (
-              <div className="alert alert-success mb-4">
-                <div>
-                  Your classroom has been created. Click{" "}
-                  <Link
-                    className="underline"
-                    to="/$org/$classroom"
-                    params={{ org, classroom: classroomSlug }}
-                  >
-                    here
-                  </Link>{" "}
-                  to view your new classroom; please note it may take a minute
-                  or two for the new class to show up.
-                </div>
-              </div>
-            ) : (
-              <></>
-            )}
             <div className="flex flex-col">
               <div className="mb-8">
                 <CreateClassroomForm

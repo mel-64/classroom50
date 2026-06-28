@@ -12,6 +12,7 @@ import { useState } from "react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { submitOnboarding } from "@/api/mutations/onboarding"
 import {
   hasActiveOnboardingForClassroom,
@@ -189,6 +190,7 @@ const OnboardingPage = () => {
         invite_token: inviteToken,
       }),
   })
+  const runOnboard = useSafeSubmit()
 
   if (
     loadingMembership ||
@@ -345,7 +347,7 @@ const OnboardingPage = () => {
             type="button"
             className="btn btn-primary w-full bg-[#4e80ee]"
             disabled={onboardMutation.isPending || !formValid}
-            onClick={() => onboardMutation.mutate()}
+            onClick={() => void runOnboard(() => onboardMutation.mutateAsync())}
           >
             {onboardMutation.isPending ? (
               <>

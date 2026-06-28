@@ -1,5 +1,7 @@
 import { useForm } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
+import { slugify } from "@/util/slug"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -47,6 +49,9 @@ import {
 
 export type CreateAssignmentFormValues = {
   name: string
+  // URL/repo slug for the assignment. Shown editable on create (auto-prefilled
+  // from the name until the teacher edits it); not edited here in edit mode.
+  slug: string
   description: string
   mode: "group" | "individual"
   template_repo: string
@@ -75,10 +80,14 @@ export type AssignmentForm = ReturnType<typeof useAssignmentForm>
 const useAssignmentForm = (
   defaultValues: Partial<CreateAssignmentFormValues> | undefined,
   onSubmit: (values: CreateAssignmentFormValues) => void | Promise<void>,
+  // Create-only slug uniqueness: existing assignment slugs in the classroom,
+  // and whether this form is in edit mode (where slug is not validated/edited).
+  slugContext?: { takenSlugs?: string[]; edit?: boolean },
 ) =>
   useForm({
     defaultValues: {
       name: defaultValues?.name || "",
+      slug: defaultValues?.slug || "",
       description: defaultValues?.description || "",
       mode: defaultValues?.mode || "individual",
       template_repo: defaultValues?.template_repo || "",
@@ -101,6 +110,21 @@ const useAssignmentForm = (
         const errors: Record<string, string> = {}
         if (!value.name.trim()) {
           errors.name = "Assignment name is required."
+        }
+        // Slug is shown + validated on create only (edit mode does not rename).
+        if (!slugContext?.edit) {
+          const slug = slugify(value.slug)
+          if (!slug) {
+            errors.slug = "Assignment slug is required."
+          } else if (
+            (slugContext?.takenSlugs ?? []).some(
+              (s) => s.trim().toLowerCase() === slug.toLowerCase(),
+            )
+          ) {
+            // Case-insensitive collision (slugs become repo path segments);
+            // the write path re-checks authoritatively (nextAvailableSlug).
+            errors.slug = `An assignment "${slug}" already exists in this classroom.`
+          }
         }
         if (!Number(value.max_group_size)) {
           errors.max_group_size = "Max group size must be a valid number."
@@ -147,6 +171,7 @@ const useAssignmentForm = (
     onSubmit: async ({ value }) => {
       await onSubmit({
         name: value.name.trim(),
+        slug: slugify(value.slug),
         description: value.description.trim(),
         mode: value.mode,
         template_repo: value.template_repo.trim(),
@@ -181,6 +206,9 @@ type CreateAssignmentFormProps = {
   // Classroom slug, used by the template pre-flight to check whether the
   // classroom team already has read on an in-org private template.
   classroom?: string
+  // Existing assignment slugs in the classroom, for the create-mode slug
+  // uniqueness check (case-insensitive). Ignored in edit mode.
+  takenSlugs?: string[]
 }
 const FormErrors = ({ form }: { form: AssignmentForm }) => (
   <form.Subscribe selector={(state) => [state.errors]}>
@@ -446,8 +474,12 @@ const CreateAssignmentForm = ({
   readOnly = false,
   org,
   classroom,
+  takenSlugs,
 }: CreateAssignmentFormProps) => {
-  const form = useAssignmentForm(defaultValues, onSubmit)
+  const form = useAssignmentForm(defaultValues, onSubmit, { takenSlugs, edit })
+  // Auto-prefill the slug from the name until the teacher edits the slug
+  // directly, so a deliberate slug isn't clobbered by later name edits.
+  const [slugTouched, setSlugTouched] = useState(false)
   const tzShort = new Intl.DateTimeFormat(undefined, {
     timeZoneName: "short",
   })
@@ -482,11 +514,58 @@ const CreateAssignmentForm = ({
                     placeholder="e.g., Loops Assignment"
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
+                    onChange={(e) => {
+                      field.handleChange(e.target.value)
+                      // Prefill the slug from the name until the teacher edits
+                      // it directly (create mode only).
+                      if (!edit && !slugTouched) {
+                        form.setFieldValue("slug", slugify(e.target.value))
+                      }
+                    }}
                   />
                 </>
               )}
             </form.Field>
+
+            {!edit && (
+              <form.Field name="slug">
+                {(field) => (
+                  <>
+                    <label htmlFor={field.name} className="label font-bold">
+                      Assignment Slug<span className="text-[#f00]">*</span>
+                    </label>
+                    <input
+                      id={field.name}
+                      name={field.name}
+                      type="text"
+                      className="input w-full"
+                      placeholder="e.g., loops-assignment"
+                      value={field.state.value}
+                      onBlur={(e) => {
+                        // Normalize on blur so what the teacher sees is what's
+                        // saved (the repo path segment).
+                        field.handleChange(slugify(e.target.value))
+                        field.handleBlur()
+                      }}
+                      onChange={(e) => {
+                        setSlugTouched(true)
+                        field.handleChange(e.target.value)
+                      }}
+                    />
+                    <p className="mt-1.5 mb-4 text-sm text-base-content/60">
+                      Used in the assignment&apos;s repository names.
+                      Auto-filled from the name; edit it if you like. Must be
+                      unique in this classroom.
+                    </p>
+                    {field.state.meta.errors.length > 0 && (
+                      <p className="text-error text-sm mb-4">
+                        {String(field.state.meta.errors[0])}
+                      </p>
+                    )}
+                  </>
+                )}
+              </form.Field>
+            )}
 
             <form.Field name="description">
               {(field) => (

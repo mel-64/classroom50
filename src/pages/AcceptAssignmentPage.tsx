@@ -24,6 +24,7 @@ import {
   type AcceptStepStatus,
 } from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
@@ -456,6 +457,7 @@ const AcceptAssignmentPage = () => {
 
   const [steps, setSteps] = useState<StepState>(initialStepState)
   const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
+  const runAccept = useSafeSubmit()
 
   const acceptMutation = useMutation({
     mutationFn: () => {
@@ -646,7 +648,9 @@ const AcceptAssignmentPage = () => {
                   type="button"
                   className="btn btn-primary w-full text-xl p-6"
                   disabled={!username || acceptMutation.isPending}
-                  onClick={() => acceptMutation.mutate()}
+                  onClick={() =>
+                    void runAccept(() => acceptMutation.mutateAsync())
+                  }
                 >
                   <GitHubWhite className="size-6" />
                   Accept Assignment & Create Repository
@@ -658,7 +662,9 @@ const AcceptAssignmentPage = () => {
               !acceptMutation.isPending && (
                 <RepairToggle
                   disabled={!username || acceptMutation.isPending}
-                  onRerun={() => acceptMutation.mutate()}
+                  onRerun={() =>
+                    void runAccept(() => acceptMutation.mutateAsync())
+                  }
                 />
               )}
           </div>
