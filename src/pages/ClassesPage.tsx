@@ -76,37 +76,23 @@ const ClassCard = ({
         </Link>
       )}
       <div className="card-body gap-4">
-        {classroomData ? (
-          <div className="flex items-center gap-2">
-            <label className="h-6 badge badge-soft badge-primary">
-              {classroomData?.term || "No Term Specified"}
-            </label>
-            {archived ? (
-              <span className="h-6 badge badge-soft badge-neutral">
-                Archived
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <div className="skeleton w-10 h-6" />
-        )}
-        {classroomData ? (
-          <h1 className="text-xl h-8">
-            {classroomData?.name ||
-              classroomData?.short_name ||
-              "Unknown Class Name"}
-          </h1>
-        ) : (
-          <div className="skeleton h-8 w-40" />
-        )}
-        {classroomData ? (
-          <div className="flex gap-2 h-6">
-            <UsersRound />
-            {students ? `${students.length} Students` : "No Students"}
-          </div>
-        ) : (
-          <div className="skeleton w-20 h-6" />
-        )}
+        <div className="flex items-center gap-2">
+          <label className="h-6 badge badge-soft badge-primary">
+            {classroomData?.term || "No Term Specified"}
+          </label>
+          {archived ? (
+            <span className="h-6 badge badge-soft badge-neutral">Archived</span>
+          ) : null}
+        </div>
+        <h1 className="text-xl h-8">
+          {classroomData?.name ||
+            classroomData?.short_name ||
+            "Unknown Class Name"}
+        </h1>
+        <div className="flex gap-2 h-6">
+          <UsersRound />
+          {students ? `${students.length} Students` : "No Students"}
+        </div>
         <Link
           type="button"
           to="/$org/$classroom/assignments"

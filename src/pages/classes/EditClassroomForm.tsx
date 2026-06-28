@@ -97,13 +97,11 @@ const ArchiveClassroomButton = ({
   org,
   classroom,
   archived,
-  onToggled,
 }: {
   org: string
   classroom: string
   // Current lifecycle state, so the button shows the opposite action.
   archived: boolean
-  onToggled: () => void
 }) => {
   const client = useGitHubClient()
   const { notify } = useToast()
@@ -207,7 +205,6 @@ const ArchiveClassroomButton = ({
                 ? `"${classroom}" was unarchived.`
                 : `"${classroom}" was archived.`,
             })
-            onToggled()
           } catch (err) {
             notify({
               tone: "error",
@@ -281,15 +278,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
             <ArchiveClassroomButton
               org={org}
               classroom={classroom}
-              archived={isClassroomArchived(cl ?? {})}
-              onToggled={() => {
-                // Cache reconciliation is owned by the mutation's onSuccess
-                // (optimistic flip of this classroom.json + listing invalidate).
-                // We deliberately do NOT invalidate the per-classroom
-                // classroom.json key here: an immediate unpinned refetch races
-                // GitHub's read-after-write eventual consistency and can revert
-                // the optimistic archive state. Hook kept for future needs.
-              }}
+              archived={archived}
             />
             <DeleteClassroomButton
               org={org}
