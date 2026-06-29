@@ -96,6 +96,8 @@ export const githubKeys = {
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
 
+  orgAudit: (owner: string) => [...githubKeys.all, "orgAudit", owner] as const,
+
   releases: (owner: string, repo: string) =>
     [...githubKeys.all, "releases", owner, repo] as const,
 }
