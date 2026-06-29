@@ -25,14 +25,20 @@ export type CheckVerdict = {
   detail?: string
 }
 
-function unreadableFrom(err: unknown): CheckVerdict {
+// The `detail` string for a failed read, distinguishing an HTTP status from a
+// non-API error. Shared so every "unreadable" verdict phrases it identically.
+export function readFailedDetail(err: unknown): string {
   if (err instanceof GitHubAPIError) {
-    if (err.status === 404) {
-      return { state: "unenforced", detail: "not configured" }
-    }
-    return { state: "unreadable", detail: `read failed (${err.status})` }
+    return `read failed (${err.status})`
   }
-  return { state: "unreadable", detail: "read failed" }
+  return "read failed"
+}
+
+function unreadableFrom(err: unknown): CheckVerdict {
+  if (err instanceof GitHubAPIError && err.status === 404) {
+    return { state: "unenforced", detail: "not configured" }
+  }
+  return { state: "unreadable", detail: readFailedDetail(err) }
 }
 
 // orgDefaults: GET /orgs/{org}, classify against the plan-filtered desired
@@ -274,6 +280,18 @@ async function verifyOrgDefaults(
   }
 }
 
+// The transient result returned when a secondary-rate-limit aborts an apply —
+// the caller should surface a retry message, not a drift checklist.
+function rateLimitedResult(org: string): OrgDefaultsRepairResult {
+  return {
+    ok: false,
+    transient: true,
+    unenforced: [],
+    enterprisePinned: [],
+    message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
+  }
+}
+
 // repairOrgDefaults applies the full plan-filtered member-default lockdown,
 // mirroring the CLI's applyOrgMemberDefaults: one combined PATCH /orgs/{org};
 // on a 403/422 (not a rate limit) drop to a per-field fallback; on a
@@ -297,13 +315,7 @@ export async function repairOrgDefaults(
     })
   } catch (err) {
     if (err instanceof GitHubAPIError && err.isRateLimited) {
-      return {
-        ok: false,
-        transient: true,
-        unenforced: [],
-        enterprisePinned: [],
-        message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
-      }
+      return rateLimitedResult(org)
     }
     if (
       err instanceof GitHubAPIError &&
@@ -312,13 +324,7 @@ export async function repairOrgDefaults(
       const fallback = await repairOrgDefaultsPerField(client, org, settings)
       rejected = fallback.rejected
       if (fallback.transient) {
-        return {
-          ok: false,
-          transient: true,
-          unenforced: [],
-          enterprisePinned: [],
-          message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
-        }
+        return rateLimitedResult(org)
       }
     } else {
       throw err

@@ -5,9 +5,9 @@
 // exactly — a divergence is a parity bug.
 
 import type { GitHubClient } from "./client"
-import { GitHubAPIError } from "./errors"
 import { paginateAll } from "./queries"
 import type { CheckVerdict } from "./orgChecks"
+import { readFailedDetail } from "./orgChecks"
 
 const FEEDBACK_BASE_BRANCH = "feedback"
 
@@ -114,10 +114,7 @@ export async function checkRulesets(
         missing.length === 0 ? undefined : `missing: ${missing.join(", ")}`,
     }
   } catch (err) {
-    if (err instanceof GitHubAPIError) {
-      return { state: "unreadable", detail: `read failed (${err.status})` }
-    }
-    return { state: "unreadable", detail: "read failed" }
+    return { state: "unreadable", detail: readFailedDetail(err) }
   }
 }
 

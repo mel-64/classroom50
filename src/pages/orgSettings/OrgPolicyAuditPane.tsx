@@ -28,9 +28,10 @@ import SettingsSection from "./SettingsSection"
 
 // Org policy audit pane: surfaces every org/repo policy concern with its live
 // drift verdict, the unenforced member-default fields (each with its manual
-// fix), and the four API-less manual steps. Repairs run through the re-run
-// onboarding flow (owner-gated), so this pane is read-only review plus a
-// pointer to that action. Mirrors the service-token pane's banner shape.
+// fix), and the four API-less manual steps. Each drifted, API-repairable
+// concern gets an owner-gated per-concern "Fix it" button; Re-run Setup below
+// is the "repair everything" alternative. Mirrors the service-token pane's
+// banner shape.
 
 const VERDICT_BANNER: Record<
   AuditVerdict,

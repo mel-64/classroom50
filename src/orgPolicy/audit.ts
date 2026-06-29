@@ -16,6 +16,7 @@ import {
 import { checkRulesets } from "@/hooks/github/rulesets"
 import {
   manualHardeningSteps,
+  memberPrivilegesUrl,
   type DefaultVerdict,
   type ManualStep,
   type MemberDefaultSetting,
@@ -60,7 +61,6 @@ export type OrgAuditReport = {
   concerns: ConcernCheck[]
   // The four API-less settings the teacher confirms by hand; never fail.
   manualUnreadable: ManualStep[]
-  settingsUrl: string
 }
 
 const CONCERN_TITLES: Record<ConcernId, string> = {
@@ -82,7 +82,7 @@ function concernSettingsUrl(id: ConcernId, org: string): string {
   const repoBase = `https://github.com/${org}/classroom50/settings`
   switch (id) {
     case "orgDefaults":
-      return `${orgBase}/member_privileges`
+      return memberPrivilegesUrl(org)
     case "orgActions":
     case "orgPrCreation":
       return `${orgBase}/actions`
@@ -183,6 +183,5 @@ export async function buildOrgAuditReport(
     defaultVerdicts,
     concerns,
     manualUnreadable: manualHardeningSteps(org),
-    settingsUrl: `https://github.com/organizations/${org}/settings/member_privileges`,
   }
 }

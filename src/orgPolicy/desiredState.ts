@@ -216,11 +216,18 @@ export type ManualStep = {
   url: string
 }
 
+// The org member-privileges settings page — the single place a teacher
+// inspects/sets the member-default lockdown by hand. Shared so the desired
+// state, audit, and any deep links can't drift on the path.
+export function memberPrivilegesUrl(org: string): string {
+  return `https://github.com/organizations/${org}/settings/member_privileges`
+}
+
 // manualHardeningSteps is the canonical list of the four member-privilege
 // settings with no REST API — the teacher applies them by hand. All four live
 // on the org member-privileges settings page.
 export function manualHardeningSteps(org: string): ManualStep[] {
-  const url = `https://github.com/organizations/${org}/settings/member_privileges`
+  const url = memberPrivilegesUrl(org)
   return [
     {
       setting:
