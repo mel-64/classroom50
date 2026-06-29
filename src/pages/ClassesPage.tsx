@@ -33,6 +33,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
+import OrgPreflightNotice from "@/pages/orgSettings/OrgPreflightNotice"
 
 type ClassFilter = "active" | "archived" | "all"
 
@@ -426,6 +427,7 @@ const ClassesPage = () => {
               <JoinOrgCard org={org} />
             )}
           </div>
+          {isTeacher && <OrgPreflightNotice org={org} />}
           {roleLoading ? (
             <div className="grid grid-cols-12 gap-4 mb-6">
               {Array.from({ length: 3 }).map((_, i) => (

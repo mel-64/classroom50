@@ -96,6 +96,14 @@ export const githubKeys = {
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
 
+  orgAudit: (owner: string, plan?: string) =>
+    [...githubKeys.all, "orgAudit", owner, plan ?? null] as const,
+
+  // Prefix matching every orgAudit entry for an org regardless of plan — use
+  // for invalidation so a refetch happens whatever plan the cached audit used.
+  orgAuditPrefix: (owner: string) =>
+    [...githubKeys.all, "orgAudit", owner] as const,
+
   releases: (owner: string, repo: string) =>
     [...githubKeys.all, "releases", owner, repo] as const,
 }
@@ -847,7 +855,6 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
-    serviceToken: ServiceTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
@@ -867,7 +874,6 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  let serviceToken: ServiceTokenStatus | null = null
   let status: Classroom50Status
 
   try {
@@ -875,7 +881,11 @@ export async function getClassroom50OrgSummary(
     canAccessRepo = true
     status = "ready"
 
-    serviceToken = await getServiceTokenStatus(client, org.login)
+    // The service-token read is deliberately NOT done here: this summary runs
+    // for every org the user can see, and reading the token per org fans out
+    // an extra GitHub API call across potentially many orgs. The token (and
+    // the full policy audit) is checked only when a specific org is opened
+    // (the teacher preflight on ClassesPage).
   } catch (error) {
     if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
@@ -906,7 +916,6 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
-      serviceToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,

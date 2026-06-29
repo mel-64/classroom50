@@ -17,6 +17,8 @@ import type { OnboardingCleanupMode } from "@/types/classroom"
 import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
+import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
+import { repairRulesets } from "./rulesets"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -821,12 +823,7 @@ async function tryStep<T>({
 
     onStepUpdate?.({
       id,
-      status:
-        maybeStatus === "warning"
-          ? "warning"
-          : maybeStatus === "complete"
-            ? "complete"
-            : "complete",
+      status: maybeStatus === "warning" ? "warning" : "complete",
       data: result,
       message:
         typeof result === "object" &&
@@ -867,26 +864,13 @@ async function tryStep<T>({
   }
 }
 
-type InitStepStatus =
+export type InitStepStatus =
   | "pending"
   | "running"
   | "complete"
   | "warning"
   | "error"
   | "skipped"
-
-async function updateOrgClassroomSafetyDefaults(
-  client: GitHubClient,
-  org: string,
-) {
-  return client.request(`/orgs/${org}`, {
-    method: "PATCH",
-    body: {
-      default_repository_permission: "none",
-      members_can_create_public_repositories: false,
-    },
-  })
-}
 
 export async function createOrgRepo(client: GitHubClient, org: string) {
   return client.request(`/orgs/${org}/repos`, {
@@ -950,7 +934,6 @@ const SKELETON_PATHS = [
 const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
 const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
 const ORG_BASE = ".github"
-const CONFIG_REPO = "classroom50"
 const SKELETON_SOURCE_OWNER = "foundation50"
 const SKELETON_SOURCE_REPO = "classroom50"
 const SKELETON_SOURCE_REF = "main"
@@ -1115,7 +1098,7 @@ export type EnsurePagesResult = {
   pagesAlreadyEnabled: boolean
   visibilityPublic: boolean
   settingsUrl: string
-  warnings: string[]
+  message: string
   pagesUrl: string
 }
 
@@ -1206,23 +1189,45 @@ export async function ensurePages(
   org: string,
   repo = "classroom50",
 ): Promise<EnsurePagesResult> {
-  const warnings: string[] = []
-
   const enableResult = await enableWorkflowPages(client, org, repo)
   const visibilityResult = await setPagesPublic(client, org, repo)
+  const settingsUrl = pagesSettingsUrl(org, repo)
 
-  if (visibilityResult.warning) {
-    warnings.push(visibilityResult.warning)
-  }
+  // Trust the live read-back, not the write outcome: the writes are idempotent
+  // and a re-run on an already-public site can 422 the visibility PUT while the
+  // site is in fact correct. Using checkPages also keeps this in lockstep with
+  // the audit.
+  const verdict = await checkPages(client, org, repo)
 
-  return {
-    status: warnings.length > 0 ? "warning" : "complete",
+  const base = {
     pagesEnabled: enableResult.enabled,
     pagesAlreadyEnabled: enableResult.alreadyEnabled,
     visibilityPublic: visibilityResult.visibilityPublic,
+    settingsUrl,
     pagesUrl: expectedPagesUrl(org),
-    settingsUrl: pagesSettingsUrl(org, repo),
-    warnings,
+  }
+
+  if (verdict.state === "enforced") {
+    return {
+      ...base,
+      status: "complete",
+      visibilityPublic: true,
+      message: `${org}/${repo}: GitHub Pages builds from the workflow and the site is public.`,
+    }
+  }
+
+  // Not enforced, or the read-back was unreadable: surface why, preferring the
+  // write-time warning when we have one.
+  const message =
+    visibilityResult.warning ??
+    (verdict.state === "unreadable"
+      ? `${org}/${repo}: couldn't verify GitHub Pages (${verdict.detail ?? "read failed"}). Check it at ${settingsUrl} → Pages.`
+      : `${org}/${repo}: GitHub Pages isn't fully configured (needs a workflow build and a public site). Set it at ${settingsUrl} → Pages.`)
+
+  return {
+    ...base,
+    status: "warning",
+    message,
   }
 }
 
@@ -1230,8 +1235,8 @@ export type EnsureWorkflowPermissionsResult =
   | {
       status: "complete"
       repo: string
-      defaultWorkflowPermissions: "write"
-      managedByOrgPolicy: false
+      defaultWorkflowPermissions: "read" | "write"
+      managedByOrgPolicy: boolean
       message: string
     }
   | {
@@ -1286,20 +1291,19 @@ export async function ensureWorkflowPermissions(
       managedByOrgPolicy: false,
       message: `${owner}/${repo}: workflow permissions set to write.`,
     }
-  } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 409) {
-      throw new Error(
-        `Could not set workflow permissions for ${owner}/${repo}: ${getErrorMessage(
-          err,
-        )}`,
-        { cause: err },
-      )
-    }
-
+  } catch {
+    // The PUT failed — typically a 409 because workflow write is org/enterprise-
+    // managed. That's benign (the skeleton workflows declare their own
+    // permissions), so re-read and report the effective state instead of
+    // failing setup.
     return reportOrgWorkflowPermissions(client, owner, repo)
   }
 }
 
+// Report the effective (org-managed) workflow-permission state when the repo
+// PUT didn't apply. A read default is acceptable because the skeleton workflows
+// declare workflow-level write where needed, so both "write" and "read" are
+// reported complete; only an unreadable state warrants a warning.
 async function reportOrgWorkflowPermissions(
   client: GitHubClient,
   owner: string,
@@ -1310,28 +1314,30 @@ async function reportOrgWorkflowPermissions(
 
     if (permissions.default_workflow_permissions === "write") {
       return {
-        status: "warning",
+        status: "complete",
         repo: `${owner}/${repo}`,
         defaultWorkflowPermissions: "write",
         managedByOrgPolicy: true,
-        message: `${owner}/${repo}: workflow permissions are already write, managed by organization policy.`,
+        message: `${owner}/${repo}: workflow permissions are write, managed by organization policy.`,
       }
     }
 
     return {
-      status: "warning",
+      status: "complete",
       repo: `${owner}/${repo}`,
       defaultWorkflowPermissions: permissions.default_workflow_permissions,
       managedByOrgPolicy: true,
-      message: `${owner}/${repo}: organization default workflow permissions are ${permissions.default_workflow_permissions}. This is okay because the Classroom 50 skeleton workflows declare workflow-level write permissions where needed.`,
+      message: `${owner}/${repo}: organization policy defaults workflows to read. This is okay — the Classroom 50 skeleton workflows declare workflow-level write where needed.`,
     }
   } catch {
+    // Couldn't confirm the effective state — surface a warning to check rather
+    // than a clean complete. Setup still proceeds (skeleton workflows self-declare).
     return {
       status: "warning",
       repo: `${owner}/${repo}`,
       defaultWorkflowPermissions: "unknown",
       managedByOrgPolicy: true,
-      message: `${owner}/${repo}: workflow permissions are managed by an organization policy. The effective setting could not be read, but setup can continue because the Classroom 50 skeleton workflows declare their own permissions.`,
+      message: `${owner}/${repo}: workflow permissions are managed by an organization policy and couldn't be read. Setup can continue because the Classroom 50 skeleton workflows declare their own permissions.`,
     }
   }
 }
@@ -1948,6 +1954,7 @@ export type InitStepId =
   | "workflowPermissions"
   | "reusableWorkflowAccess"
   | "pages"
+  | "rulesets"
 
 export type InitStepUpdate = {
   id: InitStepId
@@ -1970,12 +1977,12 @@ function stepFailed(result: unknown): boolean {
 export async function initClassroom50({
   client,
   org,
+  plan,
   onStepUpdate,
 }: {
   client: GitHubClient
   org: string
-  serviceToken?: string
-  serviceAccountConfirmed: boolean
+  plan?: string
   onStepUpdate: (update: InitStepUpdate) => void
 }) {
   const results: Partial<Record<InitStepId, unknown>> = {}
@@ -1991,7 +1998,13 @@ export async function initClassroom50({
   results.orgDefaults = await tryStep({
     id: "orgDefaults",
     onStepUpdate,
-    fn: () => updateOrgClassroomSafetyDefaults(client, org),
+    fn: async () => {
+      const result = await repairOrgDefaults(client, org, plan)
+      if (!result.ok || result.transient) {
+        return { status: "warning" as const, message: result.message }
+      }
+      return { status: "complete" as const, message: result.message }
+    },
     options: { warningCodes: [403, 422] },
   })
 
@@ -2053,6 +2066,12 @@ export async function initClassroom50({
     id: "branchProtection",
     onStepUpdate,
     fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
+  })
+
+  results.rulesets = await tryStep({
+    id: "rulesets",
+    onStepUpdate,
+    fn: () => repairRulesets(client, org),
   })
 
   return buildResult("complete")

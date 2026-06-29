@@ -16,63 +16,13 @@ import {
 } from "@/hooks/github/mutations"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { AlertCircle, AlertTriangle, CheckCircle } from "lucide-react"
 import { OrgSettingsPane } from "./OrgSettingsPage"
+import {
+  InitStepBoard,
+  applyStepUpdate,
+  initialInitSteps,
+} from "./orgSettings/initStepBoard"
 
-const InitStep = ({
-  title,
-  description,
-  status,
-  message,
-}: {
-  title: string
-  description?: string
-  status: "pending" | "running" | "complete" | "warning" | "error" | "skipped"
-  message?: string
-}) => {
-  const badgeClass =
-    status === "complete"
-      ? "badge-success"
-      : status === "warning"
-        ? "badge-warning"
-        : status === "error"
-          ? "badge-error"
-          : "badge-neutral badge-ghost"
-
-  return (
-    <div className="flex items-start justify-between gap-4 rounded-xl border border-base-300 bg-base-100 p-4">
-      <div>
-        <div className="font-semibold">{title}</div>
-        <p className="mt-1 text-sm text-base-content/70">
-          {message || description}
-        </p>
-      </div>
-      <span className={`badge ${badgeClass}`}>
-        {status === "complete" ? <CheckCircle className="size-4" /> : <></>}
-        {status === "pending" ? "" : <></>}
-        {status === "warning" ? <AlertCircle className="size-4" /> : <></>}
-        {status === "running" ? (
-          <span className="loading loading-spinner size-4" />
-        ) : (
-          <></>
-        )}
-        {status === "error" ? <AlertTriangle className="size-4" /> : <></>}
-      </span>
-    </div>
-  )
-}
-
-const INIT_STEP_ORDER: InitStepId[] = [
-  "orgDefaults",
-  "orgActions",
-  "orgPrCreation",
-  "configRepo",
-  "skeleton",
-  "branchProtection",
-  "workflowPermissions",
-  "reusableWorkflowAccess",
-  "pages",
-]
 const OrgSteps = ({
   steps,
   mutation,
@@ -124,20 +74,7 @@ const OrgSteps = ({
         </div>
 
         {stage === 1 ? (
-          <div className="grid gap-3">
-            {INIT_STEP_ORDER.map((id) => {
-              const step = steps[id]
-
-              return (
-                <InitStep
-                  key={step.id}
-                  title={step.title ?? step.id}
-                  status={step.status}
-                  description={step.message ?? step.error}
-                />
-              )
-            })}
-          </div>
+          <InitStepBoard steps={steps} />
         ) : stage === 2 ? (
           <div className="px-20">
             <OrgSettingsPane onSubmit={() => setStage(3)} />
@@ -178,74 +115,13 @@ const NotTeamOrEnterpriseWarning = () => {
   )
 }
 
-const initialSteps: Record<InitStepId, InitStepUpdate> = {
-  orgDefaults: {
-    id: "orgDefaults",
-    status: "pending",
-    title: "Organization safety defaults",
-  },
-  orgActions: {
-    id: "orgActions",
-    status: "pending",
-    title: "Actions permissions",
-  },
-  orgPrCreation: {
-    id: "orgPrCreation",
-    status: "pending",
-    title: "Actions pull request creation",
-  },
-  configRepo: {
-    id: "configRepo",
-    status: "pending",
-    title: "Config repository",
-  },
-  skeleton: {
-    id: "skeleton",
-    status: "pending",
-    title: "Skeleton files",
-  },
-  branchProtection: {
-    id: "branchProtection",
-    status: "pending",
-    title: "Branch protection",
-  },
-  workflowPermissions: {
-    id: "workflowPermissions",
-    status: "pending",
-    title: "Workflow permissions",
-  },
-  reusableWorkflowAccess: {
-    id: "reusableWorkflowAccess",
-    status: "pending",
-    title: "Reusable workflow access",
-  },
-  pages: {
-    id: "pages",
-    status: "pending",
-    title: "GitHub Pages",
-  },
-}
-
-function applyStepUpdate(
-  steps: Record<InitStepId, InitStepUpdate>,
-  update: InitStepUpdate,
-): Record<InitStepId, InitStepUpdate> {
-  return {
-    ...steps,
-    [update.id]: {
-      ...steps[update.id],
-      ...update,
-    },
-  }
-}
-
 const OrgSetupPage = () => {
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
 
   const { org } = useParams({ strict: false })
   const [steps, setSteps] =
-    useState<Record<InitStepId, InitStepUpdate>>(initialSteps)
+    useState<Record<InitStepId, InitStepUpdate>>(initialInitSteps)
   const { data: orgMembership, isLoading } = useGetOrgMembership(org)
   const { data: orgPlanDetails, isLoading: isLoadingPlanDetails } =
     useGetOrgPlanDetails(org)
@@ -264,8 +140,7 @@ const OrgSetupPage = () => {
       return initClassroom50({
         client: githubClient,
         org,
-        serviceToken: "",
-        serviceAccountConfirmed: false,
+        plan: orgPlanDetails?.plan?.name,
         onStepUpdate: (update) => {
           setSteps((steps) => applyStepUpdate(steps, update))
         },
@@ -287,8 +162,8 @@ const OrgSetupPage = () => {
 
   const isOwner = orgMembership?.role === "admin"
   const isTeamOrEnterprise =
-    orgPlanDetails?.plan.name === "team" ||
-    orgPlanDetails?.plan.name === "enterprise"
+    orgPlanDetails?.plan?.name === "team" ||
+    orgPlanDetails?.plan?.name === "enterprise"
 
   return (
     <div className="min-h-screen">

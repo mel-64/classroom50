@@ -131,7 +131,9 @@ export type GitHubTeam = {
 export type GitHubOrgDetails = {
   login: string
   id: number
-  plan: {
+  // `plan` is only returned by GET /orgs/{org} to org owners; a non-owner
+  // member gets a response without it, so it's optional and read defensively.
+  plan?: {
     name: string
     space: number
     filled_seats: number
