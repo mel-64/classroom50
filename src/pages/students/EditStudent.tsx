@@ -47,6 +47,10 @@ const EditStudent = ({
 
   const displayHandle = student.username || student.email
   const isEnrolled = student.enrollment_status === "enrolled"
+  // An email-only row (no username, no github_id) is keyed by its email, so the
+  // email can't be changed here — doing so would re-key or drop the row. Show it
+  // read-only with an explanation (the mutation also enforces this).
+  const emailLocked = !student.username && !student.github_id
 
   const updateMutation = useMutation({
     mutationFn: (value: EditStudentFormValues) =>
@@ -208,6 +212,8 @@ const EditStudent = ({
                       placeholder="student@university.edu"
                       className="input w-full"
                       value={field.state.value}
+                      readOnly={emailLocked}
+                      disabled={emailLocked}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                     />
@@ -217,9 +223,15 @@ const EditStudent = ({
                       {String(field.state.meta.errors[0] ?? "")}
                     </p>
                   )}
-                  {isEnrolled &&
-                  field.state.value.trim().toLowerCase() !==
-                    (student.email ?? "").trim().toLowerCase() ? (
+                  {emailLocked ? (
+                    <p className="mt-1 text-xs text-base-content/60">
+                      This student has no GitHub identity yet, so their email is
+                      their only identifier and can&apos;t be changed here.
+                      Unenroll and re-add them to change it.
+                    </p>
+                  ) : isEnrolled &&
+                    field.state.value.trim().toLowerCase() !==
+                      (student.email ?? "").trim().toLowerCase() ? (
                     <p className="mt-1 text-xs text-base-content/60">
                       This student is already enrolled. Changing their email
                       won&apos;t re-bind their confirmed GitHub identity; it

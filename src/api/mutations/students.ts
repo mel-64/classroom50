@@ -161,10 +161,37 @@ function parseStudentsCsv(csv: string): StudentCsvRow[] {
     .filter((row) => row.username || row.github_id || row.email)
 }
 
+// Neutralize spreadsheet formula injection (OWASP CSV injection) in the
+// free-text fields a teacher controls. A value starting with = + - @ (or a
+// leading tab/CR that a spreadsheet treats as a formula lead) is prefixed with
+// a single quote so Excel/Sheets render it as text. Idempotent: a value already
+// quote-guarded isn't double-prefixed. Applied ONLY to teacher-entered free
+// text — never to email/github_id/tokens/hashes/timestamps, which must
+// round-trip byte-exact for reconcile and the gh-teacher CLI.
+//
+// NOTE: this writes the leading quote into the STORED value, so any consumer of
+// students.csv (this app's parse layer and the gh-teacher CLI) sees and must
+// tolerate it on these three fields. Cross-binary contract — keep in lockstep.
+const FORMULA_LEAD = /^[=+\-@\t\r]/
+const FORMULA_GUARDED_FIELDS = ["first_name", "last_name", "section"] as const
+
+function escapeFormulaInjection(value: string): string {
+  if (!value) return value
+  if (value.startsWith("'") && FORMULA_LEAD.test(value.slice(1))) return value
+  return FORMULA_LEAD.test(value) ? `'${value}` : value
+}
+
 function stringifyStudentsCsv(rows: StudentCsvRow[]) {
   const normalizedRows = rows
     .map((row) => normalizeStudentRow(row))
     .filter((row) => row.username || row.github_id || row.email)
+    .map((row) => {
+      const guarded = { ...row }
+      for (const field of FORMULA_GUARDED_FIELDS) {
+        guarded[field] = escapeFormulaInjection(guarded[field])
+      }
+      return guarded
+    })
 
   return (
     Papa.unparse(normalizedRows, {
@@ -2039,14 +2066,16 @@ export async function updateStudent(
   const emailChanged = nextEmail.toLowerCase() !== existing.email.toLowerCase()
 
   // An email-only row (no username, no github_id) is identified solely by its
-  // email. Clearing it would leave the row with no key, and stringifyStudentsCsv
-  // drops keyless rows — so the student would silently vanish from the roster on
-  // write. Refuse rather than destroy the row (#74).
-  if (!nextEmail && !existing.username && !existing.github_id) {
+  // email: it's that row's studentKey, both server-side here and in the UI's
+  // optimistic cache. Editing the email would re-key (or, if cleared, drop) the
+  // row — stringifyStudentsCsv discards keyless rows, so a cleared email
+  // silently deletes the student. Refuse any email change on such a row; the
+  // teacher should unenroll instead (#74).
+  if (emailChanged && !existing.username && !existing.github_id) {
     throw new Error(
-      "Can't clear the email: this student has no GitHub username or id, so " +
-        "the email is their only identifier. Clearing it would remove them " +
-        "from the roster — unenroll them instead if that's the intent.",
+      "Can't change the email for this student: they have no GitHub username " +
+        "or id, so their email is their only identifier. Unenroll and re-add " +
+        "them to change it.",
     )
   }
 

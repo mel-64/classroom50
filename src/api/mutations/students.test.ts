@@ -6,6 +6,7 @@ import {
   inviteStudentByEmail,
   markStudentEnrolledWithConflictRetry,
   updateStudent,
+  updateStudentWithConflictRetry,
 } from "./students"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubClient } from "@/hooks/github/client"
@@ -613,9 +614,21 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
     expect(committed.content).toBeNull()
   })
 
-  it("rejects clearing the email of an email-only row (would drop it from the roster)", async () => {
+  it("rejects changing the email of an email-only row (re-keys/drops it)", async () => {
     const { client, committed } = makeClient({ startingCsv: HEADER + bobRow })
 
+    // Clearing it (would drop the keyless row from the roster on write).
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "bob@x.edu",
+        patch: { first_name: "Bob", last_name: "B", email: "   ", section: "" },
+      }),
+    ).rejects.toThrow(/only identifier|unenroll/i)
+    expect(committed.content).toBeNull()
+
+    // Changing it to a different address (would re-key the row).
     await expect(
       updateStudent(client, {
         org: "acme",
@@ -624,11 +637,11 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
         patch: {
           first_name: "Bob",
           last_name: "B",
-          email: "   ", // trims to empty -> would leave the row keyless
+          email: "bob.new@x.edu",
           section: "",
         },
       }),
-    ).rejects.toThrow(/only identifier|remove them from the roster/i)
+    ).rejects.toThrow(/only identifier|unenroll/i)
     expect(committed.content).toBeNull()
   })
 
@@ -652,5 +665,251 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
     const csv = committed.content!
     expect(csv.split("\n")[0]).toBe(HEADER.trim())
     expect(rowsFromCsv(csv)).toHaveLength(2)
+  })
+
+  it("matches a username-only row by its username key (no github_id)", async () => {
+    // carol: a row with a username but no github_id (key falls through to username).
+    const carolRow =
+      "carol,Carol,C,carol@x.edu,,,invited,github,carolhash,tok-3,2026-01-01T00:00:00Z,\n"
+    const { client, committed } = makeClient({ startingCsv: HEADER + carolRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "carol", // username key
+      patch: {
+        first_name: "Caroline",
+        last_name: "Carter",
+        email: "carol@x.edu",
+        section: "Period 5",
+      },
+    })
+
+    const carol = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "carol",
+    )
+    expect(carol?.first_name).toBe("Caroline")
+    expect(carol?.last_name).toBe("Carter")
+    expect(carol?.section).toBe("Period 5")
+    expect(carol?.github_id).toBe("")
+  })
+
+  it("clears email + email_hash via a whitespace-only email on a github-keyed row", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: { first_name: "Alice", last_name: "A", email: "   ", section: "" },
+    })
+
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "42",
+    )
+    expect(alice?.email).toBe("")
+    expect(alice?.email_hash).toBe("")
+  })
+
+  it("keeps a github-keyed row when all editable fields are cleared", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: { first_name: "", last_name: "", email: "", section: "" },
+    })
+
+    const rows = rowsFromCsv(committed.content!)
+    const alice = rows.find((r) => r.github_id === "42")
+    expect(alice).toBeTruthy()
+    expect(alice?.username).toBe("alice")
+    expect(alice?.enrollment_status).toBe("enrolled")
+    expect(alice?.invite_token).toBe("tok-1")
+    expect(rows).toHaveLength(1)
+  })
+
+  it("round-trips fields containing commas, quotes, and newlines without breaking the CSV", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: 'Al"ice',
+        last_name: "An, derson",
+        email: "alice@x.edu",
+        section: "Line1\nLine2",
+      },
+    })
+
+    const csv = committed.content!
+    const alice = rowsFromCsv(csv).find((r) => r.github_id === "42")
+    expect(alice?.first_name).toBe('Al"ice')
+    expect(alice?.last_name).toBe("An, derson")
+    expect(alice?.section).toBe("Line1\nLine2")
+    // No row-count corruption from the embedded delimiters/newline.
+    expect(rowsFromCsv(csv)).toHaveLength(1)
+  })
+
+  it("escapes spreadsheet formula-injection in teacher-entered fields", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "=HYPERLINK(1)",
+        last_name: "+CMD",
+        email: "alice@x.edu",
+        section: "@SUM(A1)",
+      },
+    })
+
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "42",
+    )
+    // A leading formula char is neutralized with a quote prefix in the stored value.
+    expect(alice?.first_name).toBe("'=HYPERLINK(1)")
+    expect(alice?.last_name).toBe("'+CMD")
+    expect(alice?.section).toBe("'@SUM(A1)")
+    // email is NOT formula-guarded (must round-trip byte-exact for reconcile/CLI).
+    expect(alice?.email).toBe("alice@x.edu")
+  })
+
+  it("writes a descriptive commit message", async () => {
+    const messages: string[] = []
+    const committed: { content: string | null } = { content: null }
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/") && path.includes("students.csv")) {
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(HEADER + aliceRow, "utf-8").toString("base64"),
+          })
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        if (path.endsWith("/git/trees")) {
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          messages.push((options?.body as { message: string }).message)
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          committed.content = "ok"
+          return Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+    const client = { request, requestRaw } as unknown as GitHubClient
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alice",
+        last_name: "A",
+        email: "alice@x.edu",
+        section: "Period 1",
+      },
+    })
+
+    expect(messages[0]).toBe("Edit student: cs101/alice")
+  })
+
+  it("retries on a 409 conflict and lands the edit (updateStudentWithConflictRetry)", async () => {
+    const committed: { content: string | null } = { content: null }
+    let refUpdateAttempts = 0
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/") && path.includes("students.csv")) {
+          // On retry, serve the already-committed CSV if present.
+          const csv = committed.content ?? HEADER + aliceRow
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(csv, "utf-8").toString("base64"),
+          })
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        if (path.endsWith("/git/trees")) {
+          const tree = (
+            options?.body as { tree?: { path: string; content?: string }[] }
+          )?.tree
+          const entry = tree?.find((t) => t.path.includes("students.csv"))
+          if (entry?.content) committed.content = entry.content
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          refUpdateAttempts++
+          if (refUpdateAttempts === 1) {
+            // First updateRef loses the race: 409.
+            committed.content = null
+            return Promise.reject(
+              new GitHubAPIError({
+                status: 409,
+                url: path,
+                message: "conflict",
+                body: null,
+                rateLimit: {} as never,
+              }),
+            )
+          }
+          return Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+    const client = { request, requestRaw } as unknown as GitHubClient
+
+    await updateStudentWithConflictRetry(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alicia",
+        last_name: "A",
+        email: "alice@x.edu",
+        section: "Period 1",
+      },
+    })
+
+    expect(refUpdateAttempts).toBe(2)
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "42",
+    )
+    expect(alice?.first_name).toBe("Alicia")
   })
 })
