@@ -107,8 +107,8 @@ const UnenrollStudentButton = ({
   })
   const [open, setOpen] = useState(false)
 
-  // Only an active member offers... (org removal now lives on the org Members
-  // page, where the student's full cross-classroom footprint is visible).
+  // Org removal now lives on the org Members page, where the student's full
+  // cross-classroom footprint is visible.
   const isMember = status === "member"
   // Email-invited rows have no username yet; show the email so the row is
   // identifiable before reconciliation.

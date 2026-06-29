@@ -76,4 +76,16 @@ describe("listAllOrgMembers (#76 — pages to completion)", () => {
     expect(all).toEqual([])
     expect(requested).toHaveLength(1)
   })
+
+  it("stops at the page cap if a server keeps returning full pages", async () => {
+    // A misbehaving server that ignores `page` and always returns 100 items
+    // must not loop unbounded; paginateAll caps at 100 pages.
+    const request = vi
+      .fn()
+      .mockResolvedValue(Array.from({ length: 100 }, (_, i) => member(i + 1)))
+    const client = { request } as unknown as GitHubClient
+    const all = await listAllOrgMembers(client, "acme")
+    expect(request).toHaveBeenCalledTimes(100)
+    expect(all).toHaveLength(100 * 100)
+  })
 })

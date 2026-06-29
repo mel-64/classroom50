@@ -117,6 +117,21 @@ describe("aggregateOrgMembers (#76)", () => {
     expect(sections).toEqual(["P1", "P9"])
   })
 
+  it("matches an empty-github_id roster row to a member by login (no duplicate row)", () => {
+    // A roster row typed before reconcile has a username but no github_id. It
+    // must be classified member-on-roster and NOT also surface as a separate
+    // member-no-roster row for the same person.
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [roster("cs101", [student({ username: "alice", github_id: "" })])],
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].classification).toBe("member-on-roster")
+    expect(rows[0].isMember).toBe(true)
+    // The immutable id is backfilled from the member match.
+    expect(rows[0].github_id).toBe("42")
+  })
+
   it("sorts discrepancies before members", () => {
     const rows = aggregateOrgMembers(
       [member(42, "alice")],

@@ -19,13 +19,49 @@ import RequireTeacher from "@/components/RequireTeacher"
 import Avatar from "@/components/avatar"
 import GitHub from "@/assets/github.svg?react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { useToast } from "@/context/notifications/NotificationProvider"
+import {
+  useToast,
+  type NotifyInput,
+} from "@/context/notifications/NotificationProvider"
 import { useGitHubViewer } from "@/hooks/github/hooks"
 import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
 import useOrgMembersOverview from "@/hooks/useOrgMembersOverview"
 import type { OrgMemberRow } from "@/util/orgMembers"
+import { isSameGitHubUser } from "@/util/students"
 import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
 import { inviteMemberToOrg } from "@/pages/orgMembers/inviteMemberToOrg"
+import type { GitHubClient } from "@/hooks/github/client"
+
+// Shared invite-by-id flow for both the inline row button and the detail
+// drawer: call inviteMemberToOrg, toast the resolved (or fallback) handle, and
+// run the caller's onDone refresh. Throwing is handled here so both call sites
+// only manage their own in-flight flag.
+const runInviteMember = async (
+  client: GitHubClient,
+  org: string,
+  row: OrgMemberRow,
+  notify: (input: NotifyInput) => void,
+  onDone: () => void,
+) => {
+  const label = row.username || row.email
+  try {
+    const result = await inviteMemberToOrg(client, { org, row })
+    const who = result.currentUsername ? `@${result.currentUsername}` : label
+    notify({
+      tone: "success",
+      durationMs: 6000,
+      message: `Invited ${who} to the ${org} organization.`,
+    })
+    onDone()
+  } catch (err) {
+    notify({
+      tone: "error",
+      message: `Couldn't invite ${label}: ${
+        err instanceof Error ? err.message : "something went wrong"
+      }`,
+    })
+  }
+}
 
 // GitHub identity line: makes it explicit these are GitHub members by showing
 // the @username and the immutable numeric GitHub id together.
@@ -80,26 +116,15 @@ const MemberDetail = ({
   const [working, setWorking] = useState(false)
   const [inviting, setInviting] = useState(false)
   const label = row.username || row.email
+  // Only non-archived classrooms are actually unenrolled (archived ones can't
+  // be; removeMemberFromOrg skips them), so the confirm copy counts those.
+  const activeClassrooms = row.classrooms.filter((c) => !c.archived)
 
   const handleInvite = async () => {
     if (inviting) return
     setInviting(true)
     try {
-      const result = await inviteMemberToOrg(client, { org, row })
-      const who = result.currentUsername ? `@${result.currentUsername}` : label
-      notify({
-        tone: "success",
-        durationMs: 6000,
-        message: `Invited ${who} to the ${org} organization.`,
-      })
-      onRemoved()
-    } catch (err) {
-      notify({
-        tone: "error",
-        message: `Couldn't invite ${label}: ${
-          err instanceof Error ? err.message : "something went wrong"
-        }`,
-      })
+      await runInviteMember(client, org, row, notify, onRemoved)
     } finally {
       setInviting(false)
     }
@@ -272,15 +297,15 @@ const MemberDetail = ({
           ) : confirming ? (
             <div className="rounded-box border border-error/30 bg-error/5 p-4 text-sm">
               <p className="text-base-content/80">
-                {row.classrooms.length > 0 ? (
+                {activeClassrooms.length > 0 ? (
                   <>
                     {label} will first be unenrolled from{" "}
                     <span className="font-semibold">
-                      {row.classrooms.length} classroom
-                      {row.classrooms.length === 1 ? "" : "s"}
+                      {activeClassrooms.length} classroom
+                      {activeClassrooms.length === 1 ? "" : "s"}
                     </span>{" "}
-                    ({row.classrooms.map((c) => c.classroom).join(", ")}), then
-                    removed from the{" "}
+                    ({activeClassrooms.map((c) => c.classroom).join(", ")}),
+                    then removed from the{" "}
                     <span className="font-semibold">{org}</span> organization.
                     Their assignment repositories are not deleted.
                   </>
@@ -343,10 +368,30 @@ const OrgMembersPage = () => {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [invitingKey, setInvitingKey] = useState<string | null>(null)
 
-  const refresh = () => {
+  const refresh = (affected?: OrgMemberRow) => {
     if (!org) return
-    queryClient.invalidateQueries({ queryKey: githubKeys.orgMembers(org) })
+    queryClient.invalidateQueries({ queryKey: githubKeys.orgMembersAll(org) })
     invalidateInviteQueries(queryClient, org)
+    // removeMemberFromOrg rewrites each affected classroom's students.csv, which
+    // the aggregation reads via csvFileQuery; invalidate those (and the
+    // classroom.json) so the page doesn't show a just-removed student as still
+    // enrolled until the 5-minute staleTime elapses.
+    for (const access of affected?.classrooms ?? []) {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.csvFile(
+          org,
+          "classroom50",
+          `${access.classroom}/students.csv`,
+        ),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(
+          org,
+          "classroom50",
+          `${access.classroom}/classroom.json`,
+        ),
+      })
+    }
   }
 
   // Inline row invite for an on-roster non-member (mirrors the detail-drawer
@@ -355,23 +400,7 @@ const OrgMembersPage = () => {
     if (!org || invitingKey) return
     setInvitingKey(row.key)
     try {
-      const result = await inviteMemberToOrg(client, { org, row })
-      const who = result.currentUsername
-        ? `@${result.currentUsername}`
-        : row.username || row.email
-      notify({
-        tone: "success",
-        durationMs: 6000,
-        message: `Invited ${who} to the ${org} organization.`,
-      })
-      refresh()
-    } catch (err) {
-      notify({
-        tone: "error",
-        message: `Couldn't invite ${row.username || row.email}: ${
-          err instanceof Error ? err.message : "something went wrong"
-        }`,
-      })
+      await runInviteMember(client, org, row, notify, () => refresh(row))
     } finally {
       setInvitingKey(null)
     }
@@ -388,14 +417,18 @@ const OrgMembersPage = () => {
   }, [rows, query])
 
   const selected = rows.find((row) => row.key === selectedKey) ?? null
-  const discrepancyCount = rows.filter(
-    (row) => row.classification === "on-roster-not-member",
-  ).length
+  const discrepancyCount = useMemo(
+    () =>
+      rows.filter((row) => row.classification === "on-roster-not-member")
+        .length,
+    [rows],
+  )
 
   const isSelf = (row: OrgMemberRow) =>
-    Boolean(viewer) &&
-    (String(viewer?.id) === row.github_id ||
-      viewer?.login?.toLowerCase() === row.username.toLowerCase())
+    isSameGitHubUser(viewer ?? null, {
+      github_id: row.github_id,
+      username: row.username,
+    })
 
   return (
     <div className="min-h-screen">
@@ -538,7 +571,7 @@ const OrgMembersPage = () => {
           onClose={() => setSelectedKey(null)}
           onRemoved={() => {
             setSelectedKey(null)
-            refresh()
+            refresh(selected)
           }}
         />
       ) : null}

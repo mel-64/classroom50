@@ -1945,7 +1945,10 @@ export async function unenrollStudent(
   // here: unenroll is classroom-scoped, and org-wide removal would leave any
   // other roster the student is on showing them as still enrolled. Org removal
   // lives on the org Members page, where the full footprint is visible.
-  const orgState = await orgStatePromise
+  // Resolve org state defensively: a reject here would otherwise throw AFTER
+  // the roster commit landed, defeating the "commit landed -> downstream
+  // non-fatal" guarantee and discarding accumulated warnings.
+  const orgState = await orgStatePromise.catch(() => null)
 
   // Never cancel the signed-in teacher's own invite (a teacher mid-enrollment).
   const viewer = await viewerPromise.catch(() => null)

@@ -19,16 +19,12 @@ body {
     background-color 150ms ease,
     transform 150ms ease,
     box-shadow 150ms ease;
-}
-@utility clickable-row {
   &:hover {
     background-color: var(--color-base-200);
     transform: translateY(-1px);
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  @utility clickable-row {
+  @media (prefers-reduced-motion: reduce) {
     transition: background-color 150ms ease;
     &:hover {
       transform: none;

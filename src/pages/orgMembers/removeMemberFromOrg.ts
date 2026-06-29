@@ -1,6 +1,8 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import { unenrollStudent } from "@/api/mutations/students"
 import { removeOrgMembership, getErrorMessage } from "@/hooks/github/mutations"
+import { getAuthenticatedUser } from "@/api/queries/users"
+import { isSameGitHubUser } from "@/util/students"
 import type { Student } from "@/types/classroom"
 import type { OrgMemberRow } from "@/util/orgMembers"
 
@@ -39,7 +41,49 @@ export async function removeMemberFromOrg(
   const unenrolledClassrooms: string[] = []
   const warnings: string[] = []
 
+  // Defense-in-depth self-guard: the Members page hides this action for the
+  // signed-in viewer, but that guard is UI-only and depends on the viewer query
+  // being loaded. Re-resolve the viewer server-side and refuse to remove the
+  // acting account from the org (an org-wide DELETE that could lock the teacher
+  // out), mirroring unenrollStudent's self-guard.
+  const viewer = await getAuthenticatedUser(client).catch(() => null)
+  if (
+    isSameGitHubUser(viewer, {
+      github_id: row.github_id,
+      username: row.username,
+    })
+  ) {
+    throw new Error(
+      "You can't remove your own account from the organization here.",
+    )
+  }
+
+  // Without a GitHub username we can't DELETE the org membership (the GitHub
+  // endpoint is keyed by username). Bail BEFORE clearing any rosters — clearing
+  // them under a "Remove from organization" action that can't actually remove
+  // the membership would be misleading, destructive work.
+  if (!row.username) {
+    return {
+      unenrolledClassrooms: [],
+      warnings: [
+        `Couldn't remove ${row.email || "this student"} from the organization: no GitHub username on file.`,
+      ],
+      removed: false,
+    }
+  }
+
   for (const access of row.classrooms) {
+    // Archived classrooms can't be unenrolled (unenrollStudent throws via
+    // assertClassroomNotArchived), and the org DELETE below would still run —
+    // leaving the student off the org but stuck on the archived roster, the very
+    // inconsistency this flow exists to prevent. Skip them and report instead.
+    if (access.archived) {
+      warnings.push(
+        `${row.username || row.email} is still on the archived classroom "${access.classroom}"; ` +
+          `unarchive it to remove them from that roster.`,
+      )
+      continue
+    }
     try {
       await unenrollStudent(client, {
         org,
@@ -58,14 +102,8 @@ export async function removeMemberFromOrg(
 
   let removed = false
   try {
-    if (row.username) {
-      await removeOrgMembership(client, { org, username: row.username })
-      removed = true
-    } else {
-      warnings.push(
-        `Couldn't remove ${row.email} from the organization: no GitHub username on file.`,
-      )
-    }
+    await removeOrgMembership(client, { org, username: row.username })
+    removed = true
   } catch (err) {
     warnings.push(
       `Removing ${row.username} from the organization failed (${getErrorMessage(

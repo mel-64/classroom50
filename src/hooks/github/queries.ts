@@ -51,6 +51,12 @@ export const githubKeys = {
 
   orgMembers: (org: string) => ["orgs", "list", "members", org] as const,
 
+  // Distinct from `orgMembers` (page-1 via listOrgMembers): this keys the
+  // all-pages fetch used by the org Members page. Sharing one key would let the
+  // page-1 and all-pages results overwrite each other in the cache.
+  orgMembersAll: (org: string) =>
+    ["orgs", "list", "members", "all", org] as const,
+
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
   repo: (owner: string, repo: string) =>
@@ -624,8 +630,11 @@ export async function paginateAll<T>(
 ): Promise<T[]> {
   const all: T[] = []
   let page = 1
+  // Hard cap (100 pages x 100/page = 10k items) so a server that ignores the
+  // page param and keeps returning full pages can't loop unbounded.
+  const MAX_PAGES = 100
 
-  while (true) {
+  while (page <= MAX_PAGES) {
     const batch = await client.request<T[]>(makePath(page))
     all.push(...batch)
     if (batch.length < 100) break
@@ -647,16 +656,6 @@ export async function listOnboardingRepos(
     (page) => `/orgs/${org}/repos?per_page=100&page=${page}&type=all`,
   )
   return repos.filter((repo) => repo.name.startsWith(ONBOARDING_REPO_PREFIX))
-}
-
-export async function getOrgMembers(
-  client: GitHubClient,
-  org: string,
-): Promise<GitHubUser[]> {
-  return paginateAll<GitHubUser>(
-    client,
-    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
-  )
 }
 
 // Owner-only (403 for non-owners). Expired invites drop off this list and

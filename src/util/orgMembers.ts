@@ -29,7 +29,6 @@ export type OrgMemberRow = {
   github_id: string
   name: string
   email: string
-  avatarUrl?: string
   isMember: boolean
   classrooms: ClassroomAccess[]
   classification: MemberClassification
@@ -59,6 +58,13 @@ export function aggregateOrgMembers(
   rosters: ClassroomRoster[],
 ): OrgMemberRow[] {
   const memberIds = memberIdSet(members)
+  // Login -> numeric id, so a roster row that carries a username but no
+  // github_id (typed before reconcile) can still be matched to a live member.
+  // Without this, such a row is classified on-roster-not-member AND the member
+  // is also emitted as member-no-roster — the same person counted twice.
+  const memberIdByLogin = new Map<string, string>(
+    members.map((m) => [m.login.toLowerCase(), String(m.id)]),
+  )
 
   type Acc = {
     key: string
@@ -89,8 +95,8 @@ export function aggregateOrgMembers(
         if (!existing.github_id && student.github_id)
           existing.github_id = student.github_id
         if (!existing.email && student.email) existing.email = student.email
-        if (!existing.name && fullName(student))
-          existing.name = fullName(student)
+        const name = fullName(student)
+        if (!existing.name && name) existing.name = name
       } else {
         byKey.set(key, {
           key,
@@ -108,12 +114,24 @@ export function aggregateOrgMembers(
   const matchedMemberIds = new Set<string>()
 
   for (const acc of byKey.values()) {
-    const isMember = Boolean(acc.github_id) && memberIds.has(acc.github_id)
-    if (isMember) matchedMemberIds.add(acc.github_id)
+    // Match by github_id when present; otherwise fall back to login (a row that
+    // hasn't been reconciled to an id yet). The resolved id is recorded in
+    // matchedMemberIds so the no-roster fold below doesn't emit a duplicate row.
+    const loginId = acc.username
+      ? memberIdByLogin.get(acc.username.toLowerCase())
+      : undefined
+    const matchedId =
+      acc.github_id && memberIds.has(acc.github_id)
+        ? acc.github_id
+        : (loginId ?? "")
+    const isMember = Boolean(matchedId)
+    if (isMember) matchedMemberIds.add(matchedId)
     rows.push({
       key: acc.key,
       username: acc.username,
-      github_id: acc.github_id,
+      // Backfill the immutable id from the member match when the roster row
+      // lacked one, so downstream actions (invite by id) still work.
+      github_id: acc.github_id || matchedId,
       name: acc.name,
       email: acc.email,
       isMember,
@@ -132,7 +150,6 @@ export function aggregateOrgMembers(
       github_id: id,
       name: member.name ?? "",
       email: member.email ?? "",
-      avatarUrl: member.avatar_url,
       isMember: true,
       classrooms: [],
       classification: "member-no-roster",

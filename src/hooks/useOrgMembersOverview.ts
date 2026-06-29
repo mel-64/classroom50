@@ -35,7 +35,7 @@ const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
   const client = useGitHubClient()
 
   const membersQuery = useQuery({
-    queryKey: githubKeys.orgMembers(org ?? ""),
+    queryKey: githubKeys.orgMembersAll(org ?? ""),
     queryFn: () => listAllOrgMembers(client, org ?? ""),
     enabled: Boolean(org),
     staleTime: 5 * 60 * 1000,
