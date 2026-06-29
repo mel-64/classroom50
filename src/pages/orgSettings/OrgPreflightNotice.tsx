@@ -7,8 +7,14 @@ import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 
 // Teacher preflight banner shown when an org is opened. The service-token and
 // policy checks live HERE (one org at a time) rather than on the org list,
-// which would fan out these reads across every org the user can see. Renders
-// nothing while loading or when everything is in order.
+// which would fan out these reads across every org the user can see.
+//
+// One aggregated "preflight check" banner names every failing category rather
+// than surfacing them one at a time; the org settings page is the source of
+// truth for the per-item detail. Severity is the worst of the failing checks:
+// a missing token or critical policy gap is an error; non-critical policy
+// drift is a softer warning. Renders nothing while loading or when all checks
+// pass.
 const OrgPreflightNotice = ({ org }: { org: string }) => {
   const { data: tokenStatus } = useGetServiceTokenStatus(org)
   const { data: planDetails } = useGetOrgPlanDetails(org)
@@ -18,9 +24,19 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
   const policyFail = audit?.verdict === "fail"
   const policyWarn = audit?.verdict === "warn"
 
-  if (!tokenMissing && !policyFail && !policyWarn) return null
+  // Each failing check contributes a named category and a severity. The banner
+  // aggregates them; the worst severity drives the styling.
+  const failing: { label: string; severity: "error" | "warning" }[] = []
+  if (tokenMissing) failing.push({ label: "service token", severity: "error" })
+  if (policyFail)
+    failing.push({ label: "organization policy", severity: "error" })
+  else if (policyWarn)
+    failing.push({ label: "organization policy", severity: "warning" })
 
-  const isError = tokenMissing || policyFail
+  if (failing.length === 0) return null
+
+  const isError = failing.some((f) => f.severity === "error")
+  const categories = failing.map((f) => f.label).join(", ")
 
   return (
     <div
@@ -34,17 +50,15 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
       )}
       <div className="text-sm">
         <p className="font-semibold">
-          {tokenMissing
-            ? "This organization needs a service token"
-            : policyFail
-              ? "Organization policy is incomplete"
-              : "Organization policy has drifted"}
+          {isError
+            ? "Organization preflight check failed"
+            : "Organization preflight check needs attention"}
         </p>
         <p className="mt-0.5 text-base-content/70">
-          {tokenMissing
-            ? "Classroom 50 workflows can't run until a service token is set."
-            : "Some organization settings differ from the Classroom 50 lockdown."}{" "}
-          Review it on the{" "}
+          {failing.length === 1
+            ? `An issue was found with this organization's ${categories}.`
+            : `Issues were found with this organization's ${categories}.`}{" "}
+          Review and fix on the{" "}
           <Link to="/$org/settings" params={{ org }} className="link">
             organization settings page
           </Link>
