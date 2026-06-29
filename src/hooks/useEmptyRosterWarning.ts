@@ -1,5 +1,10 @@
 import useGetStudents from "@/hooks/useGetStudents"
 import useRosterStatus from "@/hooks/useRosterStatus"
+import {
+  countEnrolled,
+  resolveEmptyRosterWarning,
+  type EmptyRosterDecision,
+} from "@/util/roster"
 
 // Whether to warn a teacher that no student can yet accept an assignment.
 //
@@ -8,16 +13,10 @@ import useRosterStatus from "@/hooks/useRosterStatus"
 // "zero enrolled (org member) students", not merely "zero roster rows": a
 // classroom with 30 pending invites still warrants the warning.
 //
-// `show` is gated on the data having settled so the banner never flashes during
-// load. When live status is unavailable (non-owner, or a members/invites
-// failure) we fall back to the CSV "enrolled" column, mirroring StudentListPage.
-export type EmptyRosterWarning = {
-  show: boolean
-  // No roster rows at all vs. rows exist but nobody has joined the org yet.
-  // Lets callers tailor copy ("add students" vs. "students haven't joined yet").
-  hasRosterRows: boolean
-  isLoading: boolean
-}
+// The show/enrolled decision lives in pure functions (countEnrolled,
+// resolveEmptyRosterWarning) in util/roster, shared with the roster header so
+// the two can't drift and the branches stay unit-testable.
+export type EmptyRosterWarning = EmptyRosterDecision
 
 const useEmptyRosterWarning = (
   org: string | undefined,
@@ -27,25 +26,21 @@ const useEmptyRosterWarning = (
     org,
     classroom,
   )
-  const { statusAvailable, statusLoading, partition } = useRosterStatus(
-    org ?? "",
-    classroom ?? "",
-    students,
-  )
+  const status = useRosterStatus(org ?? "", classroom ?? "", students)
 
-  const enrolledCount =
-    statusAvailable && !statusLoading
-      ? partition.enrolled.length
-      : students.filter((s) => s.enrollment_status === "enrolled").length
-
-  // Don't decide until the roster and (when available) live status have loaded.
-  const isLoading = studentsLoading || (statusAvailable && statusLoading)
-
-  return {
-    show: !isLoading && enrolledCount === 0,
-    hasRosterRows: students.length > 0,
-    isLoading,
-  }
+  // statusLoading covers members + invitations but intentionally NOT the
+  // onboarding-reports query: reports only move rows into the `ready` bucket,
+  // and countEnrolled counts only `enrolled` (member/removed), so a still-
+  // loading reports query can't change the enrolled count. If the enrolled
+  // definition ever broadens to include onboarded/`ready` rows, gate on
+  // status.rosterReady instead (which also waits on reports) to avoid a flash.
+  return resolveEmptyRosterWarning({
+    studentsLoading,
+    statusAvailable: status.statusAvailable,
+    statusLoading: status.statusLoading,
+    enrolledCount: countEnrolled(status, students),
+    rosterRowCount: students.length,
+  })
 }
 
 export default useEmptyRosterWarning

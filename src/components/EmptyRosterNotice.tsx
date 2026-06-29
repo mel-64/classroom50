@@ -1,15 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { Info, UserPlus } from "lucide-react"
 
-// Warns a teacher that no enrolled (GitHub org member) student can accept an
-// assignment yet, and links straight to the roster. Owns the daisyUI alert
-// shell + ARIA so the assignments list and create pages can't drift in markup;
-// copy adapts to whether the roster has rows (invited but not joined) or is
-// entirely empty. Render only when useEmptyRosterWarning().show is true.
-//
-// Layout: icon + message on the left, action on the right. On narrow widths the
-// alert stacks (message then full-width button) instead of squeezing the two
-// columns together; the button never wraps its own label (whitespace-nowrap).
+// Empty/unenrolled-roster warning. Owns the daisyUI alert shell + ARIA so the
+// assignments list and create pages can't drift in markup; copy adapts to
+// whether the roster has rows (invited but not joined) or is entirely empty.
+// Render only when useEmptyRosterWarning().show is true.
 export const EmptyRosterNotice = ({
   org,
   classroom,

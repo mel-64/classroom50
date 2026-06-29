@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest"
 import {
   applyReconciledToRoster,
+  countEnrolled,
   isRosterReady,
   partitionRoster,
   removeFromRoster,
+  resolveEmptyRosterWarning,
   splitName,
   studentKey,
   toStudent,
 } from "./roster"
+import type { RosterPartition } from "./roster"
 import type { Student } from "@/types/classroom"
 import type { InviteStatus } from "@/util/inviteStatus"
 
@@ -285,5 +288,101 @@ describe("partitionRoster", () => {
     expect(result.enrolled).toEqual([memberRow, removedRow])
     // pending and undefined-status both fall through to awaiting.
     expect(result.awaitingEnrollment).toEqual([awaitingRow, unknownRow])
+  })
+})
+
+const partition = (overrides: Partial<RosterPartition> = {}): RosterPartition => ({
+  readyToConfirm: [],
+  awaitingEnrollment: [],
+  enrolled: [],
+  ...overrides,
+})
+
+describe("countEnrolled", () => {
+  it("uses the live partition when status is available and settled", () => {
+    const enrolled = [student({ github_id: "1" }), student({ github_id: "2" })]
+    const count = countEnrolled(
+      { statusAvailable: true, statusLoading: false, partition: partition({ enrolled }) },
+      // CSV column disagrees on purpose: the live partition must win.
+      [student({ enrollment_status: "invited" })],
+    )
+    expect(count).toBe(2)
+  })
+
+  it("falls back to the CSV enrolled column when status is unavailable (non-owner)", () => {
+    const students = [
+      student({ github_id: "1", enrollment_status: "enrolled" }),
+      student({ github_id: "2", enrollment_status: "invited" }),
+      student({ github_id: "3", enrollment_status: "enrolled" }),
+    ]
+    const count = countEnrolled(
+      // Non-owner: partition would be empty, but the CSV fallback is used.
+      { statusAvailable: false, statusLoading: false, partition: partition() },
+      students,
+    )
+    expect(count).toBe(2)
+  })
+
+  it("falls back to the CSV column while live status is still loading", () => {
+    const students = [student({ enrollment_status: "enrolled" })]
+    const count = countEnrolled(
+      { statusAvailable: true, statusLoading: true, partition: partition() },
+      students,
+    )
+    expect(count).toBe(1)
+  })
+})
+
+describe("resolveEmptyRosterWarning", () => {
+  const base = {
+    studentsLoading: false,
+    statusAvailable: true,
+    statusLoading: false,
+    enrolledCount: 0,
+    rosterRowCount: 0,
+  }
+
+  it("shows the warning only once settled with zero enrolled students", () => {
+    expect(resolveEmptyRosterWarning(base)).toMatchObject({
+      show: true,
+      hasRosterRows: false,
+      isLoading: false,
+    })
+  })
+
+  it("never shows (no flash) while the roster is still loading", () => {
+    expect(
+      resolveEmptyRosterWarning({ ...base, studentsLoading: true }).show,
+    ).toBe(false)
+  })
+
+  it("never shows (no flash) while live status is loading and available", () => {
+    expect(
+      resolveEmptyRosterWarning({ ...base, statusLoading: true }).show,
+    ).toBe(false)
+  })
+
+  it("ignores statusLoading when status is unavailable (non-owner settles on the roster)", () => {
+    // statusLoading=true but statusAvailable=false -> not gated by status.
+    expect(
+      resolveEmptyRosterWarning({
+        ...base,
+        statusAvailable: false,
+        statusLoading: true,
+      }).show,
+    ).toBe(true)
+  })
+
+  it("hides the warning when at least one student is enrolled", () => {
+    expect(
+      resolveEmptyRosterWarning({ ...base, enrolledCount: 1 }).show,
+    ).toBe(false)
+  })
+
+  it("reports hasRosterRows so callers can distinguish empty vs invited-only", () => {
+    // Rows exist but nobody is enrolled -> warn, with the 'invited' copy branch.
+    expect(
+      resolveEmptyRosterWarning({ ...base, rosterRowCount: 30, enrolledCount: 0 }),
+    ).toMatchObject({ show: true, hasRosterRows: true })
   })
 })

@@ -92,6 +92,54 @@ export type RosterPartition = {
   enrolled: Student[]
 }
 
+// The single source of truth for "how many students are enrolled (GitHub org
+// members)". When live status has settled, trust the partition (members +
+// removed). Otherwise — a non-owner whose invitations endpoint 403s, or a
+// terminal members failure — fall back to the CSV `enrollment_status` column,
+// which is the only signal available without owner-only endpoints. Pure so both
+// the roster header and the empty-roster warning share one definition and can't
+// drift.
+export function countEnrolled(
+  status: {
+    statusAvailable: boolean
+    statusLoading: boolean
+    partition: RosterPartition
+  },
+  students: Student[],
+): number {
+  return status.statusAvailable && !status.statusLoading
+    ? status.partition.enrolled.length
+    : students.filter((s) => s.enrollment_status === "enrolled").length
+}
+
+export type EmptyRosterDecision = {
+  show: boolean
+  hasRosterRows: boolean
+  isLoading: boolean
+}
+
+// Pure decision for the empty-roster warning, kept React-free (no hooks) so the
+// branches are unit-testable in isolation — mirroring resolveTeacherVerdict.
+// `enrolledCount` must already be computed via countEnrolled from the same
+// roster status.
+export function resolveEmptyRosterWarning(input: {
+  studentsLoading: boolean
+  statusAvailable: boolean
+  statusLoading: boolean
+  enrolledCount: number
+  rosterRowCount: number
+}): EmptyRosterDecision {
+  // Gate on load so the banner never flashes: decide only once the roster and
+  // (when available) live status have settled.
+  const isLoading =
+    input.studentsLoading || (input.statusAvailable && input.statusLoading)
+  return {
+    show: !isLoading && input.enrolledCount === 0,
+    hasRosterRows: input.rosterRowCount > 0,
+    isLoading,
+  }
+}
+
 // Whether the roster can render without a row flashing in the wrong section.
 // True once members + invitations (statusLoading) have settled and — when
 // status is available — the self-reports query has loaded or errored (an error

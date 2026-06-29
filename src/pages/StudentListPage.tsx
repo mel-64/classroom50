@@ -15,7 +15,7 @@ import useRosterStatus from "@/hooks/useRosterStatus"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
-import { toStudent } from "@/util/roster"
+import { countEnrolled, toStudent } from "@/util/roster"
 
 const StudentListContent = ({
   org,
@@ -30,17 +30,10 @@ const StudentListContent = ({
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
   // Count from the same live partition the Enrolled section uses, so header and
-  // badge agree. While status is loading/unavailable (non-owner), fall back to
-  // the CSV "enrolled" signal rather than flashing 0.
-  const { statusAvailable, statusLoading, partition } = useRosterStatus(
-    org,
-    classroom,
-    students,
-  )
-  const enrolledCount =
-    statusAvailable && !statusLoading
-      ? partition.enrolled.length
-      : students.filter((s) => s.enrollment_status === "enrolled").length
+  // badge agree. While status is loading/unavailable (non-owner), countEnrolled
+  // falls back to the CSV "enrolled" signal rather than flashing 0.
+  const rosterStatus = useRosterStatus(org, classroom, students)
+  const enrolledCount = countEnrolled(rosterStatus, students)
   const className = classData?.name || classData?.short_name || "Untitled class"
 
   return (
