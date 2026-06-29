@@ -6,7 +6,12 @@
 
 import type { GitHubClient } from "./client"
 import { GitHubAPIError } from "./errors"
-import { classifyDefaults, type ClassifyResult } from "@/orgPolicy/desiredState"
+import {
+  classifyDefaults,
+  memberDefaultSettings,
+  type ClassifyResult,
+  type MemberDefaultSetting,
+} from "@/orgPolicy/desiredState"
 
 export const CONFIG_REPO = "classroom50"
 
@@ -175,4 +180,128 @@ export async function checkPages(
   } catch (err) {
     return unreadableFrom(err)
   }
+}
+
+export type OrgDefaultsRepairResult = {
+  // ok mirrors the CLI's "lockdown complete" = no critical field unenforced.
+  ok: boolean
+  // transient is set when a secondary-rate-limit aborted the apply; the caller
+  // should surface a retry message rather than a drift checklist.
+  transient: boolean
+  // The unenforced settings after the authoritative read-back, each carrying
+  // its manualFix for the settings page / wizard checklist.
+  unenforced: MemberDefaultSetting[]
+  message: string
+}
+
+function orgDefaultsBody(
+  settings: MemberDefaultSetting[],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  for (const s of settings) body[s.field] = s.value
+  return body
+}
+
+// Read the org back and classify — the single source of truth for residual
+// state. A 200 on the PATCH is not proof the values stuck (enterprise-pinned
+// fields silently no-op), so the read-back is authoritative. A read failure
+// does not manufacture a false checklist (mirrors the CLI: warn, treat as ok).
+async function verifyOrgDefaults(
+  client: GitHubClient,
+  org: string,
+  plan: string | undefined,
+): Promise<{ ok: boolean; unenforced: MemberDefaultSetting[] }> {
+  try {
+    const live = await client.request<Record<string, unknown>>(`/orgs/${org}`)
+    const { verdicts, criticalMissed } = classifyDefaults(live, plan)
+    return {
+      ok: !criticalMissed,
+      unenforced: verdicts.filter((v) => !v.enforced).map((v) => v.setting),
+    }
+  } catch {
+    return { ok: true, unenforced: [] }
+  }
+}
+
+// repairOrgDefaults applies the full plan-filtered member-default lockdown,
+// mirroring the CLI's applyOrgMemberDefaults: one combined PATCH /orgs/{org};
+// on a 403/422 (not a rate limit) drop to a per-field fallback; on a
+// secondary-rate-limit abort as transient (do not amplify the throttle); then
+// always read the org back and classify.
+export async function repairOrgDefaults(
+  client: GitHubClient,
+  org: string,
+  plan: string | undefined,
+): Promise<OrgDefaultsRepairResult> {
+  const settings = memberDefaultSettings(plan)
+
+  try {
+    await client.request(`/orgs/${org}`, {
+      method: "PATCH",
+      body: orgDefaultsBody(settings),
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isRateLimited) {
+      return {
+        ok: false,
+        transient: true,
+        unenforced: [],
+        message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
+      }
+    }
+    if (
+      err instanceof GitHubAPIError &&
+      (err.status === 403 || err.status === 422)
+    ) {
+      const fallback = await repairOrgDefaultsPerField(client, org, settings)
+      if (fallback.transient) return fallback
+    } else {
+      throw err
+    }
+  }
+
+  const { ok, unenforced } = await verifyOrgDefaults(client, org, plan)
+  return {
+    ok,
+    transient: false,
+    unenforced,
+    message: ok
+      ? `${org}: org member-privilege lockdown applied.`
+      : `${org}: org member-privilege lockdown incomplete — ${unenforced.length} setting(s) need manual attention.`,
+  }
+}
+
+// Per-field fallback: PATCH each field alone. A 403/422 on an individual field
+// is a plan-gated rejection — skip it silently; the read-back reports the true
+// residual state as one checklist. A secondary-rate-limit aborts.
+async function repairOrgDefaultsPerField(
+  client: GitHubClient,
+  org: string,
+  settings: MemberDefaultSetting[],
+): Promise<OrgDefaultsRepairResult> {
+  for (const s of settings) {
+    try {
+      await client.request(`/orgs/${org}`, {
+        method: "PATCH",
+        body: { [s.field]: s.value },
+      })
+    } catch (err) {
+      if (err instanceof GitHubAPIError && err.isRateLimited) {
+        return {
+          ok: false,
+          transient: true,
+          unenforced: [],
+          message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
+        }
+      }
+      if (
+        err instanceof GitHubAPIError &&
+        (err.status === 403 || err.status === 422)
+      ) {
+        continue
+      }
+      throw err
+    }
+  }
+  return { ok: true, transient: false, unenforced: [], message: "" }
 }

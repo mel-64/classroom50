@@ -264,6 +264,7 @@ const OrgSetupPage = () => {
       return initClassroom50({
         client: githubClient,
         org,
+        plan: orgPlanDetails?.plan.name,
         serviceToken: "",
         serviceAccountConfirmed: false,
         onStepUpdate: (update) => {

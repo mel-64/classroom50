@@ -17,6 +17,7 @@ import type { OnboardingCleanupMode } from "@/types/classroom"
 import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
+import { repairOrgDefaults } from "./orgChecks"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -874,19 +875,6 @@ type InitStepStatus =
   | "warning"
   | "error"
   | "skipped"
-
-async function updateOrgClassroomSafetyDefaults(
-  client: GitHubClient,
-  org: string,
-) {
-  return client.request(`/orgs/${org}`, {
-    method: "PATCH",
-    body: {
-      default_repository_permission: "none",
-      members_can_create_public_repositories: false,
-    },
-  })
-}
 
 export async function createOrgRepo(client: GitHubClient, org: string) {
   return client.request(`/orgs/${org}/repos`, {
@@ -1970,10 +1958,12 @@ function stepFailed(result: unknown): boolean {
 export async function initClassroom50({
   client,
   org,
+  plan,
   onStepUpdate,
 }: {
   client: GitHubClient
   org: string
+  plan?: string
   serviceToken?: string
   serviceAccountConfirmed: boolean
   onStepUpdate: (update: InitStepUpdate) => void
@@ -1991,7 +1981,13 @@ export async function initClassroom50({
   results.orgDefaults = await tryStep({
     id: "orgDefaults",
     onStepUpdate,
-    fn: () => updateOrgClassroomSafetyDefaults(client, org),
+    fn: async () => {
+      const result = await repairOrgDefaults(client, org, plan)
+      if (!result.ok || result.transient) {
+        return { status: "warning" as const, message: result.message }
+      }
+      return { status: "complete" as const, message: result.message }
+    },
     options: { warningCodes: [403, 422] },
   })
 
