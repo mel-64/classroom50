@@ -159,4 +159,19 @@ describe("removeMemberFromOrg (#76)", () => {
     expect(unenrollMock).not.toHaveBeenCalled()
     expect(removeOrgMembershipMock).not.toHaveBeenCalled()
   })
+
+  it("fails closed when the viewer can't be resolved (no self-lockout)", async () => {
+    getAuthenticatedUserMock.mockReset().mockRejectedValue(new Error("401"))
+    unenrollMock.mockReset()
+    removeOrgMembershipMock.mockReset()
+
+    await expect(
+      removeMemberFromOrg(client, {
+        org: "acme",
+        row: row({ classrooms: [access("cs101")] }),
+      }),
+    ).rejects.toThrow(/verify your account/i)
+    expect(unenrollMock).not.toHaveBeenCalled()
+    expect(removeOrgMembershipMock).not.toHaveBeenCalled()
+  })
 })

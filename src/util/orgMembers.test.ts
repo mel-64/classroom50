@@ -132,6 +132,21 @@ describe("aggregateOrgMembers (#76)", () => {
     expect(rows[0].github_id).toBe("42")
   })
 
+  it("matches a STALE-github_id roster row to a member by login and prefers the live id", () => {
+    // CSV carries a stale/wrong github_id ("999") that no longer matches any
+    // member, but the username still matches a live member. The row must be
+    // classified member-on-roster, not duplicated, and surface the LIVE id (42)
+    // rather than the stale one so id-keyed display/actions don't use "999".
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [roster("cs101", [student({ username: "alice", github_id: "999" })])],
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].classification).toBe("member-on-roster")
+    expect(rows[0].isMember).toBe(true)
+    expect(rows[0].github_id).toBe("42")
+  })
+
   it("sorts discrepancies before members", () => {
     const rows = aggregateOrgMembers(
       [member(42, "alice")],

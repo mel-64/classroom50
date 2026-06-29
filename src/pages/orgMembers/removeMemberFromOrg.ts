@@ -44,9 +44,16 @@ export async function removeMemberFromOrg(
   // Defense-in-depth self-guard: the Members page hides this action for the
   // signed-in viewer, but that guard is UI-only and depends on the viewer query
   // being loaded. Re-resolve the viewer server-side and refuse to remove the
-  // acting account from the org (an org-wide DELETE that could lock the teacher
-  // out), mirroring unenrollStudent's self-guard.
+  // acting account from the org. This guards an org-wide DELETE that is
+  // effectively irreversible from the app, so it fails CLOSED: if the viewer
+  // can't be resolved we refuse rather than risk a self-lockout. (unenrollStudent
+  // can fail open since it's classroom-scoped and reversible; this can't.)
   const viewer = await getAuthenticatedUser(client).catch(() => null)
+  if (!viewer) {
+    throw new Error(
+      "Couldn't verify your account, so the member wasn't removed. Please try again.",
+    )
+  }
   if (
     isSameGitHubUser(viewer, {
       github_id: row.github_id,

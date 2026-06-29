@@ -129,9 +129,9 @@ export function aggregateOrgMembers(
     rows.push({
       key: acc.key,
       username: acc.username,
-      // Backfill the immutable id from the member match when the roster row
-      // lacked one, so downstream actions (invite by id) still work.
-      github_id: acc.github_id || matchedId,
+      // Prefer the resolved live member id over a roster id: a stale CSV id that
+      // matched a member only by login would otherwise be displayed/used.
+      github_id: matchedId || acc.github_id,
       name: acc.name,
       email: acc.email,
       isMember,
