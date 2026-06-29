@@ -187,10 +187,9 @@ type UnretryableDisposition = "rethrow" | "permanent" | null
 // can't drift in their backoff/retry behavior.
 async function withDeleteRetry(
   deleteFn: () => Promise<void>,
-  classifyUnretryable: (err: GitHubAPIError) => Exclude<
-    UnretryableDisposition,
-    null
-  > | null,
+  classifyUnretryable: (
+    err: GitHubAPIError,
+  ) => Exclude<UnretryableDisposition, null> | null,
 ): Promise<DeleteOutcome> {
   let lastWasRateLimit = false
   for (let attempt = 0; attempt < MAX_DELETE_ATTEMPTS; attempt++) {

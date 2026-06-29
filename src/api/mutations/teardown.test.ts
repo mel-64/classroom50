@@ -445,7 +445,9 @@ describe("executeTeardown", () => {
     const { client, teamDeletes } = makeClient({
       markerExists: true,
       repos: ["classroom50"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
     })
     const plan = await planTeardown(client, "acme")
     const result = await executeTeardown(client, plan)
@@ -457,7 +459,9 @@ describe("executeTeardown", () => {
     const { client } = makeClient({
       markerExists: true,
       repos: ["classroom50"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
       failTeams: { "classroom50-cs101": "not-found" },
     })
     const plan = await planTeardown(client, "acme")
@@ -473,7 +477,9 @@ describe("executeTeardown", () => {
     const { client, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50", "cs101-hw1-alice"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
       failTeams: { "classroom50-cs101": "server" },
     })
     const plan = await planTeardown(client, "acme")
@@ -495,7 +501,9 @@ describe("executeTeardown", () => {
     const { client, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50", "cs101-hw1-alice"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
       failTeams: { "classroom50-cs101": "rate-limit" },
     })
     const plan = await planTeardown(client, "acme")
@@ -538,7 +546,9 @@ describe("executeTeardown", () => {
     const { client, teamDeletes, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
       teamIdMismatch: { "classroom50-cs101": 999 },
     })
     const plan = await planTeardown(client, "acme")
@@ -555,7 +565,9 @@ describe("executeTeardown", () => {
     const { client, teamDeletes } = makeClient({
       markerExists: true,
       repos: ["classroom50", "cs101-hw1-alice"],
-      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
       deleteForbidden: true,
     })
     const plan = await planTeardown(client, "acme")

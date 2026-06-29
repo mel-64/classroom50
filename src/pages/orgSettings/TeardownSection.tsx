@@ -61,10 +61,7 @@ const TeardownSection = ({ org }: { org: string }) => {
         setDone(null)
       } else {
         setDone(
-          formatTeardownResult(
-            result,
-            `https://github.com/orgs/${org}/teams`,
-          ),
+          formatTeardownResult(result, `https://github.com/orgs/${org}/teams`),
         )
       }
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
@@ -138,8 +135,8 @@ const TeardownSection = ({ org }: { org: string }) => {
               <code>classroom50</code> config repo (deleted last)
               {plan && plan.teams.length > 0 ? (
                 <>
-                  , and remove{" "}
-                  <strong>{plan.teams.length}</strong> classroom team
+                  , and remove <strong>{plan.teams.length}</strong> classroom
+                  team
                   {plan.teams.length === 1 ? "" : "s"}
                 </>
               ) : null}
