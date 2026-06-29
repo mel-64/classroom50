@@ -5,6 +5,8 @@ import {
   enrollStudentInClassroom,
   inviteStudentByEmail,
   markStudentEnrolledWithConflictRetry,
+  matchStudentToAccountWithConflictRetry,
+  reconcileOnboarding,
   unenrollStudent,
   updateStudent,
   updateStudentWithConflictRetry,
@@ -402,7 +404,7 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     expect(row?.last_name).toBe("Typed")
   })
 
-  it("422 + email NOT in any other roster -> stub removed + warning", async () => {
+  it("422 + email NOT in any other roster -> row PERSISTS for manual matching + warning", async () => {
     const { client, rosters } = makeEmailClient({
       rosters: { cs101: HEADER, cs202: HEADER },
       inviteSucceeds: false, // already a member -> 422
@@ -415,8 +417,13 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     })
 
     expect(result.inviteWarning).toMatch(/already belongs to a member/i)
+    expect(result.inviteWarning).toMatch(/match account|remove the row/i)
+    // The invited email row is KEPT so the teacher can match or delete it.
     const rows = rowsFromCsv(rosters.cs101)
-    expect(rows.find((r) => r.email === "ghost@x.edu")).toBeUndefined()
+    const ghost = rows.find((r) => r.email === "ghost@x.edu")
+    expect(ghost).toBeTruthy()
+    expect(ghost?.enrollment_status).toBe("invited")
+    expect(ghost?.username).toBe("")
   })
 })
 
@@ -1165,5 +1172,355 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal (#7
     // Self: invite NOT cancelled, and a warning explains why.
     expect(orgMembershipDeletes).toHaveLength(0)
     expect(result.teamWarning).toMatch(/signed-in account/i)
+  })
+})
+
+// Onboarding-bypass reconcile: a student who accepts the org invite directly
+// never creates an onboarding repo. The membership pass auto-enrolls rows that
+// carry a github_id/username and are active members; the email pass routes
+// accepted-but-unidentifiable email rows to needsMatch.
+describe("reconcileOnboarding — onboarding-bypass (joined org directly)", () => {
+  type ReconcileRosters = Record<string, string>
+
+  const makeReconcileClient = (opts: {
+    rosters: ReconcileRosters
+    // username (lowercased) -> membership state
+    memberships?: Record<string, "active" | "pending" | null>
+    // pending invitation emails (lowercased)
+    pendingInviteEmails?: string[]
+    cleanupMode?: string
+  }) => {
+    const rosters = { ...opts.rosters }
+    const memberships = opts.memberships ?? {}
+    const pendingInviteEmails = (opts.pendingInviteEmails ?? []).map((e) =>
+      e.toLowerCase(),
+    )
+    const cleanupMode = opts.cleanupMode ?? "keep"
+
+    const csvResponse = (csv: string) => ({
+      type: "file" as const,
+      encoding: "base64" as const,
+      content: Buffer.from(csv, "utf-8").toString("base64"),
+    })
+
+    const classroomOf = (path: string) => {
+      const m = path.match(/\/contents\/([^/]+)\/students\.csv/)
+      return m ? decodeURIComponent(m[1]) : null
+    }
+    const usernameFromMembership = (path: string) => {
+      const m = path.match(/\/memberships\/([^/?]+)/)
+      return m ? decodeURIComponent(m[1]).toLowerCase() : null
+    }
+
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (/\/contents\/(\?|$)/.test(path) || path.endsWith("/contents/")) {
+        const dirs = Object.keys(rosters).map((name) => ({
+          type: "dir",
+          name,
+          path: name,
+        }))
+        return Promise.resolve(JSON.stringify(dirs))
+      }
+      if (path.includes("classroom.json")) {
+        return Promise.resolve(
+          JSON.stringify({ short_name: "x", onboarding_cleanup: cleanupMode }),
+        )
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/") && path.includes("students.csv")) {
+          const cls = classroomOf(path)
+          return Promise.resolve(csvResponse((cls && rosters[cls]) ?? HEADER))
+        }
+        // Onboarding repo listing (none in these tests).
+        if (path.includes("/repos?")) {
+          return Promise.resolve([])
+        }
+        // Pending org invitations.
+        if (path.includes("/invitations")) {
+          return Promise.resolve(
+            pendingInviteEmails.map((email, i) => ({
+              id: i + 1,
+              login: null,
+              email,
+              role: "direct_member",
+              created_at: "2026-01-01T00:00:00Z",
+              failed_at: null,
+              failed_reason: null,
+            })),
+          )
+        }
+        if (path.includes("/memberships/") && !path.includes("/teams/")) {
+          const u = usernameFromMembership(path)
+          const state = u ? memberships[u] : null
+          if (!state) return Promise.reject(new Error("404 not a member"))
+          return Promise.resolve({ state })
+        }
+        if (path.includes("/teams/")) {
+          return Promise.resolve({ slug: "classroom50-cs101", id: 7 })
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        if (path.endsWith("/git/trees")) {
+          const tree = (
+            options?.body as { tree?: { path: string; content?: string }[] }
+          )?.tree
+          const entry = tree?.find((t) => t.path.includes("students.csv"))
+          if (entry?.content) {
+            const m = entry.path.match(/^([^/]+)\/students\.csv/)
+            if (m) rosters[m[1]] = entry.content
+          }
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          return Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      rosters,
+    }
+  }
+
+  it("auto-enrolls a github_id/username row whose member is active (no repo)", async () => {
+    const invited =
+      "alice,Alice,A,alice@x.edu,,42,invited,github,,tok-1,2026-01-01T00:00:00Z,\n"
+    const { client, rosters } = makeReconcileClient({
+      rosters: { cs101: HEADER + invited },
+      memberships: { alice: "active" },
+    })
+
+    const result = await reconcileOnboarding(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.reconciled).toEqual([
+      { email: "alice@x.edu", username: "alice" },
+    ])
+    const alice = rowsFromCsv(rosters.cs101).find((r) => r.username === "alice")
+    expect(alice?.enrollment_status).toBe("enrolled")
+    expect(alice?.enrolled_at).toBeTruthy()
+  })
+
+  it("leaves a github_id row pending when the member is not active", async () => {
+    const invited =
+      "bob,Bob,B,bob@x.edu,,43,invited,github,,tok-2,2026-01-01T00:00:00Z,\n"
+    const { client, rosters } = makeReconcileClient({
+      rosters: { cs101: HEADER + invited },
+      memberships: { bob: "pending" },
+    })
+
+    const result = await reconcileOnboarding(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.reconciled).toHaveLength(0)
+    expect(result.pending).toContain("bob@x.edu")
+    const bob = rowsFromCsv(rosters.cs101).find((r) => r.username === "bob")
+    expect(bob?.enrollment_status).toBe("invited")
+  })
+
+  it("routes an accepted email-only row with no recoverable identity to needsMatch", async () => {
+    const carolHash = await emailHash("carol@x.edu")
+    const emailOnly = `,,,carol@x.edu,,,invited,email,${carolHash},tok-3,2026-01-01T00:00:00Z,\n`
+    const { client } = makeReconcileClient({
+      rosters: { cs101: HEADER + emailOnly },
+      // No pending invite for carol -> accepted. No other roster to resolve from.
+      pendingInviteEmails: [],
+    })
+
+    const result = await reconcileOnboarding(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.needsMatch).toEqual([{ email: "carol@x.edu" }])
+    expect(result.pending).not.toContain("carol@x.edu")
+  })
+
+  it("leaves an email-only row pending while its invite is still pending", async () => {
+    const daveHash = await emailHash("dave@x.edu")
+    const emailOnly = `,,,dave@x.edu,,,invited,email,${daveHash},tok-4,2026-01-01T00:00:00Z,\n`
+    const { client } = makeReconcileClient({
+      rosters: { cs101: HEADER + emailOnly },
+      pendingInviteEmails: ["dave@x.edu"],
+    })
+
+    const result = await reconcileOnboarding(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.needsMatch).toHaveLength(0)
+    expect(result.pending).toContain("dave@x.edu")
+  })
+
+  it("cross-roster resolves an accepted email-only row to an active member and enrolls", async () => {
+    const hash = await emailHash("erin@x.edu")
+    const emailOnly = `,,,erin@x.edu,,,invited,email,${hash},tok-5,2026-01-01T00:00:00Z,\n`
+    const otherEnrolled = `erin,Erin,E,erin@x.edu,,55,enrolled,github,${hash},,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n`
+    const { client, rosters } = makeReconcileClient({
+      rosters: { cs101: HEADER + emailOnly, cs202: HEADER + otherEnrolled },
+      pendingInviteEmails: [],
+      memberships: { erin: "active" },
+    })
+
+    const result = await reconcileOnboarding(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.needsMatch).toHaveLength(0)
+    expect(result.reconciled).toEqual([
+      { email: "erin@x.edu", username: "erin" },
+    ])
+    const erin = rowsFromCsv(rosters.cs101).find(
+      (r) => r.email === "erin@x.edu",
+    )
+    expect(erin?.username).toBe("erin")
+    expect(erin?.github_id).toBe("55")
+    expect(erin?.enrollment_status).toBe("enrolled")
+  })
+})
+
+describe("matchStudentToAccountWithConflictRetry — teacher manual match (email path)", () => {
+  const makeMatchClient = (opts: {
+    startingCsv: string
+    membershipState?: "active" | "pending" | null
+  }) => {
+    const committed: { content: string | null } = { content: null }
+    const membershipState =
+      "membershipState" in opts ? opts.membershipState : "active"
+
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/") && path.includes("students.csv")) {
+          const csv = committed.content ?? opts.startingCsv
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(csv, "utf-8").toString("base64"),
+          })
+        }
+        if (path.includes("/memberships/") && !path.includes("/teams/")) {
+          if (membershipState === null)
+            return Promise.reject(new Error("404 not a member"))
+          return Promise.resolve({ state: membershipState })
+        }
+        if (path.includes("/teams/")) {
+          return Promise.resolve({ slug: "classroom50-cs101", id: 7 })
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        if (path.endsWith("/git/trees")) {
+          const tree = (
+            options?.body as { tree?: { path: string; content?: string }[] }
+          )?.tree
+          const entry = tree?.find((t) => t.path.includes("students.csv"))
+          if (entry?.content) committed.content = entry.content
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          return Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      committed,
+    }
+  }
+
+  const emailOnlyRow =
+    ",,,frank@x.edu,,,invited,email,,tok-6,2026-01-01T00:00:00Z,\n"
+
+  it("writes the picked identity + enrolled for an active member", async () => {
+    const { client, committed } = makeMatchClient({
+      startingCsv: HEADER + emailOnlyRow,
+      membershipState: "active",
+    })
+
+    const result = await matchStudentToAccountWithConflictRetry(client, {
+      org: "acme",
+      classroom: "cs101",
+      email: "frank@x.edu",
+      username: "frankgh",
+      github_id: "66",
+    })
+
+    expect(result.alreadyEnrolled).toBe(false)
+    const frank = rowsFromCsv(committed.content!).find(
+      (r) => r.email === "frank@x.edu",
+    )
+    expect(frank?.username).toBe("frankgh")
+    expect(frank?.github_id).toBe("66")
+    expect(frank?.enrollment_status).toBe("enrolled")
+    expect(frank?.enrolled_at).toBeTruthy()
+  })
+
+  it("refuses to match a non-active account (guard throws, no write)", async () => {
+    const { client, committed } = makeMatchClient({
+      startingCsv: HEADER + emailOnlyRow,
+      membershipState: null,
+    })
+
+    await expect(
+      matchStudentToAccountWithConflictRetry(client, {
+        org: "acme",
+        classroom: "cs101",
+        email: "frank@x.edu",
+        username: "frankgh",
+        github_id: "66",
+      }),
+    ).rejects.toThrow(/not an active member/i)
+    expect(committed.content).toBeNull()
+  })
+
+  it("throws when no unmatched row exists for the email", async () => {
+    const { client } = makeMatchClient({
+      startingCsv: HEADER,
+      membershipState: "active",
+    })
+
+    await expect(
+      matchStudentToAccountWithConflictRetry(client, {
+        org: "acme",
+        classroom: "cs101",
+        email: "ghost@x.edu",
+        username: "ghostgh",
+        github_id: "0",
+      }),
+    ).rejects.toThrow(/no unmatched roster row/i)
   })
 })

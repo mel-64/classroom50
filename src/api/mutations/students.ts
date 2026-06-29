@@ -21,6 +21,7 @@ import {
 } from "./classrooms"
 import {
   getFileCommitAuthorIds,
+  getOrgInvitations,
   getRawFile,
   getRepoFile,
   getUser,
@@ -37,6 +38,7 @@ import {
   generateInviteToken,
   isReconcilableRow,
   isValidInviteToken,
+  normalizeEmail,
   onboardingRepoPrefixForGithubId,
   ONBOARDING_YAML_PATH,
   rowMatchesEmailHash,
@@ -530,39 +532,6 @@ async function enrollEmailRowWithResolvedIdentity(
   })
 }
 
-// Remove an email-only row (matched by email) — undoes a stub when the email is
-// an org member we couldn't identify, so it isn't left stuck in "Awaiting".
-async function removeEmailRowWithRetry(
-  client: GitHubClient,
-  input: { org: string; classroom: string; email: string },
-) {
-  return withGitConflictRetry(async () => {
-    const { org, classroom } = input
-    const ref = await getBranchRef(client, org)
-    const commit = await getCommit(client, org, ref.object.sha)
-    const studentsFilePath = `${classroom}/students.csv`
-    const currentCsv = await getRawFile(client, {
-      org,
-      path: studentsFilePath,
-      ref: ref.object.sha,
-    })
-    const currentStudents = parseStudentsCsv(currentCsv)
-    const emailKey = input.email.trim().toLowerCase()
-    const nextStudents = currentStudents.filter(
-      (row) => !(row.email.toLowerCase() === emailKey && !row.username),
-    )
-    const nextCsv = stringifyStudentsCsv(nextStudents)
-    await commitStudentsCsv(client, {
-      org,
-      classroom,
-      baseTreeSha: commit.tree.sha,
-      parentSha: ref.object.sha,
-      content: nextCsv,
-      message: `Remove unresolved email invite: ${classroom}/${input.email}`,
-    })
-  })
-}
-
 // Commit a new students.csv content in one tree+commit+ref update.
 async function commitStudentsCsv(
   client: GitHubClient,
@@ -674,21 +643,19 @@ export async function inviteStudentByEmail(
           // Fall through to the generic warning below (row stays as a stub).
         }
       } else if (!resolved) {
-        // Member but unidentifiable from any roster — drop the stub and warn.
-        await removeEmailRowWithRetry(client, {
-          org: input.org,
-          classroom: input.classroom,
-          email: result.student.email,
-        }).catch((removeErr) =>
-          console.error("failed to remove unresolved email stub:", removeErr),
-        )
+        // Member but unidentifiable from any roster. Keep the invited email row
+        // (don't drop it): the student is in the org without onboarding, and the
+        // email->login link is unrecoverable post-accept, so the teacher must
+        // complete the match by hand (the "Match account" affordance) or delete
+        // the row from this classroom's roster. Reconcile surfaces it as
+        // needsMatch.
         return {
           ...result,
           inviteWarning:
             `${result.student.email} already belongs to a member of the ${input.org} ` +
-            `organization, so no invite was sent and they were not added to this ` +
-            `classroom (we couldn't match the email to a student in your other ` +
-            `classrooms). Add them by their GitHub username instead.`,
+            `organization, so no invite was sent. They were kept on this classroom's ` +
+            `roster as a pending match — use "Match account" to link their GitHub ` +
+            `account, or remove the row if you can't identify them.`,
         }
       }
     }
@@ -717,6 +684,12 @@ export type ReconcileOnboardingResult = {
   // Verified self-reports matching no roster row (e.g. joined via raw org link).
   // Reported for teacher awareness; no automatic roster add.
   needsAttention: { github_id: string; login: string }[]
+  // Email-invited rows whose invite was accepted (so the student joined the org
+  // directly, no onboarding repo) but whose GitHub identity can't be recovered
+  // — GitHub drops the email->login link once an invitation is accepted. The
+  // teacher must complete the match by hand (pick the account) or remove the
+  // unidentifiable person from the org.
+  needsMatch: { email: string }[]
   // Onboarding repos archived after a successful reconcile.
   archived: string[]
   // Onboarding repos deleted after a successful reconcile.
@@ -745,6 +718,7 @@ export async function reconcileOnboarding(
     pending: [],
     unmatched: [],
     needsAttention: [],
+    needsMatch: [],
     archived: [],
     deleted: [],
   }
@@ -796,7 +770,7 @@ export async function reconcileOnboarding(
     email: string
     first_name: string
     last_name: string
-    matchBy: "token" | "github_id" | "email"
+    matchBy: "token" | "github_id" | "email" | "username"
     matchValue: string
   }
   const resolved: Resolved[] = []
@@ -991,11 +965,170 @@ export async function reconcileOnboarding(
     })
   }
 
+  // Membership pass: a row that carries a GitHub identity (github_id/username)
+  // but never produced a self-report repo is the "joined the org directly"
+  // case (accepting the org invite activates org + team membership via team_ids,
+  // bypassing onboarding). If that account is an ACTIVE org member, bind it now
+  // — github_id is GitHub-attested and an active membership re-check is the same
+  // trust model as markStudentEnrolled (#65), so this is safe to auto-enroll
+  // without a self-report. Bounded-parallel; only rows with a username can be
+  // membership-checked (the GitHub endpoint is keyed by username).
+  const membershipCandidates = targets.filter(
+    (row) => !claimedRows.has(row) && Boolean(row.username.trim()),
+  )
+  const membershipChecks = await mapWithConcurrency(
+    membershipCandidates,
+    ONBOARDING_READ_CONCURRENCY,
+    async (row) => {
+      try {
+        const state = await getOrgMembershipState(
+          client,
+          org,
+          row.username.trim(),
+        )
+        return { row, active: state === "active" }
+      } catch {
+        // Transient failure: leave the row pending; a later reconcile retries.
+        return { row, active: false }
+      }
+    },
+  )
+  for (const { row, active } of membershipChecks) {
+    if (!active || claimedRows.has(row)) continue
+    const githubId = row.github_id.trim()
+    // A github_id lets the commit phase re-bind by the immutable key; without
+    // one, fall back to the username (recorded via matchBy "username").
+    const matchBy: Resolved["matchBy"] = githubId ? "github_id" : "username"
+    const matchValue = githubId || row.username.trim().toLowerCase()
+    if (githubId && claimedGithubIds.has(githubId)) continue
+    if (githubId) claimedGithubIds.add(githubId)
+    claimedRows.add(row)
+    resolved.push({
+      repo: "",
+      username: row.username,
+      github_id: githubId,
+      email: row.email,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      matchBy,
+      matchValue,
+    })
+    result.reconciled.push({
+      email: row.email || row.username,
+      username: row.username,
+    })
+  }
+
+  // Email-invite pass: rows with no GitHub identity (email-only) that the
+  // membership pass couldn't bind. The student may have accepted the org invite
+  // directly (no onboarding repo). GitHub drops the email->login link once an
+  // invitation is accepted, so we can't auto-bind from the email alone. Three
+  // outcomes per row:
+  //   1. Invite still PENDING -> genuinely awaiting acceptance -> pending.
+  //   2. Accepted/expired + the email resolves to an ACTIVE member via the
+  //      teacher's OTHER rosters (cross-roster identity) -> auto-enroll.
+  //   3. Otherwise -> needsMatch: the teacher completes the match by hand.
+  const emailOnlyRows = targets.filter(
+    (row) =>
+      !claimedRows.has(row) &&
+      !row.github_id.trim() &&
+      !row.username.trim() &&
+      Boolean(row.email.trim()),
+  )
+  if (emailOnlyRows.length > 0) {
+    // Pending invitations are owner-only; a non-owner read 403s. Fail SAFE: if
+    // we can't tell whether an invite is still pending, treat every email row as
+    // pending (never auto-enroll or push to needsMatch on a blind read), so a
+    // permission/transient failure can't strand or mis-resolve a row.
+    const pendingInviteEmails: Set<string> | null = await getOrgInvitations(
+      client,
+      org,
+    )
+      .then(
+        (invitations) =>
+          new Set(
+            invitations
+              .map((inv) => (inv.email ? normalizeEmail(inv.email) : undefined))
+              .filter((email): email is string => Boolean(email)),
+          ),
+      )
+      .catch(() => null)
+
+    for (const row of emailOnlyRows) {
+      const emailLower = normalizeEmail(row.email)
+      if (pendingInviteEmails === null) {
+        result.pending.push(row.email || row.username)
+        continue
+      }
+      if (pendingInviteEmails.has(emailLower)) {
+        // Still awaiting acceptance.
+        result.pending.push(row.email || row.username)
+        continue
+      }
+
+      // Accepted (or expired): try to recover the identity from the teacher's
+      // other rosters, then confirm it's an active member before binding.
+      const resolvedIdentity = await resolveStudentIdentityByEmail(
+        client,
+        org,
+        row.email,
+        classroom,
+        headRef.object.sha,
+      ).catch(() => null)
+      let active = false
+      if (resolvedIdentity?.username) {
+        try {
+          active =
+            (await getOrgMembershipState(
+              client,
+              org,
+              resolvedIdentity.username,
+            )) === "active"
+        } catch {
+          active = false
+        }
+      }
+
+      if (resolvedIdentity && active) {
+        const githubId = resolvedIdentity.github_id.trim()
+        if (githubId && claimedGithubIds.has(githubId)) {
+          // Another row already bound this account; surface for the teacher.
+          result.needsMatch.push({ email: row.email })
+          continue
+        }
+        if (githubId) claimedGithubIds.add(githubId)
+        claimedRows.add(row)
+        resolved.push({
+          repo: "",
+          username: resolvedIdentity.username,
+          github_id: githubId,
+          email: row.email,
+          first_name: row.first_name || resolvedIdentity.first_name,
+          last_name: row.last_name || resolvedIdentity.last_name,
+          // Re-bind by the row's email key in the commit phase (the row stays
+          // email-keyed until this commit writes the resolved username).
+          matchBy: "email",
+          matchValue: row.email_hash || (await emailHash(row.email)),
+        })
+        result.reconciled.push({
+          email: row.email,
+          username: resolvedIdentity.username,
+        })
+        continue
+      }
+
+      // Accepted but unidentifiable: the teacher must complete the match.
+      result.needsMatch.push({ email: row.email })
+    }
+  }
+
   // Reconcilable rows with no matching self-report this run = not onboarded yet.
   // claimedRows holds exactly the target rows bound during the resolve phase, so
   // membership is the authoritative "resolved" test (no re-matching/re-hashing).
+  // needsMatch rows are surfaced for manual matching, not counted as pending.
+  const needsMatchEmails = new Set(result.needsMatch.map((m) => m.email))
   for (const row of targets) {
-    if (!claimedRows.has(row)) {
+    if (!claimedRows.has(row) && !needsMatchEmails.has(row.email)) {
       result.pending.push(row.email || row.username)
     }
   }
@@ -1021,6 +1154,8 @@ export async function reconcileOnboarding(
   ): Promise<string | undefined> => {
     if (matchBy === "token") return row.invite_token || undefined
     if (matchBy === "github_id") return row.github_id || undefined
+    if (matchBy === "username")
+      return row.username ? row.username.trim().toLowerCase() : undefined
     return (
       row.email_hash || (row.email ? await emailHash(row.email) : undefined)
     )
@@ -1149,7 +1284,10 @@ export async function reconcileOnboarding(
   // redundant duplicate repos. A repo whose write didn't land, or whose row was
   // already enrolled, is never touched. Mode is per-classroom (default
   // "delete"); failures non-fatal. Never touch unmatched/pending.
-  const reposToCleanup = [...committed.map((c) => c.repo), ...redundantRepos]
+  const reposToCleanup = [
+    ...committed.map((c) => c.repo),
+    ...redundantRepos,
+  ].filter((repo) => repo.length > 0)
   if (cleanupMode !== "keep" && reposToCleanup.length > 0) {
     let deleteScopeMissing = false
 
@@ -1416,6 +1554,130 @@ export async function markStudentEnrolledWithConflictRetry(
     console.error("team add failed (mark enrolled):", err)
     teamWarning =
       `${result.student.username} was marked enrolled, but adding them to the ` +
+      `classroom team failed; they won't have read on private templates until ` +
+      `it's retried.`
+  }
+
+  return { ...result, teamWarning }
+}
+
+export type MatchStudentToAccountInput = {
+  org: string
+  classroom: string
+  // The email-only row's email (its only identifier).
+  email: string
+  // The GitHub account the teacher picked for this row.
+  username: string
+  github_id: string
+}
+
+// Teacher-initiated manual match for an email-invited row whose student joined
+// the org directly (no onboarding repo) and whose identity GitHub no longer
+// exposes (the email->login link is dropped once an invite is accepted). The
+// teacher selects which org/team member owns the email; this writes that
+// identity onto the email-keyed row and enrolls it. Re-verifies the chosen
+// account is an ACTIVE member before binding (same #65/#50 trust model as
+// markStudentEnrolled), so a wrong/stale pick can't bind a non-member.
+async function matchStudentToAccount(
+  client: GitHubClient,
+  input: MatchStudentToAccountInput,
+) {
+  const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const normalizedUsername = input.username.trim()
+  const normalizedEmail = input.email.trim()
+  if (!normalizedUsername) {
+    throw new Error("A GitHub account is required to complete the match.")
+  }
+  if (!normalizedEmail) {
+    throw new Error("The roster row has no email to match against.")
+  }
+
+  // Authoritative member re-check — only an active member can be bound.
+  const state = await getOrgMembershipState(client, org, normalizedUsername)
+  if (state !== "active") {
+    throw new Error(
+      `${normalizedUsername} is not an active member of the ${org} organization, so they can't be matched.`,
+    )
+  }
+
+  const ref = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, ref.object.sha)
+  const studentsFilePath = `${classroom}/students.csv`
+  const currentStudents = parseStudentsCsv(
+    await getRawFile(client, {
+      org,
+      path: studentsFilePath,
+      ref: ref.object.sha,
+    }),
+  )
+
+  const emailKey = normalizeEmail(normalizedEmail)
+  // Target the email-only row (no username yet) — the same predicate the
+  // email-resolution path uses, so we never re-key a row that already has an
+  // identity.
+  const isTarget = (row: StudentCsvRow) =>
+    normalizeEmail(row.email) === emailKey && !row.username.trim()
+  const target = currentStudents.find(isTarget)
+  if (!target) {
+    throw new Error(
+      `No unmatched roster row found for ${normalizedEmail}; it may already be matched.`,
+    )
+  }
+
+  if (target.enrollment_status === "enrolled") {
+    return { alreadyEnrolled: true, student: target }
+  }
+
+  const now = new Date().toISOString()
+  const matchedRow = normalizeStudentRow({
+    ...target,
+    username: normalizedUsername,
+    github_id: input.github_id.trim(),
+    enrollment_status: "enrolled",
+    enrolled_at: now,
+  })
+  const nextStudents = currentStudents.map((row) =>
+    isTarget(row) ? matchedRow : row,
+  )
+
+  await commitStudentsCsv(client, {
+    org,
+    classroom,
+    baseTreeSha: commit.tree.sha,
+    parentSha: ref.object.sha,
+    content: stringifyStudentsCsv(nextStudents),
+    message: `Match student to account: ${classroom}/${normalizedUsername}`,
+  })
+
+  return { alreadyEnrolled: false, student: matchedRow }
+}
+
+export async function matchStudentToAccountWithConflictRetry(
+  client: GitHubClient,
+  input: MatchStudentToAccountInput,
+) {
+  const result = await withGitConflictRetry(() =>
+    matchStudentToAccount(client, input),
+  )
+
+  // Best-effort: ensure the matched member is on the classroom team. Non-fatal.
+  let teamWarning: string | undefined
+  try {
+    const team = await resolveClassroomTeam(client, input.org, input.classroom)
+    if (team.slug) {
+      await addUserToTeam(client, {
+        org: input.org,
+        teamSlug: team.slug,
+        username: result.student.username,
+        role: "member",
+      })
+    }
+  } catch (err) {
+    console.error("team add failed (match account):", err)
+    teamWarning =
+      `${result.student.username} was matched, but adding them to the ` +
       `classroom team failed; they won't have read on private templates until ` +
       `it's retried.`
   }

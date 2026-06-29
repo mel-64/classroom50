@@ -25,6 +25,7 @@ import {
   reconcileOnboarding,
   unenrollStudent,
   markStudentEnrolledWithConflictRetry,
+  matchStudentToAccountWithConflictRetry,
 } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
@@ -46,8 +47,10 @@ import {
   studentKey,
   toStudent,
 } from "@/util/roster"
+import { unmatchedTeamMembers, type MatchCandidate } from "@/util/orgMembers"
 import EditStudent from "@/pages/students/EditStudent"
 import type { StudentCsvRow } from "@/api/mutations/students"
+import { Link2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 const EditStudentButton = ({
@@ -423,6 +426,244 @@ const OnboardingLink = ({
   )
 }
 
+// Manual-match affordance for an email-invited row whose student joined the org
+// directly (accepted the GitHub invite, so no onboarding repo) and whose GitHub
+// identity GitHub no longer exposes (the email->login link is dropped once an
+// invite is accepted). The teacher picks which unmatched team member owns the
+// email; matchStudentToAccount re-verifies the pick is an active member before
+// binding. Candidates are org members not already on this roster.
+const MatchAccountButton = ({
+  org,
+  classroom,
+  student,
+  candidates,
+  onMatched,
+}: {
+  org: string
+  classroom: string
+  student: Student
+  candidates: MatchCandidate[]
+  onMatched: (student: Student, teamWarning?: string) => void
+}) => {
+  const client = useGitHubClient()
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (open && !dialog.open) dialog.showModal()
+    if (!open && dialog.open) dialog.close()
+  }, [open])
+
+  const close = () => {
+    if (submitting) return
+    setOpen(false)
+    setError(null)
+    setSelected(null)
+    setFilter("")
+  }
+
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return candidates
+    return candidates.filter(
+      (c) =>
+        c.login.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
+    )
+  }, [candidates, filter])
+
+  const selectedCandidate = useMemo(
+    () => candidates.find((c) => c.github_id === selected) ?? null,
+    [candidates, selected],
+  )
+
+  const handleConfirm = async () => {
+    if (submitting || !selected) return
+    const pick = candidates.find((c) => c.github_id === selected)
+    if (!pick) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const result = await matchStudentToAccountWithConflictRetry(client, {
+        org,
+        classroom,
+        email: student.email,
+        username: pick.login,
+        github_id: pick.github_id,
+      })
+      onMatched(toStudent(result.student), result.teamWarning)
+      setOpen(false)
+      setSelected(null)
+      setFilter("")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-xs btn-primary"
+        aria-label={`Match a GitHub account to ${student.email}`}
+        title="Joined the org without onboarding — match their GitHub account"
+        onClick={() => setOpen(true)}
+      >
+        <Link2 className="size-3.5" />
+        Match account
+      </button>
+
+      <dialog
+        ref={dialogRef}
+        className="modal"
+        onClose={close}
+        onCancel={(event) => {
+          if (submitting) {
+            event.preventDefault()
+            return
+          }
+          close()
+        }}
+      >
+        <div className="modal-box max-w-lg">
+          <h3 className="text-lg font-bold">Match a GitHub account</h3>
+          <p className="mt-2 text-sm leading-6 text-base-content/70">
+            <span className="font-semibold text-base-content">
+              {student.email}
+            </span>{" "}
+            was invited by email and appears to have joined the{" "}
+            <span className="font-semibold text-base-content">{org}</span>{" "}
+            organization without onboarding, so we can&apos;t tell which GitHub
+            account is theirs. Pick the account that belongs to this student to
+            complete their enrollment.
+          </p>
+
+          {candidates.length === 0 ? (
+            <div className="mt-4 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
+              No unmatched organization members to choose from. If this student
+              hasn&apos;t accepted their invite yet, wait for them to join. To
+              remove an unidentifiable member, use the Members page in
+              organization settings.
+            </div>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={filter}
+                placeholder="Filter by username or name..."
+                aria-label="Filter accounts"
+                className="input input-sm input-bordered mt-4 w-full"
+                onChange={(e) => setFilter(e.target.value)}
+                disabled={submitting}
+              />
+              <ul className="menu mt-2 max-h-64 w-full flex-nowrap overflow-y-auto rounded-box border border-base-300 p-1">
+                {filtered.length === 0 ? (
+                  <li className="px-3 py-2 text-sm text-base-content/60">
+                    No accounts match &quot;{filter}&quot;.
+                  </li>
+                ) : (
+                  filtered.map((c) => {
+                    const isSelected = selected === c.github_id
+                    return (
+                      <li key={c.github_id}>
+                        <button
+                          type="button"
+                          className={`flex items-center justify-between gap-2${
+                            isSelected
+                              ? " active ring-2 ring-primary ring-inset"
+                              : ""
+                          }`}
+                          aria-pressed={isSelected}
+                          onClick={() => setSelected(c.github_id)}
+                          disabled={submitting}
+                        >
+                          <Avatar
+                            name={c.name || c.login}
+                            github={c.login}
+                            subtitle={`@${c.login}`}
+                            initials={
+                              (c.name || c.login)[0]?.toUpperCase() ?? "?"
+                            }
+                          />
+                          {isSelected ? (
+                            <Check className="size-4 shrink-0 text-primary" />
+                          ) : null}
+                        </button>
+                      </li>
+                    )
+                  })
+                )}
+              </ul>
+
+              {selectedCandidate ? (
+                <div className="mt-3 flex items-center gap-2 rounded-box border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                  <Check className="size-4 shrink-0 text-primary" />
+                  <span className="text-base-content/80">
+                    Selected{" "}
+                    <span className="font-semibold text-base-content">
+                      {selectedCandidate.name || selectedCandidate.login}
+                    </span>{" "}
+                    <span className="text-base-content/60">
+                      (@{selectedCandidate.login})
+                    </span>
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-base-content/50">
+                  Select an account above to enable matching.
+                </p>
+              )}
+            </>
+          )}
+
+          {error ? (
+            <div className="alert alert-error alert-soft mt-4 text-sm">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={close}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={submitting || !selected}
+              onClick={() => void handleConfirm()}
+            >
+              {submitting ? (
+                <span className="loading loading-spinner loading-sm" />
+              ) : selectedCandidate ? (
+                `Confirm match: @${selectedCandidate.login}`
+              ) : (
+                "Confirm match"
+              )}
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button type="button" onClick={close} aria-label="Close">
+            close
+          </button>
+        </form>
+      </dialog>
+    </>
+  )
+}
+
 const EnrolledStudents = ({
   students = [],
   org,
@@ -450,6 +691,13 @@ const EnrolledStudents = ({
   // Live member github_ids (cache hit — useRosterStatus already fetched them),
   // for gating the "Mark enrolled" affordance.
   const memberIds = useMemo(() => memberIdSet(members ?? []), [members])
+  // Org members not already bound to any roster row in this classroom — the
+  // candidate set for manually matching an email-invited student who joined the
+  // org directly (no onboarding repo).
+  const matchCandidates = useMemo(
+    () => unmatchedTeamMembers(members ?? [], students),
+    [members, students],
+  )
   const {
     statusByKey,
     getStatus,
@@ -535,6 +783,9 @@ const EnrolledStudents = ({
       }
       if (result.needsAttention.length > 0) {
         parts.push(`${result.needsAttention.length} need attention`)
+      }
+      if (result.needsMatch.length > 0) {
+        parts.push(`${result.needsMatch.length} need matching`)
       }
       if (result.unmatched.length > 0) {
         parts.push(`${result.unmatched.length} unmatched`)
@@ -712,6 +963,16 @@ const EnrolledStudents = ({
       status !== "removed" &&
       status !== "ready"
     const isMarking = markingUsernames.has(student.username)
+    // Show "Match account" for an email-invited row with no GitHub identity yet
+    // that isn't showing a self-report or outstanding invite — the student
+    // likely joined the org directly (no onboarding repo). The teacher binds it
+    // to an org member by hand (email->login isn't recoverable post-accept).
+    const isEmailOnly = !student.github_id.trim() && !student.username.trim()
+    const showMatchAccount =
+      statusAvailable &&
+      isEmailOnly &&
+      Boolean(student.email.trim()) &&
+      status === "onboarding"
     const invitedAtLabel =
       status === "pending" || status === "expired"
         ? formatInvitedAt(statusEntry?.invitedAt)
@@ -811,6 +1072,43 @@ const EnrolledStudents = ({
                 </>
               )}
             </button>
+          ) : null}
+
+          {showMatchAccount ? (
+            <MatchAccountButton
+              org={org}
+              classroom={classroom}
+              student={student}
+              candidates={matchCandidates}
+              onMatched={(matched, warning) => {
+                if (warning) {
+                  setWarning(matched.username || student.email, warning)
+                }
+                // Optimistically reflect the bound identity + enrolled status so
+                // the row moves out of "awaiting" immediately; a refetch
+                // reconciles the rest.
+                updateRosterCache((current) =>
+                  current.map((s) =>
+                    studentKey(s) === rowKey
+                      ? {
+                          ...s,
+                          username: matched.username,
+                          github_id: matched.github_id,
+                          enrollment_status: "enrolled" as const,
+                        }
+                      : s,
+                  ),
+                )
+                invalidateInviteQueries()
+                notify({
+                  tone: warning ? "warning" : "success",
+                  durationMs: 6000,
+                  message: warning
+                    ? warning
+                    : `Matched ${student.email} to @${matched.username}.`,
+                })
+              }}
+            />
           ) : null}
 
           <EditStudentButton

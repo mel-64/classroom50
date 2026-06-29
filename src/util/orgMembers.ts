@@ -171,3 +171,46 @@ export function aggregateOrgMembers(
 
   return rows
 }
+
+// A candidate GitHub account for a teacher to manually match to an email-only
+// roster row that joined the org directly (no onboarding repo, no recoverable
+// identity). github_id is the immutable bind key; login/name/avatar are display.
+export type MatchCandidate = {
+  github_id: string
+  login: string
+  name: string
+  avatar_url: string
+}
+
+// Live org/team members NOT already claimed by any roster row in this classroom
+// — the smallest, most accurate set for the manual-match picker. A member is
+// "claimed" when their numeric id or login appears on a roster row (by github_id
+// or username), so a teacher only sees accounts that aren't yet bound to a
+// student here. Pure for unit-testing without react-query.
+export function unmatchedTeamMembers(
+  members: GitHubUser[],
+  students: Student[],
+): MatchCandidate[] {
+  const claimedIds = new Set<string>()
+  const claimedLogins = new Set<string>()
+  for (const student of students) {
+    const id = student.github_id?.trim()
+    const login = student.username?.trim().toLowerCase()
+    if (id) claimedIds.add(id)
+    if (login) claimedLogins.add(login)
+  }
+
+  return members
+    .filter(
+      (member) =>
+        !claimedIds.has(String(member.id)) &&
+        !claimedLogins.has(member.login.toLowerCase()),
+    )
+    .map((member) => ({
+      github_id: String(member.id),
+      login: member.login,
+      name: member.name ?? "",
+      avatar_url: member.avatar_url,
+    }))
+    .sort((a, b) => a.login.localeCompare(b.login))
+}
