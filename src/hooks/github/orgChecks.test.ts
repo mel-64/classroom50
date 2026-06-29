@@ -7,6 +7,7 @@ import {
   checkOrgPrCreation,
   checkPages,
   checkReusableWorkflowAccess,
+  checkWorkflowPermissions,
 } from "./orgChecks"
 import { GitHubAPIError } from "./errors"
 import type { GitHubClient } from "./client"
@@ -204,5 +205,37 @@ describe("checkPages", () => {
   it("unenforced (not configured) on a 404", async () => {
     const client = makeClient({ "/pages": notFound() })
     expect((await checkPages(client, "acme")).state).toBe("unenforced")
+  })
+})
+
+describe("checkWorkflowPermissions", () => {
+  it("enforced when the repo default is write", async () => {
+    const client = makeClient({
+      "/repos/": { default_workflow_permissions: "write" },
+      "/orgs/": { default_workflow_permissions: "read" },
+    })
+    expect((await checkWorkflowPermissions(client, "acme")).state).toBe(
+      "enforced",
+    )
+  })
+
+  it("enforced (org-managed) when repo is read but the org restricts write", async () => {
+    const client = makeClient({
+      "/repos/": { default_workflow_permissions: "read" },
+      "/orgs/": { default_workflow_permissions: "read" },
+    })
+    const verdict = await checkWorkflowPermissions(client, "acme")
+    expect(verdict.state).toBe("enforced")
+    expect(verdict.detail).toMatch(/org policy/i)
+  })
+
+  it("unenforced when repo is read but the org allows write (fixable)", async () => {
+    const client = makeClient({
+      "/repos/": { default_workflow_permissions: "read" },
+      "/orgs/": { default_workflow_permissions: "write" },
+    })
+    expect((await checkWorkflowPermissions(client, "acme")).state).toBe(
+      "unenforced",
+    )
   })
 })

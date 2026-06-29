@@ -183,9 +183,11 @@ type RepoWorkflowPermissions = {
   default_workflow_permissions?: "read" | "write"
 }
 
-// workflowPermissions: GET /repos/{org}/{repo}/actions/permissions/workflow —
-// enforced when the default workflow permission is "write" (skeleton workflows
-// need write to push scores / open Feedback PRs).
+// workflowPermissions: GET /repos/{org}/{repo}/actions/permissions/workflow.
+// A repo "read" is acceptable when the org also restricts write — the skeleton
+// workflows declare their own workflow-level permissions, so the org default
+// doesn't block them. Only repo "read" while the org *allows* write is a
+// fixable drift.
 export async function checkWorkflowPermissions(
   client: GitHubClient,
   org: string,
@@ -195,12 +197,26 @@ export async function checkWorkflowPermissions(
     const perms = await client.request<RepoWorkflowPermissions>(
       `/repos/${org}/${repo}/actions/permissions/workflow`,
     )
-    return {
-      state:
-        perms.default_workflow_permissions === "write"
-          ? "enforced"
-          : "unenforced",
+    if (perms.default_workflow_permissions === "write") {
+      return { state: "enforced" }
     }
+
+    try {
+      const orgPerms = await client.request<RepoWorkflowPermissions>(
+        `/orgs/${org}/actions/permissions/workflow`,
+      )
+      if (orgPerms.default_workflow_permissions !== "write") {
+        return {
+          state: "enforced",
+          detail:
+            "org policy defaults workflows to read; the skeleton workflows declare their own permissions",
+        }
+      }
+    } catch {
+      // Org policy unreadable — treat the repo "read" as drift.
+    }
+
+    return { state: "unenforced" }
   } catch (err) {
     return unreadableFrom(err)
   }

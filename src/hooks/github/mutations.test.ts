@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { buildClassroomUpdate, editClassroom } from "./mutations"
+import {
+  buildClassroomUpdate,
+  editClassroom,
+  ensurePages,
+  ensureWorkflowPermissions,
+} from "./mutations"
+import { GitHubAPIError } from "./errors"
 import type { GitHubClient } from "./client"
 
 // classroom.json is a strict cross-binary contract (the Go gh-teacher CLI
@@ -185,5 +191,147 @@ describe("editClassroom archived read-only guard", () => {
       editClassroom(client, { org: "acme", slug: "cs101", name: "Renamed" }),
     ).resolves.toMatchObject({ newCommitSha: "new-commit-sha" })
     expect(blobPost).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ensurePages (the re-run/init write path) must agree with checkPages (the
+// audit read path) on the same org — they decide status from the same live
+// read-back, so a re-run can't warn about a Pages site the audit shows green.
+describe("ensurePages alignment with checkPages", () => {
+  const notFound = () =>
+    new GitHubAPIError({
+      status: 404,
+      url: "x",
+      message: "Not Found",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  const conflict = () =>
+    new GitHubAPIError({
+      status: 409,
+      url: "x",
+      message: "Conflict",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  // pagesLive is what GET /pages returns after the writes (the source of truth).
+  function makeClient(opts: {
+    enablePost?: () => Promise<unknown>
+    visibilityPut?: () => Promise<unknown>
+    pagesLive: unknown | GitHubAPIError
+  }): GitHubClient {
+    return {
+      request: <T>(path: string, options?: { method?: string }) => {
+        const method = options?.method ?? "GET"
+        if (path.endsWith("/pages") && method === "POST") {
+          return (opts.enablePost?.() ?? Promise.resolve({})) as Promise<T>
+        }
+        if (path.endsWith("/pages") && method === "PUT") {
+          return (opts.visibilityPut?.() ?? Promise.resolve({})) as Promise<T>
+        }
+        if (path.endsWith("/pages") && method === "GET") {
+          if (opts.pagesLive instanceof GitHubAPIError) {
+            return Promise.reject(opts.pagesLive) as Promise<T>
+          }
+          return Promise.resolve(opts.pagesLive) as Promise<T>
+        }
+        return Promise.reject(
+          new Error(`unexpected: ${method} ${path}`),
+        ) as Promise<T>
+      },
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+  }
+
+  it("reports complete when the site is already public, even if the visibility PUT 422s", async () => {
+    const client = makeClient({
+      enablePost: () => Promise.reject(conflict()), // already enabled
+      visibilityPut: () => Promise.reject(notFound()), // re-run PUT rejected
+      pagesLive: { build_type: "workflow", public: true }, // but live is correct
+    })
+    const result = await ensurePages(client, "acme", "classroom50")
+    expect(result.status).toBe("complete")
+    expect(result.message).toMatch(/public/i)
+  })
+
+  it("warns with an explanatory message when the site is genuinely not public", async () => {
+    const client = makeClient({
+      visibilityPut: () => Promise.reject(notFound()),
+      pagesLive: { build_type: "workflow", public: false },
+    })
+    const result = await ensurePages(client, "acme", "classroom50")
+    expect(result.status).toBe("warning")
+    expect(result.message.length).toBeGreaterThan(0)
+  })
+})
+
+// A 409 on the repo workflow-permissions PUT means write is disabled by an
+// org/enterprise policy — benign (skeleton workflows declare their own
+// permissions), so ensureWorkflowPermissions must report a managed-by-policy
+// warning, never throw a hard error.
+describe("ensureWorkflowPermissions org-policy conflict", () => {
+  function conflict() {
+    return new GitHubAPIError({
+      status: 409,
+      url: "x",
+      message:
+        "Write permissions for workflows are disabled by the organization",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+  }
+
+  function makeClient(repoReadback: { default_workflow_permissions: string }) {
+    const client: GitHubClient = {
+      request: <T>(path: string, options?: { method?: string }) => {
+        const method = options?.method ?? "GET"
+        if (path.endsWith("/actions/permissions/workflow")) {
+          if (method === "PUT") return Promise.reject(conflict()) as Promise<T>
+          return Promise.resolve(repoReadback) as Promise<T>
+        }
+        return Promise.reject(
+          new Error(`unexpected: ${method} ${path}`),
+        ) as Promise<T>
+      },
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+    return client
+  }
+
+  it("returns a managed-by-policy complete (not a warning or throw) on a 409", async () => {
+    const client = makeClient({ default_workflow_permissions: "read" })
+    const result = await ensureWorkflowPermissions(
+      client,
+      "acme",
+      "classroom50",
+    )
+    // Org-managed read is acceptable and shown green, matching the audit — no
+    // warning badge for a state the preflight checklist reports as OK.
+    expect(result.status).toBe("complete")
+    expect(result.managedByOrgPolicy).toBe(true)
+    expect(result.message.length).toBeGreaterThan(0)
   })
 })

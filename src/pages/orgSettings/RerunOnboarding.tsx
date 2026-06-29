@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -12,11 +12,36 @@ import { githubKeys } from "@/hooks/github/queries"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import {
+  INIT_STEP_ORDER,
   InitStepBoard,
   applyStepUpdate,
   initialInitSteps,
 } from "./initStepBoard"
 import SettingsSection from "./SettingsSection"
+
+const BANNER_TONE = {
+  error: "border-error/30 bg-error/10 text-error",
+  warning: "border-warning/30 bg-warning/10 text-base-content/80",
+  success: "border-success/30 bg-success/10 text-success",
+} as const
+
+// A small status callout shared by the re-run summary states so the
+// error/warning/success boxes stay visually consistent.
+const SummaryBanner = ({
+  tone,
+  className,
+  children,
+}: {
+  tone: keyof typeof BANNER_TONE
+  className?: string
+  children: ReactNode
+}) => (
+  <div
+    className={`rounded-lg border p-3 text-sm ${BANNER_TONE[tone]} ${className ?? ""}`}
+  >
+    {children}
+  </div>
+)
 
 // Re-run onboarding from Org Settings: re-invokes the idempotent
 // initClassroom50 to re-apply the full lockdown, rulesets, and repo settings.
@@ -35,6 +60,13 @@ const RerunOnboarding = ({ org }: { org: string }) => {
     useState<Record<InitStepId, InitStepUpdate>>(initialInitSteps)
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [done, setDone] = useState(false)
+
+  // After a completed run, surface whether any step finished with a warning so
+  // the per-step messages on the board have a headline to explain them.
+  const warningCount = started
+    ? INIT_STEP_ORDER.filter((id) => steps[id].status === "warning").length
+    : 0
 
   // Guard setState after unmount: init fires onStepUpdate across ~10 sequential
   // steps and the user can navigate away mid-run. The network work itself isn't
@@ -51,6 +83,7 @@ const RerunOnboarding = ({ org }: { org: string }) => {
     mutationFn: async () => {
       setStarted(true)
       setFailed(false)
+      setDone(false)
       setSteps(initialInitSteps)
       return initClassroom50({
         client,
@@ -64,6 +97,7 @@ const RerunOnboarding = ({ org }: { org: string }) => {
     },
     onSuccess: (data) => {
       if (!mountedRef.current) return
+      setDone(true)
       // init resolves (not throws) with status "error" on a prerequisite
       // failure; surface it instead of treating it as a clean success.
       if (data && data.status === "error") {
@@ -105,20 +139,37 @@ const RerunOnboarding = ({ org }: { org: string }) => {
       }
     >
       {!isOwner && (
-        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-base-content/70">
+        <SummaryBanner tone="warning">
           Re-running setup requires organization owner permissions. Ask an org
           owner to run it.
-        </div>
+        </SummaryBanner>
       )}
 
       {started && (
         <div className={!isOwner ? "mt-4" : undefined}>
           <InitStepBoard steps={steps} />
           {failed && (
-            <div className="mt-3 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+            <SummaryBanner tone="error" className="mt-3">
               Re-run setup did not complete — a required step failed. Review the
               steps above, resolve the issue, and run it again.
-            </div>
+            </SummaryBanner>
+          )}
+          {done && !failed && warningCount > 0 && (
+            <SummaryBanner tone="warning" className="mt-3">
+              Setup finished, but{" "}
+              {warningCount === 1
+                ? "1 step needs attention"
+                : `${warningCount} steps need attention`}
+              . See the message on each flagged step above — some settings may
+              be controlled by an organization or enterprise policy and have to
+              be set on GitHub.
+            </SummaryBanner>
+          )}
+          {done && !failed && warningCount === 0 && (
+            <SummaryBanner tone="success" className="mt-3">
+              Setup re-applied successfully — every organization setting is in
+              place.
+            </SummaryBanner>
           )}
         </div>
       )}
