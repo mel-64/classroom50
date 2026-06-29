@@ -31,6 +31,14 @@ export const REPAIRABLE_CONCERNS: ReadonlySet<ConcernId> = new Set<ConcernId>([
   "rulesets",
 ])
 
+// Result of a repair attempt. `unfixableFields` lists member-default fields
+// that were written but did not stick on read-back — i.e. silently overridden
+// by an enterprise-level policy (GitHub returns 200 but ignores the change).
+// Only populated for the orgDefaults concern.
+export type RepairResult = {
+  unfixableFields: string[]
+}
+
 // Restore a single concern's required setting. Plan is needed for orgDefaults
 // (the member-default lockdown is plan-filtered); ignored by the others.
 export async function repairConcern(
@@ -38,31 +46,32 @@ export async function repairConcern(
   org: string,
   id: ConcernId,
   plan: string | undefined,
-): Promise<void> {
+): Promise<RepairResult> {
   switch (id) {
-    case "orgDefaults":
-      await repairOrgDefaults(client, org, plan)
-      return
+    case "orgDefaults": {
+      const result = await repairOrgDefaults(client, org, plan)
+      return { unfixableFields: result.unenforced.map((s) => s.field) }
+    }
     case "orgActions":
       await ensureOrgActionsEnabled(client, org)
-      return
+      return { unfixableFields: [] }
     case "orgPrCreation":
       await ensureOrgCanCreatePullRequests(client, org)
-      return
+      return { unfixableFields: [] }
     case "branchProtection":
       await ensureBranchProtection(client, org, "classroom50", "main")
-      return
+      return { unfixableFields: [] }
     case "workflowPermissions":
       await ensureWorkflowPermissions(client, org, "classroom50")
-      return
+      return { unfixableFields: [] }
     case "reusableWorkflowAccess":
       await ensureReusableWorkflowAccess(client, org, "classroom50")
-      return
+      return { unfixableFields: [] }
     case "pages":
       await ensurePages(client, org, "classroom50")
-      return
+      return { unfixableFields: [] }
     case "rulesets":
       await repairRulesets(client, org)
-      return
+      return { unfixableFields: [] }
   }
 }

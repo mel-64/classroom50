@@ -8,6 +8,7 @@ import {
   TriangleAlert,
   XCircle,
 } from "lucide-react"
+import GitHub from "@/assets/github.svg?react"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/hooks/github/queries"
@@ -77,53 +78,113 @@ function ConcernRow({
   canFix,
   fixing,
   onFix,
+  driftedDetails,
 }: {
   concern: ConcernCheck
   canFix: boolean
   fixing: boolean
   onFix: (id: ConcernId) => void
+  driftedDetails?: {
+    field: string
+    desc: string
+    manualFix: string
+    pinned: boolean
+  }[]
 }) {
   const isDrifted = concern.verdict.state === "unenforced"
-  const showFix = isDrifted && canFix && REPAIRABLE_CONCERNS.has(concern.id)
+  // Hide "Fix it" when every drifted member-default is enterprise-pinned — the
+  // API write can't change them, so the button would silently do nothing.
+  const allPinned =
+    driftedDetails !== undefined &&
+    driftedDetails.length > 0 &&
+    driftedDetails.every((d) => d.pinned)
+  const showFix =
+    isDrifted && canFix && REPAIRABLE_CONCERNS.has(concern.id) && !allPinned
 
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-base-300 bg-base-100 p-3">
-      <div className="min-w-0">
-        <div className="text-sm font-semibold">{concern.title}</div>
-        {concern.verdict.detail && (
-          <p className="mt-0.5 text-xs text-base-content/60">
-            {concern.verdict.detail}
-          </p>
-        )}
-        <a
-          href={concern.settingsUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
-        >
-          View on GitHub
-          <ExternalLink className="size-3" />
-        </a>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {showFix && (
-          <button
-            type="button"
-            className="btn btn-xs btn-primary"
-            disabled={fixing}
-            onClick={() => onFix(concern.id)}
+    <div className="rounded-lg border border-base-300 bg-base-100 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{concern.title}</div>
+          {concern.verdict.detail && (
+            <p className="mt-0.5 text-xs text-base-content/60">
+              {concern.verdict.detail}
+            </p>
+          )}
+          <a
+            href={concern.settingsUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
           >
-            {fixing ? (
-              <span className="loading loading-spinner loading-xs" />
-            ) : (
-              "Fix it"
-            )}
-          </button>
-        )}
-        <span className={`badge ${CONCERN_STATE_BADGE[concern.verdict.state]}`}>
-          {CONCERN_STATE_LABEL[concern.verdict.state]}
-        </span>
+            View on GitHub
+            <ExternalLink className="size-3" />
+          </a>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {showFix && (
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              disabled={fixing}
+              onClick={() => onFix(concern.id)}
+            >
+              {fixing ? (
+                <span className="loading loading-spinner loading-xs" />
+              ) : (
+                "Fix it"
+              )}
+            </button>
+          )}
+          <span
+            className={`badge ${CONCERN_STATE_BADGE[concern.verdict.state]}`}
+          >
+            {CONCERN_STATE_LABEL[concern.verdict.state]}
+          </span>
+        </div>
       </div>
+
+      {isDrifted && driftedDetails && driftedDetails.length > 0 && (
+        <div className="mt-3 border-t border-base-200 pt-3">
+          <p className="text-xs font-medium text-base-content/70">
+            {driftedDetails.length === 1
+              ? "1 setting needs fixing"
+              : `${driftedDetails.length} settings need fixing`}{" "}
+            — change {driftedDetails.length === 1 ? "it" : "them"} on{" "}
+            <a
+              href={concern.settingsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="link inline-flex items-center gap-0.5"
+            >
+              GitHub
+              <ExternalLink className="size-3" />
+            </a>
+            {showFix ? ' (or use "Fix it")' : ""}:
+          </p>
+          <ul className="mt-1 space-y-1">
+            {driftedDetails.map((d) => (
+              <li key={d.field} className="flex items-start gap-2 text-xs">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-error" />
+                <span className="text-base-content/70">
+                  {d.desc}
+                  {d.manualFix && (
+                    <span className="text-base-content/50">
+                      {" "}
+                      — {d.manualFix}
+                    </span>
+                  )}
+                  {d.pinned && (
+                    <span className="ml-1 badge badge-ghost badge-xs align-middle">
+                      Managed by enterprise — set manually
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
@@ -132,11 +193,13 @@ function AuditBody({
   report,
   canFix,
   fixingId,
+  enterprisePinned,
   onFix,
 }: {
   report: OrgAuditReport
   canFix: boolean
   fixingId: ConcernId | null
+  enterprisePinned: Set<string>
   onFix: (id: ConcernId) => void
 }) {
   const banner = VERDICT_BANNER[report.verdict]
@@ -178,6 +241,16 @@ function AuditBody({
             canFix={canFix}
             fixing={fixingId === c.id}
             onFix={onFix}
+            driftedDetails={
+              c.id === "orgDefaults"
+                ? report.unenforcedDefaults.map((s) => ({
+                    field: s.field,
+                    desc: s.desc,
+                    manualFix: s.manualFix,
+                    pinned: enterprisePinned.has(s.field),
+                  }))
+                : undefined
+            }
           />
         ))}
       </div>
@@ -237,8 +310,9 @@ function AuditBody({
           {showPermissions && (
             <>
               <p className="mt-1 text-xs text-base-content/50">
-                The organization member privileges Classroom 50 sets on your
-                behalf, and whether each currently matches.
+                The full list of organization member privileges Classroom 50
+                sets, including the ones already in place. Drifted ones are
+                called out above.
               </p>
               <ul className="mt-2 space-y-1 text-sm">
                 {report.defaultVerdicts.map((v) => (
@@ -279,6 +353,14 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
   const { data: membership } = useGetOrgMembership(org)
   const isOwner = membership?.role === "admin"
 
+  // Member-default fields a Fix it / re-run wrote but that didn't stick on
+  // read-back — silently overridden by an enterprise policy (GitHub returns
+  // 200 but ignores the change). Surfaced as "Managed by enterprise" so we
+  // stop offering a Fix it that can't work.
+  const [enterprisePinned, setEnterprisePinned] = useState<Set<string>>(
+    new Set(),
+  )
+
   const {
     data: report,
     isLoading,
@@ -289,7 +371,14 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
   const fixMutation = useMutation({
     mutationFn: (id: ConcernId) =>
       repairConcern(client, org, id, planDetails?.plan.name),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result.unfixableFields.length > 0) {
+        setEnterprisePinned((prev) => {
+          const next = new Set(prev)
+          for (const f of result.unfixableFields) next.add(f)
+          return next
+        })
+      }
       void queryClient.invalidateQueries({
         queryKey: githubKeys.orgAudit(org),
       })
@@ -303,6 +392,17 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
   return (
     <SettingsSection
       title="Organization policy"
+      titleAdornment={
+        planDetails?.plan.name && (
+          <span
+            className="badge badge-ghost badge-sm gap-1 capitalize"
+            title="GitHub plan — determines which policies are in scope (Enterprise unlocks additional member-privilege fields)"
+          >
+            <GitHub className="size-3" />
+            {planDetails.plan.name} plan
+          </span>
+        )
+      }
       description="What Classroom 50 configures on your behalf, and whether anything has drifted from the expected lockdown."
       action={
         <button
@@ -348,6 +448,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
           report={report}
           canFix={Boolean(isOwner)}
           fixingId={fixingId}
+          enterprisePinned={enterprisePinned}
           onFix={(id) => {
             if (!fixMutation.isPending)
               void runFix(() => fixMutation.mutateAsync(id))

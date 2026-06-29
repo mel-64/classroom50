@@ -271,37 +271,73 @@ export async function repairOrgDefaults(
   }
 }
 
-// Per-field fallback: PATCH each field alone. A 403/422 on an individual field
-// is a plan-gated rejection — skip it silently; the read-back reports the true
-// residual state as one checklist. A secondary-rate-limit aborts.
+// The four repo-creation booleans are entangled at the API layer through the
+// deprecated members_allowed_repository_creation_type field: sending any of
+// them alone makes GitHub recompute that legacy field from the partial input
+// and silently reset the omitted ones. They must always be PATCHed together.
+// (https://github.com/integrations/terraform-provider-github/issues/3429)
+const REPO_CREATION_FIELDS = new Set([
+  "members_can_create_repositories",
+  "members_can_create_private_repositories",
+  "members_can_create_public_repositories",
+  "members_can_create_internal_repositories",
+])
+
+// Per-field fallback for when the combined PATCH is rejected. Sends each field
+// alone EXCEPT the entangled repo-creation booleans, which go in one grouped
+// sub-PATCH so GitHub can't reset the omitted ones. A 403/422 on a field is a
+// plan-gated rejection — skip it; the read-back reports residual state. A
+// secondary-rate-limit aborts.
 async function repairOrgDefaultsPerField(
   client: GitHubClient,
   org: string,
   settings: MemberDefaultSetting[],
 ): Promise<OrgDefaultsRepairResult> {
-  for (const s of settings) {
+  const rateLimitAbort = (): OrgDefaultsRepairResult => ({
+    ok: false,
+    transient: true,
+    unenforced: [],
+    message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
+  })
+
+  // One grouped body for the entangled repo-creation booleans (in scope for
+  // this plan), plus the remaining fields applied individually.
+  const repoCreation = settings.filter((s) => REPO_CREATION_FIELDS.has(s.field))
+  const rest = settings.filter((s) => !REPO_CREATION_FIELDS.has(s.field))
+
+  const patchBody = async (body: Record<string, unknown>): Promise<boolean> => {
     try {
-      await client.request(`/orgs/${org}`, {
-        method: "PATCH",
-        body: { [s.field]: s.value },
-      })
+      await client.request(`/orgs/${org}`, { method: "PATCH", body })
+      return true
     } catch (err) {
       if (err instanceof GitHubAPIError && err.isRateLimited) {
-        return {
-          ok: false,
-          transient: true,
-          unenforced: [],
-          message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
-        }
+        throw err // bubble to the abort handler below
       }
       if (
         err instanceof GitHubAPIError &&
         (err.status === 403 || err.status === 422)
       ) {
-        continue
+        return false // plan-gated rejection; read-back reports residual state
       }
       throw err
     }
   }
+
+  try {
+    if (repoCreation.length > 0) {
+      const grouped: Record<string, unknown> = {}
+      for (const s of repoCreation) grouped[s.field] = s.value
+      await patchBody(grouped)
+    }
+    for (const s of rest) {
+      await patchBody({ [s.field]: s.value })
+    }
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isRateLimited) {
+      return rateLimitAbort()
+    }
+    throw err
+  }
+
   return { ok: true, transient: false, unenforced: [], message: "" }
 }

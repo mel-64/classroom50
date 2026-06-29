@@ -56,6 +56,14 @@ type ClientOpts = {
 function makeClient(opts: ClientOpts) {
   const patchBodies: Array<Record<string, unknown>> = []
   let patchCount = 0
+  let combinedSeen = false
+
+  const repoCreationFields = new Set([
+    "members_can_create_repositories",
+    "members_can_create_private_repositories",
+    "members_can_create_public_repositories",
+    "members_can_create_internal_repositories",
+  ])
 
   const request = vi
     .fn()
@@ -75,12 +83,25 @@ function makeClient(opts: ClientOpts) {
           const body = options.body ?? {}
           patchBodies.push(body)
           const keys = Object.keys(body)
-          // A single-key body is a per-field PATCH; multi-key is the combined one.
-          if (keys.length === 1) {
-            const handler = opts.perField?.[keys[0]]
-            return handler ? handler() : Promise.resolve({})
+          // The first PATCH is the combined one; everything after is a
+          // per-field fallback sub-PATCH (a single field, or the grouped
+          // repo-creation booleans).
+          if (!combinedSeen) {
+            combinedSeen = true
+            return opts.combinedPatch
+              ? opts.combinedPatch()
+              : Promise.resolve({})
           }
-          return opts.combinedPatch ? opts.combinedPatch() : Promise.resolve({})
+          // Grouped repo-creation sub-PATCH: succeed unless a specific repo-
+          // creation field has a handler (use the first matching one).
+          if (keys.every((k) => repoCreationFields.has(k))) {
+            const handlerKey = keys.find((k) => opts.perField?.[k])
+            return handlerKey
+              ? opts.perField![handlerKey]()
+              : Promise.resolve({})
+          }
+          const handler = opts.perField?.[keys[0]]
+          return handler ? handler() : Promise.resolve({})
         }
         return Promise.reject(new Error(`unexpected: ${path}`))
       },
@@ -131,12 +152,54 @@ describe("repairOrgDefaults", () => {
       readback: live,
     })
     const result = await repairOrgDefaults(client, "acme", "team")
-    // 1 combined + 12 per-field attempts.
-    expect(getPatchCount()).toBe(13)
+    // 1 combined + per-field fallback: the 2 in-scope repo-creation fields are
+    // grouped into 1 sub-PATCH, the other 10 go individually = 11; total 12.
+    expect(getPatchCount()).toBe(12)
     expect(result.ok).toBe(false)
     expect(result.unenforced.map((s) => s.field)).toContain(
       "members_can_delete_repositories",
     )
+  })
+
+  it("groups the entangled repo-creation booleans in the per-field fallback", async () => {
+    const { client, patchBodies } = makeClient({
+      combinedPatch: () => Promise.reject(httpError(422)),
+      readback: enforced("enterprise"),
+    })
+    await repairOrgDefaults(client, "acme", "enterprise")
+    // Exactly one fallback sub-PATCH carries the repo-creation booleans, and it
+    // carries ALL four of them together (never split — splitting makes GitHub
+    // reset the omitted ones via the deprecated legacy field).
+    const repoCreationPatches = patchBodies.filter((b) =>
+      Object.keys(b).some(
+        (k) =>
+          k.startsWith("members_can_create_") && k.endsWith("_repositories"),
+      ),
+    )
+    // The combined PATCH (rejected) is patchBodies[0]; find the grouped one.
+    const grouped = patchBodies
+      .slice(1)
+      .find((b) => "members_can_create_repositories" in b)
+    expect(grouped).toBeDefined()
+    expect(Object.keys(grouped!).sort()).toEqual(
+      [
+        "members_can_create_internal_repositories",
+        "members_can_create_private_repositories",
+        "members_can_create_public_repositories",
+        "members_can_create_repositories",
+      ].sort(),
+    )
+    // No fallback sub-PATCH sends a repo-creation field on its own.
+    const splitRepoCreation = patchBodies
+      .slice(1)
+      .some(
+        (b) =>
+          Object.keys(b).length === 1 &&
+          Object.keys(b)[0].startsWith("members_can_create_") &&
+          Object.keys(b)[0].endsWith("_repositories"),
+      )
+    expect(splitRepoCreation).toBe(false)
+    expect(repoCreationPatches.length).toBeGreaterThan(0)
   })
 
   it("reports criticalMissed when read-back shows a silently-ignored field (200 PATCH)", async () => {
