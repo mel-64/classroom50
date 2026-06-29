@@ -99,20 +99,28 @@ const EditStudent = ({
     },
   })
 
-  // Drive the native dialog from the `open` prop. Reset the form + error each
-  // time it opens so a reopen starts from the student's current values.
+  // Drive the native dialog from the `open` prop. Reset the form to the
+  // student's CURRENT values each time it opens (argument-less reset reverts to
+  // the values captured at mount, which go stale after a save since this dialog
+  // is never remounted — the row key is stable across an edit), so a reopen
+  // always reflects what's persisted.
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
     if (open && !dialog.open) {
       setError(null)
-      form.reset()
+      form.reset({
+        first_name: student.first_name ?? "",
+        last_name: student.last_name ?? "",
+        email: student.email ?? "",
+        section: student.section ?? "",
+      })
       dialog.showModal()
     }
     if (!open && dialog.open) {
       dialog.close()
     }
-  }, [open, form])
+  }, [open, form, student])
 
   const submitting = form.state.isSubmitting
 
