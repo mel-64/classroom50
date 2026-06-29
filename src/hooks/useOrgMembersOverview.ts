@@ -42,7 +42,11 @@ const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
   })
 
   const { classes } = useGetClasses(org)
-  const classroomNames = useMemo(() => classes.map((c) => c.name), [classes])
+  // Use `path` (not `name`) to key the per-classroom file queries, matching
+  // ClassesPage's useGetClassroom/useGetStudents exactly so these reads hit the
+  // same react-query cache (warm when the teacher has visited the classes list)
+  // rather than issuing duplicate requests.
+  const classroomNames = useMemo(() => classes.map((c) => c.path), [classes])
 
   // classroom.json per classroom (archived flag). Shares useGetClassroom's key.
   const metaQueries = useQueries({
