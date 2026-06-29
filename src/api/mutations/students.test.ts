@@ -5,6 +5,7 @@ import {
   enrollStudentInClassroom,
   inviteStudentByEmail,
   markStudentEnrolledWithConflictRetry,
+  updateStudent,
 } from "./students"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubClient } from "@/hooks/github/client"
@@ -414,5 +415,213 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     expect(result.inviteWarning).toMatch(/already belongs to a member/i)
     const rows = rowsFromCsv(rosters.cs101)
     expect(rows.find((r) => r.email === "ghost@x.edu")).toBeUndefined()
+  })
+})
+
+describe("updateStudent — edit a roster row's teacher-facing fields in place (#74)", () => {
+  // alice: enrolled github row (identity by github_id 42); bob: email-only.
+  const aliceRow =
+    "alice,Alice,A,alice@x.edu,Period 1,42,enrolled,github,oldhash,tok-1,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
+  const bobRow =
+    ",Bob,B,bob@x.edu,,,invited,email,bobhash,tok-2,2026-01-01T00:00:00Z,\n"
+
+  it("rewrites only first/last/section and preserves identity + lifecycle columns", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alicia",
+        last_name: "Anderson",
+        email: "alice@x.edu", // unchanged
+        section: "Period 2",
+      },
+    })
+
+    const alice = rowsFromCsv(committed.content!).find((r) => r.github_id === "42")
+    expect(alice?.first_name).toBe("Alicia")
+    expect(alice?.last_name).toBe("Anderson")
+    expect(alice?.section).toBe("Period 2")
+    // identity + lifecycle preserved verbatim
+    expect(alice?.username).toBe("alice")
+    expect(alice?.github_id).toBe("42")
+    expect(alice?.enrollment_status).toBe("enrolled")
+    expect(alice?.enrollment_method).toBe("github")
+    expect(alice?.invite_token).toBe("tok-1")
+    expect(alice?.invited_at).toBe("2026-01-01T00:00:00Z")
+    expect(alice?.enrolled_at).toBe("2026-01-02T00:00:00Z")
+    // email unchanged -> stored hash untouched (no drift)
+    expect(alice?.email_hash).toBe("oldhash")
+  })
+
+  it("recomputes email_hash when the email changes", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alice",
+        last_name: "A",
+        email: "alice.new@x.edu",
+        section: "Period 1",
+      },
+    })
+
+    const alice = rowsFromCsv(committed.content!).find((r) => r.github_id === "42")
+    expect(alice?.email).toBe("alice.new@x.edu")
+    expect(alice?.email_hash).toBe(await emailHash("alice.new@x.edu"))
+    expect(alice?.email_hash).not.toBe("oldhash")
+  })
+
+  it("clears email_hash when the email is cleared", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: { first_name: "Alice", last_name: "A", email: "", section: "" },
+    })
+
+    const alice = rowsFromCsv(committed.content!).find((r) => r.username === "alice")
+    expect(alice?.email).toBe("")
+    expect(alice?.email_hash).toBe("")
+  })
+
+  it("matches an email-only row by its email key", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + bobRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "bob@x.edu",
+      patch: {
+        first_name: "Bobby",
+        last_name: "Brown",
+        email: "bob@x.edu",
+        section: "Lab A",
+      },
+    })
+
+    const bob = rowsFromCsv(committed.content!).find((r) => r.email === "bob@x.edu")
+    expect(bob?.first_name).toBe("Bobby")
+    expect(bob?.last_name).toBe("Brown")
+    expect(bob?.section).toBe("Lab A")
+    expect(bob?.enrollment_method).toBe("email")
+  })
+
+  it("throws and does not write when no row matches the key", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "999",
+        patch: { first_name: "X", last_name: "Y", email: "", section: "" },
+      }),
+    ).rejects.toThrow(/does not exist in roster/i)
+    expect(committed.content).toBeNull()
+  })
+
+  it("blocks editing into another row's email and leaves the CSV unwritten", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: HEADER + aliceRow + bobRow,
+    })
+
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "42", // alice
+        patch: {
+          first_name: "Alice",
+          last_name: "A",
+          email: "BOB@x.edu", // case-insensitively collides with bob
+          section: "Period 1",
+        },
+      }),
+    ).rejects.toThrow(/already used by another student/i)
+    expect(committed.content).toBeNull()
+  })
+
+  it("allows keeping the row's own email (case-insensitive, not a false duplicate)", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: HEADER + aliceRow + bobRow,
+    })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alice",
+        last_name: "A",
+        email: "ALICE@x.edu", // same address, different case
+        section: "Period 1",
+      },
+    })
+
+    const rows = rowsFromCsv(committed.content!)
+    expect(rows.find((r) => r.github_id === "42")?.email).toBe("ALICE@x.edu")
+    // bob untouched and still present
+    expect(rows.find((r) => r.username === "" && r.first_name === "Bob")).toBeTruthy()
+    expect(rows).toHaveLength(2)
+  })
+
+  it("rejects an edit on an archived classroom before any commit", async () => {
+    const committed: { content: string | null } = { content: null }
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        // archived -> active:false
+        return Promise.resolve(
+          JSON.stringify({ short_name: "cs101", active: false }),
+        )
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+    const request = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/git/trees")) {
+        committed.content = "should-not-write"
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`))
+    })
+    const client = { request, requestRaw } as unknown as GitHubClient
+
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "42",
+        patch: { first_name: "X", last_name: "Y", email: "", section: "" },
+      }),
+    ).rejects.toThrow(/archived/i)
+    expect(committed.content).toBeNull()
+  })
+
+  it("preserves the canonical column order and drops no other rows", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: HEADER + aliceRow + bobRow,
+    })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "42",
+      patch: {
+        first_name: "Alice",
+        last_name: "A",
+        email: "alice@x.edu",
+        section: "Period 9",
+      },
+    })
+
+    const csv = committed.content!
+    expect(csv.split("\n")[0]).toBe(HEADER.trim())
+    expect(rowsFromCsv(csv)).toHaveLength(2)
   })
 })

@@ -1963,3 +1963,154 @@ export async function unenrollStudent(
     teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
 }
+
+// The teacher-editable subset of a roster row. Identity (username, github_id)
+// and lifecycle columns (enrollment_status/method, invite_token, timestamps)
+// are deliberately excluded — they're bound by onboarding/reconcile, not the
+// teacher (#74).
+export type StudentEditableFields = {
+  first_name: string
+  last_name: string
+  email: string
+  section: string
+}
+
+export type UpdateStudentInput = {
+  org: string
+  classroom: string
+  // Stable identity of the target row (github_id, else username, else email),
+  // captured BEFORE the edit. The edit never changes these keys, so the row is
+  // still findable after the rewrite.
+  key: string
+  patch: StudentEditableFields
+}
+
+export type UpdateStudentResult = CreateClassroomResult & {
+  student: StudentCsvRow
+}
+
+// Edit one roster row's teacher-facing fields in place (first/last name, email,
+// section) and commit the rewritten students.csv. Identity + lifecycle columns
+// are preserved verbatim from the matched row. Recomputes email_hash when the
+// email changes so email-based reconcile matching stays correct (#74).
+export async function updateStudent(
+  client: GitHubClient,
+  input: UpdateStudentInput,
+): Promise<UpdateStudentResult> {
+  const { org, classroom, key, patch } = input
+
+  const targetKey = key.trim()
+  if (!targetKey) {
+    throw new Error("A student row identity is required")
+  }
+
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const ref = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, ref.object.sha)
+
+  const studentsFilePath = `${classroom}/students.csv`
+
+  const currentCsv = await getRawFile(client, {
+    org,
+    path: studentsFilePath,
+    ref: ref.object.sha,
+  })
+
+  const currentStudents = parseStudentsCsv(currentCsv)
+
+  // Stable per-row identity, same precedence the UI uses (github_id -> username
+  // -> email). Kept inline rather than importing the UI util so the mutation
+  // layer stays self-contained.
+  const rowKey = (row: StudentCsvRow) =>
+    row.github_id || row.username || row.email
+
+  const targetIndex = currentStudents.findIndex(
+    (row) => rowKey(row) === targetKey,
+  )
+
+  if (targetIndex === -1) {
+    throw new Error(`Student does not exist in roster: ${targetKey}`)
+  }
+
+  const existing = currentStudents[targetIndex]
+
+  const nextEmail = patch.email.trim()
+  const emailChanged = nextEmail.toLowerCase() !== existing.email.toLowerCase()
+
+  // Guard against editing an email into one already held by ANOTHER row
+  // (case-insensitive). The target row matching its own current email is fine.
+  if (nextEmail) {
+    const emailKey = nextEmail.toLowerCase()
+    const clash = currentStudents.some(
+      (row, idx) =>
+        idx !== targetIndex && row.email.toLowerCase() === emailKey,
+    )
+    if (clash) {
+      throw new Error(`Email already used by another student: ${nextEmail}`)
+    }
+  }
+
+  // Recompute the cached email hash only when the email changed: a new email
+  // gets a fresh hash; a cleared email clears it; an unchanged email keeps the
+  // stored hash untouched (avoids needless drift).
+  let nextEmailHash = existing.email_hash
+  if (emailChanged) {
+    nextEmailHash = nextEmail ? await emailHash(nextEmail) : ""
+  }
+
+  // Spread the existing row first so every identity/lifecycle column is
+  // preserved, then overwrite only the four editable fields. normalizeStudentRow
+  // trims and re-applies the canonical column set.
+  const updatedStudent = normalizeStudentRow({
+    ...existing,
+    first_name: patch.first_name,
+    last_name: patch.last_name,
+    email: nextEmail,
+    section: patch.section,
+    email_hash: nextEmailHash,
+  })
+
+  const nextStudents = currentStudents.map((row, idx) =>
+    idx === targetIndex ? updatedStudent : row,
+  )
+  const nextCsv = stringifyStudentsCsv(nextStudents)
+
+  const tree = await createGitTree(client, {
+    org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: studentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: nextCsv,
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org,
+    message: `Edit student: ${classroom}/${updatedStudent.username || updatedStudent.email || targetKey}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+
+  const updatedRef = await updateRef(client, org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+    student: updatedStudent,
+  }
+}
+
+export async function updateStudentWithConflictRetry(
+  client: GitHubClient,
+  input: UpdateStudentInput,
+) {
+  return withGitConflictRetry(() => updateStudent(client, input))
+}
