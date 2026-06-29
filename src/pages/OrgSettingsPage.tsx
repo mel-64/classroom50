@@ -12,6 +12,7 @@ import { githubKeys } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
 import RequireTeacher from "@/components/RequireTeacher"
+import OrgPolicyAuditPane from "@/pages/orgSettings/OrgPolicyAuditPane"
 import {
   CalendarClock,
   CheckCircle2,
@@ -401,6 +402,7 @@ const OrgSettingsPage = () => {
               </p>
             </div>
             <OrgSettingsPane />
+            {org && <OrgPolicyAuditPane org={org} />}
           </RequireTeacher>
         </DrawerContent>
         <DrawerSidebar page="classes" settings selected="settings" />
