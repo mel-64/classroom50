@@ -22,7 +22,6 @@ import {
   ChevronRight,
   ChevronUp,
   ExternalLink,
-  Info,
   TriangleAlert,
 } from "lucide-react"
 
@@ -40,9 +39,9 @@ const TOKEN_STATUS_BANNER = {
     title: "A service token is already set",
   },
   missing: {
-    className: "border-info/30 bg-info/10",
-    Icon: Info,
-    iconClassName: "text-info",
+    className: "border-error/30 bg-error/10",
+    Icon: TriangleAlert,
+    iconClassName: "text-error",
     title: "No service token set yet",
   },
   unknown: {
