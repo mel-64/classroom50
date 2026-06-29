@@ -100,6 +100,10 @@ function concernSettingsUrl(id: ConcernId, org: string): string {
   }
 }
 
+// In the GUI, any drift demands attention: a drifted concern or an unenforced
+// member-default (critical or not) fails the audit. This is intentionally
+// stricter than the CLI's three-state model (which warns on non-critical
+// drift) — the web treats every regression as actionable.
 function deriveVerdict(
   readOk: boolean,
   lockdownComplete: boolean,
@@ -108,7 +112,7 @@ function deriveVerdict(
   if (!readOk) return "fail"
   if (!lockdownComplete) return "fail"
   const anyDrift = concerns.some((c) => c.verdict.state === "unenforced")
-  return anyDrift ? "warn" : "ok"
+  return anyDrift ? "fail" : "ok"
 }
 
 export async function buildOrgAuditReport(
@@ -118,13 +122,14 @@ export async function buildOrgAuditReport(
 ): Promise<OrgAuditReport> {
   const defaults = await checkOrgDefaults(client, org, plan)
   const readOk = defaults.verdict.state !== "unreadable"
-  const lockdownComplete =
-    readOk && !(defaults.classification?.criticalMissed ?? true)
   const unenforcedDefaults =
     defaults.classification?.verdicts
       .filter((v) => !v.enforced)
       .map((v) => v.setting) ?? []
   const defaultVerdicts = defaults.classification?.verdicts ?? []
+  // Any unenforced member-default (not just critical) counts as incomplete —
+  // the GUI treats all drift as actionable.
+  const lockdownComplete = readOk && unenforcedDefaults.length === 0
 
   // Per-concern checks run in parallel — they're independent reads.
   const [
@@ -159,6 +164,8 @@ export async function buildOrgAuditReport(
     verdict,
     settingsUrl: concernSettingsUrl(id, org),
   }))
+  // Sort the audit list alphabetically by title for predictable scanning.
+  concerns.sort((a, b) => a.title.localeCompare(b.title))
 
   return {
     org,

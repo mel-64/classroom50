@@ -62,13 +62,13 @@ const VERDICT_BANNER: Record<
 
 const CONCERN_STATE_LABEL: Record<CheckState, string> = {
   enforced: "OK",
-  unenforced: "Drifted",
+  unenforced: "Needs attention",
   unreadable: "Unreadable",
 }
 
 const CONCERN_STATE_BADGE: Record<CheckState, string> = {
   enforced: "badge-success",
-  unenforced: "badge-warning",
+  unenforced: "badge-error",
   unreadable: "badge-neutral badge-ghost",
 }
 
