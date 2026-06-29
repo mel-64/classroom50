@@ -46,7 +46,7 @@ const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => (
 const ClassificationBadge = ({ row }: { row: OrgMemberRow }) => {
   if (row.classification === "on-roster-not-member") {
     return (
-      <span className="badge badge-sm badge-warning badge-soft gap-1">
+      <span className="badge badge-sm badge-error badge-soft gap-1">
         <AlertTriangle className="size-3" /> Not an org member
       </span>
     )
@@ -428,7 +428,7 @@ const OrgMembersPage = () => {
             ) : null}
 
             {discrepancyCount > 0 ? (
-              <div className="alert alert-warning alert-soft mt-6 text-sm">
+              <div className="alert alert-error alert-soft mt-6 text-sm">
                 <AlertTriangle className="size-4" />
                 <span>
                   {discrepancyCount} student
