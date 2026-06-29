@@ -5,6 +5,8 @@ import Drawer, {
 } from "@/components/drawer"
 import type { Classroom50OrgSummary } from "@/hooks/github/queries"
 import useGetOrgs from "@/hooks/useGetOrgs"
+import useGetOrgAudit from "@/hooks/useGetOrgAudit"
+import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -13,7 +15,33 @@ import {
   Info,
   Lock,
   RefreshCw,
+  XCircle,
 } from "lucide-react"
+
+// Lazily audits a ready org (admin only) and flags policy drift. A "ready" org
+// can still have regressed branch protection / member policy / rulesets; this
+// surfaces that on the card without changing the coarse ready status. Failure
+// to audit is silent — the badge just doesn't render.
+function DriftBadge({ org }: { org: string }) {
+  const { data: planDetails } = useGetOrgPlanDetails(org)
+  const { data: report } = useGetOrgAudit(org, planDetails?.plan.name)
+
+  if (!report || report.verdict === "ok") return null
+
+  const isFail = report.verdict === "fail"
+  return (
+    <span
+      className={`badge gap-1 text-xs ${isFail ? "badge-error" : "badge-warning"}`}
+    >
+      {isFail ? (
+        <XCircle className="size-3" />
+      ) : (
+        <AlertTriangle className="size-3" />
+      )}
+      {isFail ? "Policy incomplete" : "Policy drift"}
+    </span>
+  )
+}
 
 function MissingOrgNotice({
   refreshing,
@@ -127,6 +155,8 @@ function OrgCard({
                   Needs service token
                 </span>
               )}
+
+              {isReady && isAdmin && <DriftBadge org={org.login} />}
 
               {noAccess && isAdmin && (
                 <span className="badge badge-neutral gap-1">
