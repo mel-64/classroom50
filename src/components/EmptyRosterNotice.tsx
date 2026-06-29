@@ -35,8 +35,8 @@ export const EmptyRosterNotice = ({
           <>
             This classroom has no students yet. An assignment's accept link only
             works for students who are members of the{" "}
-            <span className="font-semibold">{org}</span> organization, so add and
-            enroll students before sharing it.
+            <span className="font-semibold">{org}</span> organization, so add
+            and enroll students before sharing it.
           </>
         )}
       </span>

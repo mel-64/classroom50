@@ -291,7 +291,9 @@ describe("partitionRoster", () => {
   })
 })
 
-const partition = (overrides: Partial<RosterPartition> = {}): RosterPartition => ({
+const partition = (
+  overrides: Partial<RosterPartition> = {},
+): RosterPartition => ({
   readyToConfirm: [],
   awaitingEnrollment: [],
   enrolled: [],
@@ -302,7 +304,11 @@ describe("countEnrolled", () => {
   it("uses the live partition when status is available and settled", () => {
     const enrolled = [student({ github_id: "1" }), student({ github_id: "2" })]
     const count = countEnrolled(
-      { statusAvailable: true, statusLoading: false, partition: partition({ enrolled }) },
+      {
+        statusAvailable: true,
+        statusLoading: false,
+        partition: partition({ enrolled }),
+      },
       // CSV column disagrees on purpose: the live partition must win.
       [student({ enrollment_status: "invited" })],
     )
@@ -374,15 +380,19 @@ describe("resolveEmptyRosterWarning", () => {
   })
 
   it("hides the warning when at least one student is enrolled", () => {
-    expect(
-      resolveEmptyRosterWarning({ ...base, enrolledCount: 1 }).show,
-    ).toBe(false)
+    expect(resolveEmptyRosterWarning({ ...base, enrolledCount: 1 }).show).toBe(
+      false,
+    )
   })
 
   it("reports hasRosterRows so callers can distinguish empty vs invited-only", () => {
     // Rows exist but nobody is enrolled -> warn, with the 'invited' copy branch.
     expect(
-      resolveEmptyRosterWarning({ ...base, rosterRowCount: 30, enrolledCount: 0 }),
+      resolveEmptyRosterWarning({
+        ...base,
+        rosterRowCount: 30,
+        enrolledCount: 0,
+      }),
     ).toMatchObject({ show: true, hasRosterRows: true })
   })
 })
