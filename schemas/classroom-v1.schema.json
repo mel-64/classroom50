@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/foundation50/classroom50/main/schemas/classroom-v1.schema.json",
   "title": "classroom50/classroom/v1",
-  "description": "Machine-readable schema for <classroom>/classroom.json, the per-classroom metadata scaffolded by `gh teacher classroom add` (cli/gh-teacher/classroom.go, classroomJSON). Hand-authored classrooms omit `migrated_from`; only `gh teacher classroom migrate` writes it.",
+  "description": "Machine-readable schema for <classroom>/classroom.json, the per-classroom metadata scaffolded by `gh teacher classroom add` (cli/gh-teacher/classroom.go, classroomJSON). Hand-authored classrooms omit `migrated_from`; only `gh teacher classroom migrate` writes it. additionalProperties is true so a top-level field a newer binary or the web GUI adds survives a read-modify-write verbatim (the 'tolerate AND preserve' rule, via configrepo.ClassroomJSON.Extra). Known sub-objects (team/migrated_from) stay closed.",
   "type": "object",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "required": ["schema", "name", "short_name", "term", "org"],
   "properties": {
     "schema": { "const": "classroom50/classroom/v1" },
@@ -54,6 +54,10 @@
       "type": "string",
       "pattern": "^[a-z0-9]{4,64}$",
       "description": "Optional access key for an unlisted classroom. When present, publish-pages serves this classroom's resources at an unguessable URL (`<classroom>/<secret>/...`) that every consumer inserts; when omitted, the plain `<classroom>/...` path. Obscurity, not access control — anyone with the link can read the files. Opt-in via `gh teacher classroom add --unlisted`."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "Classroom lifecycle flag: false = archived, true or ABSENT = active (legacy classrooms read as active). Written only when a teacher toggles archive/unarchive. Archived classrooms drop out of the default classes list and block new assignments/edits; once published to classrooms-index.json the student accept page refuses too."
     }
   },
   "$defs": {

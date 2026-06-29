@@ -65,6 +65,12 @@ func TestSkeletonFiles_Manifest(t *testing.T) {
 			t.Errorf("publish-pages.yaml does not publish %s to the site root (autograde-runner fetches it from Pages)", script)
 		}
 	}
+
+	// The classrooms index must publish the `active` archival flag so the
+	// student accept page can refuse an archived classroom (issue #203).
+	if !strings.Contains(pubBody, `"active"`) {
+		t.Error("publish-pages.yaml classrooms index must include the \"active\" key so the student accept page can refuse archived classrooms")
+	}
 }
 
 // TestSkeletonFiles_AutogradeRunner pins the runner workflow's

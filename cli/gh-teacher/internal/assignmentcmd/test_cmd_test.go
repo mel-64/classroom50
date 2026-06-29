@@ -567,6 +567,119 @@ func TestRunAssignmentAdd_DropsPassThresholdWarns(t *testing.T) {
 	}
 }
 
+// archivedClassroomAddServer serves just enough of the config repo for
+// runAssignmentAdd's build callback to reach ensureClassroomActive (which
+// runs before any assignments read): branch resolution, the ref read, and
+// an archived cs-principles/classroom.json. A committed blob would mean the
+// refusal failed to short-circuit.
+func archivedClassroomAddServer(t *testing.T, fix *testCmdFixture) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/o/classroom50", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"default_branch": "main"})
+	})
+	mux.HandleFunc("/repos/o/classroom50/git/refs/heads/main", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]string{"sha": "parent-sha"}})
+	})
+	mux.HandleFunc("/repos/o/classroom50/git/commits/parent-sha", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"tree": map[string]string{"sha": "parent-tree"}})
+	})
+	// The template probe runs (and must pass) before the build callback
+	// where ensureClassroomActive fires, so serve a valid template.
+	mux.HandleFunc("/repos/cs50/hello-template", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"is_template": true, "default_branch": "main"})
+	})
+	mux.HandleFunc("/repos/o/classroom50/contents/cs-principles/classroom.json", func(w http.ResponseWriter, r *http.Request) {
+		body := `{"schema":"classroom50/classroom/v1","name":"CS Principles","short_name":"cs-principles","term":"","org":"o","active":false}`
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"type":     "file",
+			"content":  base64.StdEncoding.EncodeToString([]byte(body)),
+			"encoding": "base64",
+		})
+	})
+	// A blob upload would mean the archived refusal didn't fire.
+	mux.HandleFunc("/repos/o/classroom50/git/blobs", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct{ Content, Encoding string }
+		_ = json.Unmarshal(body, &payload)
+		if payload.Encoding == "base64" {
+			decoded, _ := base64.StdEncoding.DecodeString(payload.Content)
+			fix.mu.Lock()
+			fix.committed = decoded
+			fix.mu.Unlock()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"sha": "blob-sha"})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestRunAssignmentAdd_RefusesArchivedTarget pins the add-path archived
+// refusal branch (assignment.go ensureClassroomActive): `assignment add`
+// into an archived (active:false) classroom is refused and lands no blob,
+// mirroring TestRunAssignmentReuse_RefusesArchivedTarget.
+func TestRunAssignmentAdd_RefusesArchivedTarget(t *testing.T) {
+	fix := &testCmdFixture{}
+	server := archivedClassroomAddServer(t, fix)
+	client := githubtest.NewTestClient(t, server)
+
+	var stdout, stderr bytes.Buffer
+	err := runAssignmentAdd(client, &stdout, &stderr, helloAddParams())
+	if err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("expected an archived-target refusal, got %v", err)
+	}
+	fix.mu.Lock()
+	committed := fix.committed
+	fix.mu.Unlock()
+	if committed != nil {
+		t.Errorf("archived refusal must not commit a blob, got %q", committed)
+	}
+}
+
+// TestRunAssignmentAdd_PreservesUnknownEntryField pins the "tolerate AND
+// preserve" rule on the add round-trip: an unknown top-level entry key (one a
+// newer binary or the web GUI wrote before this CLI models it) must survive a
+// re-run of `assignment add`, which rebuilds the entry from flags. Without the
+// Extra carry-forward the wholesale-replace upsert would silently drop it —
+// the exact silent-data-loss the cross-binary forward-compat contract forbids.
+func TestRunAssignmentAdd_PreservesUnknownEntryField(t *testing.T) {
+	seeded := `{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "template": { "owner": "cs50", "repo": "hello-template", "branch": "main" },
+      "mode": "individual",
+      "autograder": "default",
+      "future_field": {"nested": [1, 2, 3]}
+    }
+  ]
+}`
+	server, fix := newTestCmdServer(t, seeded, false)
+	client := githubtest.NewTestClient(t, server)
+
+	var stdout, stderr bytes.Buffer
+	if err := runAssignmentAdd(client, &stdout, &stderr, helloAddParams()); err != nil {
+		t.Fatalf("runAssignmentAdd(re-add over an entry with an unknown field): %v", err)
+	}
+	got := decodeCommitted(t, fix).Assignments[0]
+	var nested map[string]any
+	if err := json.Unmarshal(got.Extra["future_field"], &nested); err != nil {
+		t.Fatalf("add upsert dropped/mangled the unknown future_field; Extra = %v, err = %v", got.Extra, err)
+	}
+	if _, ok := nested["nested"]; !ok {
+		t.Errorf("future_field not preserved verbatim: %v", nested)
+	}
+	fix.mu.Lock()
+	committed := string(fix.committed)
+	fix.mu.Unlock()
+	if !strings.Contains(committed, "future_field") {
+		t.Errorf("committed blob dropped future_field:\n%s", committed)
+	}
+}
+
 // TestRunAssignmentAdd_ExplicitZeroPassThresholdNotDropped: an explicit
 // --pass-threshold 0 on re-add is a real 0% bar, not an omission, so it
 // must persist and must not warn.

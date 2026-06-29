@@ -152,7 +152,10 @@ jobs:
           # `team` block, which carries the GitHub team id/slug) out of the
           # unauthenticated Pages index. New public fields must be added
           # here explicitly rather than dumping classroom.json wholesale.
-          PUBLIC_KEYS = ("schema", "name", "short_name", "term", "org", "migrated_from")
+          # `active` is published so the student accept page can refuse an
+          # archived classroom (active:false); absent = active (legacy),
+          # matching configrepo.ClassroomJSON.IsArchived.
+          PUBLIC_KEYS = ("schema", "name", "short_name", "term", "org", "active", "migrated_from")
           rooms = []
           for path in sorted(glob.glob("*/classroom.json")):
               with open(path) as fh:

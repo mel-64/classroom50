@@ -214,9 +214,12 @@ class TestSchemaRejects:
     def test_bad_test_specs(self, bad_test):
         assert _errors(_manifest(_entry(tests=[bad_test]))) != []
 
-    def test_unknown_entry_key(self):
-        # e.g. the GUI's old `due_date` — DisallowUnknownFields parity.
-        assert _errors(_manifest(_entry(due_date="2026-09-15"))) != []
+    def test_unknown_entry_key_is_preserved(self):
+        # An unknown top-level entry key is TOLERATED, not rejected: the entry
+        # object is additionalProperties:true ("tolerate AND preserve"). The
+        # known sub-objects (template/due_meta/runtime/tests) stay strict — see
+        # test_bad_test_specs and test_bad_due_meta.
+        assert _errors(_manifest(_entry(future_field="v2-only"))) == []
 
     def test_max_group_size_zero_must_be_omitted(self):
         # max_group_size: 0 is invalid everywhere — below the minimum of

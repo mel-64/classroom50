@@ -172,7 +172,7 @@ func TestRunClassroomList(t *testing.T) {
 
 	t.Run("default lists short-names only", func(t *testing.T) {
 		var out, errOut bytes.Buffer
-		if err := runClassroomList(client, &out, &errOut, "o", false, false); err != nil {
+		if err := runClassroomList(client, &out, &errOut, "o", false, false, false); err != nil {
 			t.Fatalf("runClassroomList: %v", err)
 		}
 		got := strings.Fields(out.String())
@@ -192,7 +192,7 @@ func TestRunClassroomList(t *testing.T) {
 
 	t.Run("--json emits full objects", func(t *testing.T) {
 		var out, errOut bytes.Buffer
-		if err := runClassroomList(client, &out, &errOut, "o", true, true); err != nil {
+		if err := runClassroomList(client, &out, &errOut, "o", true, true, true); err != nil {
 			t.Fatalf("runClassroomList: %v", err)
 		}
 		var got []classroomSummary
@@ -401,5 +401,187 @@ func TestConfirmClassroomRemove(t *testing.T) {
 				t.Errorf("want nil, got %v", err)
 			}
 		})
+	}
+}
+
+// archivedClassroomJSON builds a classroom.json carrying active:false.
+func archivedClassroomJSON(t *testing.T, org, shortName, name string) string {
+	t.Helper()
+	f := false
+	b, err := output.JSONPretty(configrepo.ClassroomJSON{
+		Schema:    classroomSchemaV1,
+		Name:      name,
+		ShortName: shortName,
+		Org:       org,
+		Active:    &f,
+	})
+	if err != nil {
+		t.Fatalf("encode classroom.json: %v", err)
+	}
+	return string(b)
+}
+
+func TestSetClassroomActive_Archive(t *testing.T) {
+	current := classroomJSONContent(t, "o", "cs-principles", "CS Principles", "Fall-2026")
+	mock := &configRepoMock{files: map[string]string{"cs-principles/classroom.json": current}}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	if err := setClassroomActive(client, &out, &errOut, "o", "cs-principles", false); err != nil {
+		t.Fatalf("setClassroomActive(archive): %v", err)
+	}
+	if !strings.Contains(out.String(), "archived classroom cs-principles") {
+		t.Errorf("stdout = %q, want 'archived classroom'", out.String())
+	}
+	if len(mock.blobs) != 1 {
+		t.Fatalf("expected 1 committed blob, got %d", len(mock.blobs))
+	}
+	var c configrepo.ClassroomJSON
+	if err := json.Unmarshal([]byte(mock.blobs[0]), &c); err != nil {
+		t.Fatalf("committed classroom.json: %v", err)
+	}
+	if !c.IsArchived() {
+		t.Errorf("committed classroom should be archived, got Active=%v", c.Active)
+	}
+}
+
+func TestSetClassroomActive_UnarchiveClearsFlag(t *testing.T) {
+	current := archivedClassroomJSON(t, "o", "cs-principles", "CS Principles")
+	mock := &configRepoMock{files: map[string]string{"cs-principles/classroom.json": current}}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	if err := setClassroomActive(client, &out, &errOut, "o", "cs-principles", true); err != nil {
+		t.Fatalf("setClassroomActive(unarchive): %v", err)
+	}
+	if !strings.Contains(out.String(), "unarchived classroom cs-principles") {
+		t.Errorf("stdout = %q, want 'unarchived classroom'", out.String())
+	}
+	if len(mock.blobs) != 1 {
+		t.Fatalf("expected 1 committed blob, got %d", len(mock.blobs))
+	}
+	// Unarchive drops the key (absent = active), so the wire form must
+	// not carry "active".
+	if strings.Contains(mock.blobs[0], "active") {
+		t.Errorf("unarchive should drop the active key, got %s", mock.blobs[0])
+	}
+}
+
+func TestSetClassroomActive_AlreadyArchivedNoop(t *testing.T) {
+	current := archivedClassroomJSON(t, "o", "cs-principles", "CS Principles")
+	mock := &configRepoMock{files: map[string]string{"cs-principles/classroom.json": current}}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	if err := setClassroomActive(client, &out, &errOut, "o", "cs-principles", false); err != nil {
+		t.Fatalf("setClassroomActive: %v", err)
+	}
+	if !strings.Contains(out.String(), "already archived") {
+		t.Errorf("stdout = %q, want 'already archived' no-op", out.String())
+	}
+	if len(mock.blobs) != 0 {
+		t.Errorf("no-op should not commit, got %d blobs", len(mock.blobs))
+	}
+}
+
+func TestRunClassroomList_HidesArchivedByDefault(t *testing.T) {
+	mock := &configRepoMock{files: map[string]string{
+		"cs-principles/classroom.json": classroomJSONContent(t, "o", "cs-principles", "CS Principles", "Fall-2026"),
+		"old-term/classroom.json":      archivedClassroomJSON(t, "o", "old-term", "Old Term"),
+	}}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	t.Run("default hides archived", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if err := runClassroomList(client, &out, &errOut, "o", false, false, false); err != nil {
+			t.Fatalf("runClassroomList: %v", err)
+		}
+		lines := strings.Fields(out.String())
+		for _, l := range lines {
+			if l == "old-term" {
+				t.Errorf("archived classroom should be hidden by default, got %q", out.String())
+			}
+		}
+		if !strings.Contains(out.String(), "cs-principles") {
+			t.Errorf("active classroom missing: %q", out.String())
+		}
+	})
+
+	t.Run("--all shows archived with marker", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if err := runClassroomList(client, &out, &errOut, "o", false, false, true); err != nil {
+			t.Fatalf("runClassroomList: %v", err)
+		}
+		if !strings.Contains(out.String(), "old-term (archived)") {
+			t.Errorf("--all should show 'old-term (archived)', got %q", out.String())
+		}
+	})
+
+	t.Run("--json --all carries active:false", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if err := runClassroomList(client, &out, &errOut, "o", true, true, true); err != nil {
+			t.Fatalf("runClassroomList: %v", err)
+		}
+		var got []classroomSummary
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("unmarshal json: %v\n%s", err, out.String())
+		}
+		var foundArchived bool
+		for _, c := range got {
+			if c.ShortName == "old-term" {
+				if c.Active == nil || *c.Active {
+					t.Errorf("old-term summary should carry active:false, got %#v", c)
+				}
+				foundArchived = true
+			}
+		}
+		if !foundArchived {
+			t.Errorf("--all --json should include old-term")
+		}
+	})
+}
+
+// TestSetClassroomActive_PreservesUnknownField pins the forward-compat fix:
+// archiving a classroom.json that carries an unknown top-level key (one a
+// newer binary or the web GUI wrote) must NOT drop that key on the
+// read-modify-write — the classroom-side "tolerate AND preserve" guarantee
+// matching the assignments path.
+func TestSetClassroomActive_PreservesUnknownField(t *testing.T) {
+	// A classroom.json with an unknown `lms_link` key this CLI doesn't model.
+	current := `{"schema":"classroom50/classroom/v1","name":"CS Principles","short_name":"cs-principles","term":"Fall-2026","org":"o","lms_link":"https://lms.example/c/1"}`
+	mock := &configRepoMock{files: map[string]string{"cs-principles/classroom.json": current}}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	if err := setClassroomActive(client, &out, &errOut, "o", "cs-principles", false); err != nil {
+		t.Fatalf("setClassroomActive(archive): %v", err)
+	}
+	if len(mock.blobs) != 1 {
+		t.Fatalf("expected 1 committed blob, got %d", len(mock.blobs))
+	}
+	committed := mock.blobs[0]
+	if !strings.Contains(committed, "lms_link") {
+		t.Errorf("archive RMW dropped the unknown lms_link field: %s", committed)
+	}
+	// The archive still applied, and the unknown key still parses back.
+	var c configrepo.ClassroomJSON
+	if err := json.Unmarshal([]byte(committed), &c); err != nil {
+		t.Fatalf("committed classroom.json: %v", err)
+	}
+	if !c.IsArchived() {
+		t.Errorf("classroom should be archived, got Active=%v", c.Active)
+	}
+	if _, ok := c.Extra["lms_link"]; !ok {
+		t.Errorf("lms_link not preserved into Extra after RMW: %v", c.Extra)
 	}
 }

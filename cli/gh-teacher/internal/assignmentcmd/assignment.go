@@ -58,6 +58,7 @@ func NewCmd() *cobra.Command {
 			"wiki page).",
 	}
 	cmd.AddCommand(assignmentAddCmd())
+	cmd.AddCommand(assignmentReuseCmd())
 	cmd.AddCommand(assignmentRemoveCmd())
 	cmd.AddCommand(assignmentListCmd())
 	cmd.AddCommand(assignmentTestCmd())
@@ -547,6 +548,12 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		droppedTemplate = nil
 		droppedAllowedCnt = 0
 		droppedPassThreshold = nil
+		// Refuse on an archived classroom (active:false), mirroring the
+		// web's "archived blocks new assignments" rule. Checked at
+		// parentSHA so a concurrent unarchive is observed on retry.
+		if err := ensureClassroomActive(client, org, classroom, parentSHA); err != nil {
+			return nil, err
+		}
 		// Verify the autograder shim exists at parent SHA before
 		// writing — otherwise the assignment lands successfully and
 		// every student's accept 404s on the Pages fetch later. The
@@ -582,21 +589,25 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		if err != nil {
 			return nil, err
 		}
+		// One lookup of the entry this upsert replaces (if any), shared by
+		// the wholesale-replace footgun checks below and the Extra
+		// carry-forward (file.Assignments isn't mutated until UpsertAssignment).
+		prevIdx, hasPrev := assignment.FindAssignment(file.Assignments, slug)
 		// Upsert replaces the whole entry, so re-running add without
 		// --tests drops tests authored via `assignment test add`. Count
 		// them here for the post-commit warning. nil means the flag was
 		// omitted; an explicit empty array (`--tests` with `[]`) is a
 		// deliberate clear and shouldn't warn.
-		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.Tests == nil {
-			droppedTests = len(file.Assignments[idx].Tests)
+		if hasPrev && entry.Tests == nil {
+			droppedTests = len(file.Assignments[prevIdx].Tests)
 		}
 		// Same wholesale-replace footgun for the template: re-running add
 		// without --template on a previously-templated assignment would
 		// silently drop its starter-repo binding. Detect it for a loud
 		// post-commit warning (the upsert still applies — consistent with
 		// every other field — but the teacher should know).
-		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.Template == nil && file.Assignments[idx].Template != nil {
-			droppedTemplate = file.Assignments[idx].Template
+		if hasPrev && entry.Template == nil && file.Assignments[prevIdx].Template != nil {
+			droppedTemplate = file.Assignments[prevIdx].Template
 		}
 		// Wholesale-replace footgun (as with tests/template): re-running
 		// add without --allowed-files drops a prior allowlist. The flag is a
@@ -605,16 +616,23 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		// rejects an empty/whitespace pattern, so `--allowed-files ''` never
 		// yields a silent clear. A non-nil empty slice (the programmatic /
 		// non-CLI clear path) is treated as deliberate and does not warn.
-		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.AllowedFiles == nil {
-			droppedAllowedCnt = len(file.Assignments[idx].AllowedFiles)
+		if hasPrev && entry.AllowedFiles == nil {
+			droppedAllowedCnt = len(file.Assignments[prevIdx].AllowedFiles)
 		}
 		// Wholesale-replace footgun (as with tests/template/allowed_files),
 		// sharper here because pass_threshold is usually authored by the
 		// gradebook GUI, not the CLI: re-adding without --pass-threshold
 		// silently clears it. nil = flag omitted (warn); an explicit 0 is a
 		// non-nil pointer (a real 0% bar) and not a drop.
-		if idx, ok := assignment.FindAssignment(file.Assignments, slug); ok && entry.PassThreshold == nil && file.Assignments[idx].PassThreshold != nil {
-			droppedPassThreshold = file.Assignments[idx].PassThreshold
+		if hasPrev && entry.PassThreshold == nil && file.Assignments[prevIdx].PassThreshold != nil {
+			droppedPassThreshold = file.Assignments[prevIdx].PassThreshold
+		}
+		// Carry forward the existing entry's Extra (unknown/future keys):
+		// `entry` is rebuilt from CLI flags and carries none, so without
+		// this the wholesale-replace upsert would drop them. (reuse instead
+		// preserves Extra by copying the whole source entry.)
+		if hasPrev {
+			entry.Extra = file.Assignments[prevIdx].Extra
 		}
 		updated, replaced := assignment.UpsertAssignment(file.Assignments, entry)
 		if replaced {
@@ -655,21 +673,9 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 	// (pre-feature) gets an actionable message rather than a 404 against
 	// a guessed slug.
 	if resolved != nil && templatePrivate && inOrg {
-		team, ok, err := configrepo.ResolveClassroomTeam(client, org, classroom, branch)
-		if err != nil {
-			return fmt.Errorf("assignment committed, but reading the classroom team failed: %w", err)
-		}
-		if !ok {
-			return fmt.Errorf("assignment %q committed, but classroom %q has no team to grant read on the private template %s/%s — run `gh teacher classroom add %s %s` to create the team, then re-run `gh teacher assignment add` (students can't accept until the team can read the template)",
-				slug, classroom, resolved.Owner, resolved.Repo, org, classroom)
-		}
-		granted, err := configrepo.GrantTeamRepoRead(client, org, team.Slug, resolved.Owner, resolved.Repo)
-		if err != nil {
-			return fmt.Errorf("assignment committed, but granting the classroom team read on the private template %s/%s failed: %w", resolved.Owner, resolved.Repo, err)
-		}
-		if granted {
-			_, _ = fmt.Fprintf(out, "%s: granted classroom team %s read on private template %s/%s\n",
-				org, team.Slug, resolved.Owner, resolved.Repo)
+		if err := grantClassroomTeamTemplateRead(client, out, org, classroom, branch, slug, resolved.Owner, resolved.Repo,
+			grantContext{verb: "committed", classroomNoun: "classroom", rerunHint: ", then re-run `gh teacher assignment add`"}); err != nil {
+			return err
 		}
 	}
 	if droppedTests > 0 {
@@ -755,6 +761,23 @@ func runAssignmentRemove(client githubapi.Client, out io.Writer, org, classroom,
 // file → points the teacher at `gh teacher classroom add`.
 func loadAssignments(client githubapi.Client, org, classroom, ref string) (assignment.AssignmentsJSON, error) {
 	return configrepo.LoadAssignments(client, org, classroom, ref)
+}
+
+// ensureClassroomActive refuses a write (add / reuse) into an archived
+// classroom (classroom.json `active: false`), mirroring the web. Read at
+// `ref` inside the build callback so a concurrent archive/unarchive is
+// observed consistently. A missing/legacy classroom.json reads as active,
+// so this never blocks legacy classrooms.
+func ensureClassroomActive(client githubapi.Client, org, classroom, ref string) error {
+	c, ok, err := configrepo.LoadClassroom(client, org, classroom, ref)
+	if err != nil {
+		return err
+	}
+	if ok && c.IsArchived() {
+		return fmt.Errorf("classroom %q is archived (classroom.json active:false) — new assignments are refused; run `gh teacher classroom unarchive %s %s` to re-activate it first",
+			classroom, org, classroom)
+	}
+	return nil
 }
 
 // templateArg is the parsed `--template` flag. Branch is empty if

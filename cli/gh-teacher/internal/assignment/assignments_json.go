@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,6 +121,107 @@ type AssignmentEntry struct {
 	AllowedFiles  []string         `json:"allowed_files,omitempty"`
 	PassThreshold *int             `json:"pass_threshold,omitempty"`
 	MigratedFrom  *MigratedFromRef `json:"migrated_from,omitempty"`
+
+	// Extra holds unknown top-level entry keys, re-emitted verbatim so a
+	// read-modify-write never drops a field a newer binary/web GUI added
+	// ("tolerate AND preserve"). Merged in/out by the custom (Un)MarshalJSON
+	// below, so it never appears as a literal "extra" key on the wire.
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// knownEntryKeys is the top-level entry keys this binary understands;
+// any other key is diverted to Extra. Keep in lockstep with the json
+// tags on AssignmentEntry above.
+var knownEntryKeys = map[string]struct{}{
+	"slug": {}, "name": {}, "description": {}, "template": {}, "due": {},
+	"due_meta": {}, "mode": {}, "autograder": {}, "max_group_size": {},
+	"runtime": {}, "tests": {}, "feedback_pr": {}, "allowed_files": {},
+	"pass_threshold": {}, "migrated_from": {},
+}
+
+// UnmarshalJSON captures unknown top-level keys into Extra, then strictly
+// decodes only the known subset. The unknown keys must be stripped first:
+// DisallowUnknownFields is all-or-nothing per decoder, so it can stay
+// strict on the typed sub-objects (a typo inside tests/template/runtime/
+// due_meta is still a hard error) only if it never sees an unknown key.
+func (e *AssignmentEntry) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	known := make(map[string]json.RawMessage, len(raw))
+	var extra map[string]json.RawMessage
+	for k, v := range raw {
+		if _, ok := knownEntryKeys[k]; ok {
+			known[k] = v
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]json.RawMessage)
+		}
+		extra[k] = v
+	}
+
+	knownBytes, err := json.Marshal(known)
+	if err != nil {
+		return err
+	}
+	type entryAlias AssignmentEntry // avoid recursion into this method
+	var typed entryAlias
+	dec := json.NewDecoder(bytes.NewReader(knownBytes))
+	dec.DisallowUnknownFields() // still strict on the known sub-objects
+	if err := dec.Decode(&typed); err != nil {
+		return err
+	}
+	*e = AssignmentEntry(typed)
+	e.Extra = extra
+	return nil
+}
+
+// MarshalJSON emits the known fields via the alias, then byte-splices any
+// sorted Extra keys in before the closing brace. The splice (vs a map
+// round-trip) preserves the known fields' struct order so adding Extra
+// doesn't reorder every entry on the next write.
+func (e AssignmentEntry) MarshalJSON() ([]byte, error) {
+	type entryAlias AssignmentEntry
+	known, err := json.Marshal(entryAlias(e))
+	if err != nil {
+		return nil, err
+	}
+	if len(e.Extra) == 0 {
+		return known, nil
+	}
+	keys := make([]string, 0, len(e.Extra))
+	for k := range e.Extra {
+		if _, isKnown := knownEntryKeys[k]; isKnown {
+			continue // defensive: never let Extra override a known field
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return known, nil
+	}
+	sort.Strings(keys) // deterministic output
+
+	// Splice the Extra members in before `known`'s closing brace. The alias
+	// always emits slug/name/mode/autograder (no omitempty), so `known` is
+	// never "{}" and the leading comma is always correct.
+	var buf bytes.Buffer
+	trimmed := bytes.TrimSpace(known)
+	buf.Write(trimmed[:len(trimmed)-1]) // everything up to the final '}'
+	for _, k := range keys {
+		buf.WriteByte(',')
+		keyJSON, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(keyJSON)
+		buf.WriteByte(':')
+		buf.Write(e.Extra[k])
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 // MaxGroupSizeCap bounds max_group_size (when set; 0 = unset).
@@ -427,9 +530,16 @@ func AssignmentsFilePath(classroom string) string {
 // file surfaces "this CLI handles only v1" instead of
 // "json: unknown field"; the strict pass runs only on v1.
 //
-// Per-entry validation (ValidateExistingEntry) matches the write-path
-// bar so a hand-edited or web-UI-inserted entry can't re-bless
-// itself on the next CLI write.
+// The TOP-LEVEL envelope ({schema, assignments}) stays strict
+// (DisallowUnknownFields), but each ENTRY tolerates and round-trips
+// unknown keys verbatim via AssignmentEntry.Extra — the forward-compat
+// path a newer binary / the web GUI relies on, so a read-modify-write
+// here (reuse/add) never drops a field. Known sub-objects
+// (tests/template/runtime/due_meta) stay strictly typed.
+//
+// Per-entry validation (ValidateExistingEntry) runs on every KNOWN field
+// so a hand-edited or web-inserted entry can't re-bless itself on the
+// next write; the security boundary is unchanged by the tolerance.
 //
 // No hard size cap is enforced — per-assignment tests live as files
 // in the config repo rather than being inlined, so realistic
@@ -454,6 +564,9 @@ func ParseAssignments(data []byte) (AssignmentsJSON, error) {
 	}
 	var file AssignmentsJSON
 	dec := json.NewDecoder(bytes.NewReader(data))
+	// Strict at the ENVELOPE level only (rejects an unknown top-level key).
+	// It does NOT recurse into entries: AssignmentEntry.UnmarshalJSON runs
+	// its own strict decode and captures unknown entry keys into Extra.
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&file); err != nil {
 		return AssignmentsJSON{}, fmt.Errorf("parse assignments.json: %w", err)
@@ -565,6 +678,62 @@ func FindAssignment(entries []AssignmentEntry, slug string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// SlugExistsFold reports whether any entry's slug equals `slug`
+// case-insensitively. Slugs become GitHub repo path segments, and GitHub
+// treats repo names case-insensitively, so a target differing only in
+// case would still collide on the real repo. Mirrors the web's check.
+func SlugExistsFold(entries []AssignmentEntry, slug string) bool {
+	for i := range entries {
+		if strings.EqualFold(entries[i].Slug, slug) {
+			return true
+		}
+	}
+	return false
+}
+
+// slugMaxLen is the max slug length validate.ShortName accepts
+// (^[a-z0-9][a-z0-9-]{1,38}$ = 39 chars). Duplicated here (not imported
+// from validate) so the pure data layer stays free of the command seam.
+const slugMaxLen = 39
+
+// slugSuffixRe splits a slug into base + optional trailing `-N` (N >= 1):
+// `hello` -> ("hello", 0); `hello-2` -> ("hello", 2).
+var slugSuffixRe = regexp.MustCompile(`^(.*)-([1-9][0-9]*)$`)
+
+// NextAvailableSlug returns a slug that doesn't collide (case-insensitively)
+// with any existing entry, auto-suffixing `-2`, `-3`, …; a base already
+// ending in `-N` increments from N+1. Returns the input unchanged when it
+// is already free. Mirrors the web's auto-suffix algorithm.
+//
+// An auto-suffixed candidate that would overflow slugMaxLen returns an
+// actionable error rather than an over-long slug a downstream validator
+// would reject with a generic pattern error. A free input that is itself
+// over-cap is returned unchanged (the caller's validation surfaces it).
+func NextAvailableSlug(entries []AssignmentEntry, slug string) (string, error) {
+	if !SlugExistsFold(entries, slug) {
+		return slug, nil
+	}
+	base := slug
+	start := 2
+	if m := slugSuffixRe.FindStringSubmatch(slug); m != nil {
+		base = m[1]
+		// m[2] is a non-empty digit run with no leading zero (the regex),
+		// so Atoi always succeeds; start one past it.
+		n, _ := strconv.Atoi(m[2])
+		start = n + 1
+	}
+	for n := start; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if len(candidate) > slugMaxLen {
+			return "", fmt.Errorf("cannot auto-suffix slug %q: every candidate (e.g. %q) exceeds the %d-character slug cap — pass an explicit, shorter --slug",
+				slug, candidate, slugMaxLen)
+		}
+		if !SlugExistsFold(entries, candidate) {
+			return candidate, nil
+		}
+	}
 }
 
 // RemoveAssignment drops by Slug (case-sensitive, mirroring

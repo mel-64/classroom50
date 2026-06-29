@@ -1,6 +1,7 @@
 package assignment
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -1111,4 +1112,133 @@ func TestValidateAssignmentEntry_DueMeta(t *testing.T) {
 			t.Errorf("well-formed due_meta should validate, got %v", err)
 		}
 	})
+}
+
+func entriesWithSlugs(slugs ...string) []AssignmentEntry {
+	out := make([]AssignmentEntry, len(slugs))
+	for i, s := range slugs {
+		out[i] = AssignmentEntry{Slug: s}
+	}
+	return out
+}
+
+// TestParseAssignments_PreservesUnknownEntryField pins the "tolerate AND
+// preserve" rule: an unknown top-level entry key (e.g. one a newer binary
+// or the web GUI added) must NOT fail the parse and must round-trip
+// verbatim through a re-encode, so a read-modify-write here never drops it.
+func TestParseAssignments_PreservesUnknownEntryField(t *testing.T) {
+	in := []byte(`{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {
+      "slug": "hello",
+      "name": "Hello",
+      "mode": "individual",
+      "autograder": "default",
+      "future_field": {"nested": [1, 2, 3]},
+      "another_future": "v2-only"
+    }
+  ]
+}`)
+	file, err := ParseAssignments(in)
+	if err != nil {
+		t.Fatalf("ParseAssignments must tolerate an unknown entry field: %v", err)
+	}
+	entry := file.Assignments[0]
+	if entry.Extra == nil {
+		t.Fatalf("unknown fields should be captured into Extra, got nil")
+	}
+	if _, ok := entry.Extra["future_field"]; !ok {
+		t.Errorf("future_field not captured into Extra: %v", entry.Extra)
+	}
+
+	out, err := EncodeAssignments(file)
+	if err != nil {
+		t.Fatalf("EncodeAssignments: %v", err)
+	}
+	// Re-parse the re-encoded bytes and confirm the unknown fields survive.
+	reparsed, err := ParseAssignments(out)
+	if err != nil {
+		t.Fatalf("re-parse of re-encoded file: %v\n%s", err, out)
+	}
+	got := reparsed.Assignments[0]
+	if string(got.Extra["another_future"]) != `"v2-only"` {
+		t.Errorf("another_future not preserved verbatim: %s", got.Extra["another_future"])
+	}
+	var nested map[string]any
+	if err := json.Unmarshal(got.Extra["future_field"], &nested); err != nil {
+		t.Fatalf("future_field not preserved as valid JSON: %v", err)
+	}
+	if !strings.Contains(string(out), "future_field") || !strings.Contains(string(out), "another_future") {
+		t.Errorf("re-encoded file dropped an unknown field:\n%s", out)
+	}
+}
+
+// TestParseAssignments_RejectsUnknownTopLevelKey confirms the ENVELOPE
+// stays strict even though entries are tolerant.
+func TestParseAssignments_RejectsUnknownTopLevelKey(t *testing.T) {
+	in := []byte(`{"schema":"classroom50/assignments/v1","assignments":[],"extra":1}`)
+	if _, err := ParseAssignments(in); err == nil {
+		t.Fatal("unknown top-level envelope key must still be rejected")
+	}
+}
+
+func TestSlugExistsFold(t *testing.T) {
+	entries := entriesWithSlugs("hello", "Greet")
+	cases := []struct {
+		slug string
+		want bool
+	}{
+		{"hello", true},
+		{"HELLO", true}, // case-insensitive: slugs become repo path segments
+		{"greet", true},
+		{"missing", false},
+	}
+	for _, tc := range cases {
+		if got := SlugExistsFold(entries, tc.slug); got != tc.want {
+			t.Errorf("SlugExistsFold(%q) = %v, want %v", tc.slug, got, tc.want)
+		}
+	}
+}
+
+func TestNextAvailableSlug(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []AssignmentEntry
+		slug    string
+		want    string
+	}{
+		{"free slug unchanged", entriesWithSlugs("other"), "hello", "hello"},
+		{"first collision -> -2", entriesWithSlugs("hello"), "hello", "hello-2"},
+		{"case-insensitive collision -> -2", entriesWithSlugs("Hello"), "hello", "hello-2"},
+		{"skips taken suffixes", entriesWithSlugs("hello", "hello-2", "hello-3"), "hello", "hello-4"},
+		{"base already -N increments from N+1", entriesWithSlugs("hello-2"), "hello-2", "hello-3"},
+		{"base -N skips taken", entriesWithSlugs("hello-2", "hello-3"), "hello-2", "hello-4"},
+		{"non-suffix trailing number is treated as base", entriesWithSlugs("week1"), "week1", "week1-2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NextAvailableSlug(tc.entries, tc.slug)
+			if err != nil {
+				t.Fatalf("NextAvailableSlug(%q): unexpected error %v", tc.slug, err)
+			}
+			if got != tc.want {
+				t.Errorf("NextAvailableSlug(%q) = %q, want %q", tc.slug, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNextAvailableSlug_OverflowsCap pins that an auto-suffix which would
+// exceed the 39-char slug cap returns an actionable error rather than a
+// too-long candidate (which a downstream validator would reject with a
+// generic pattern error).
+func TestNextAvailableSlug_OverflowsCap(t *testing.T) {
+	base := strings.Repeat("a", 39) // already at the cap; any "-N" overflows
+	entries := entriesWithSlugs(base)
+	if _, err := NextAvailableSlug(entries, base); err == nil {
+		t.Fatal("expected an over-cap auto-suffix error, got nil")
+	} else if !strings.Contains(err.Error(), "--slug") {
+		t.Errorf("error should point at --slug, got %v", err)
+	}
 }

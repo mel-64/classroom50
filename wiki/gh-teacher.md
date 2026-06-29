@@ -23,8 +23,10 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher audit <org>` | Read-only audit of the org member-privilege lockdown. Re-reads the org and reports which API-readable settings are enforced vs. drifted, plus the four web-UI-only settings it can't read (confirm by hand). Exits non-zero if a critical lockdown field is unenforced; `--json` for a machine-readable report. |
 | `gh teacher rotate-service-token <org>` | Replace the `CLASSROOM50_SERVICE_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
-| `gh teacher classroom list <org>` | List the classrooms registered in `<org>/classroom50`, one short-name per line. Optional: `--json` (full `{short_name, name, term}` objects), `--quiet` (suppress the stderr summary). Read-only. |
+| `gh teacher classroom list <org>` | List the classrooms registered in `<org>/classroom50`, one short-name per line. Archived classrooms (`active: false`) are hidden by default — pass `--all` to include them (tagged ` (archived)`). Optional: `--json` (full `{short_name, name, term, active}` objects), `--quiet` (suppress the stderr summary). Read-only. |
 | `gh teacher classroom edit <org> <short-name>` | Update a classroom's display name and/or term in `classroom.json`. Requires at least one of `--name "<display name>"`, `--term <term>`. The short-name itself is immutable. No-op when values are unchanged. |
+| `gh teacher classroom archive <org> <short-name>` | Mark a classroom as archived (`active: false`). Archived classrooms drop out of the default `classroom list`, and `assignment add`/`reuse` refuse to write into them. Existing student repos are untouched. No-op if already archived. Reverse with `unarchive`. |
+| `gh teacher classroom unarchive <org> <short-name>` | Restore an archived classroom to active by dropping the `active` flag from `classroom.json` (absent = active). No-op if already active. |
 | `gh teacher classroom remove <org> <short-name>` | Delete a classroom's `<short-name>/` directory from `<org>/classroom50` in one commit. Prompts for the typed short-name to confirm; `--yes` skips the prompt. Does NOT delete student repos. |
 | `gh teacher classroom migrate --source <id-or-org> --target <org>` | Import an existing GitHub Classroom into `<target>/classroom50`. Discovers the source classroom (numeric ID or org login), copies each starter repo into the target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. Optional: `--short-name`, `--term`, `--template-suffix`, `--include-archived`, `--dry-run`. Roster and scores are NOT migrated. |
 | `gh teacher roster list <org> <classroom>` | List the students in `students.csv` as an aligned table (username, name, email, section, github_id). Optional: `--json` (full `{username, first_name, last_name, email, section, github_id}` objects), `--quiet` (one username per line, no table or stderr summary). Read-only. |
@@ -40,7 +42,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher autograder show <org> <classroom>` | Print the classroom default `autograder.py` to stdout, or report none. Optional: `--json` (metadata `{path, exists, is_stub, size, sha}` instead of the body), `--quiet` (suppress the stderr summary). Read-only. |
 | `gh teacher autograder list <org> <classroom>` | List named shims (`<name>.yaml`) and per-assignment override bundles (`<slug>/`) under `<classroom>/autograders/`, one per line. Optional: `--json` (full `{name, kind, path}` objects), `--quiet`. The classroom default is not listed (use `show`). Read-only. |
 | `gh teacher autograder remove <org> <classroom>` | Delete the classroom default `<classroom>/autograder.py` in one commit (distinct from overwriting it with the stub). Prompts `[y/N]` to confirm; `--yes` skips. Idempotent. Does NOT touch per-assignment overrides or named shims. |
-| `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
+| `gh teacher assignment reuse <org> <source-slug> --from <src> --to <dst>` | Copy an assignment record from one classroom's `assignments.json` into another in the **same org**, changing only slug/name. Every field is copied verbatim (template, due, mode, autograder, tests, …), including unknown/future fields. Refuses an archived target. Optional: `--slug`/`--name` to override (a colliding slug auto-suffixes `-2`/`-3`… case-insensitively unless `--slug` is given), `--json` (emit the resolved copy incl. the final slug). Re-grants the private in-org template's team read for the target. In-org only (v1). |
 | `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
 
 ## `gh teacher init`
@@ -170,14 +172,18 @@ List every classroom registered in `<org>/classroom50`. A classroom is a root-le
 ```sh
 gh teacher classroom list <org>
 gh teacher classroom list cs50-fall-2026
+gh teacher classroom list cs50-fall-2026 --all
 gh teacher classroom list cs50-fall-2026 --json
 ```
 
 Default output is one short-name per line on stdout — pipeable into `xargs`, `grep`, or an agent loop. A one-line `<org>/classroom50: N classroom(s)` summary prints to stderr.
 
+**Archived classrooms are hidden by default.** A classroom archived with `gh teacher classroom archive` (`active: false` in its `classroom.json`) drops out of the default listing, mirroring the web's default classes view. Pass `--all` to include them: in the default output an archived classroom is tagged ` (archived)` after its short-name; in `--json` it carries `"active": false`. An active classroom omits the `active` key entirely (absent = active), so legacy classrooms and re-activated ones read identically.
+
 **Flags:**
 
-- `--json` — emit the full JSON array of `{short_name, name, term}` objects instead of bare short-names, preserving the display name and term without a second call.
+- `--json` — emit the full JSON array of `{short_name, name, term, active}` objects instead of bare short-names, preserving the display name, term, and archival state without a second call. `active` is present only on archived classrooms (`false`); absent means active. Scripts/agents that need archived classrooms too must pass `--all` — the filter runs before both the text and JSON render paths.
+- `--all` — include archived classrooms (`active: false`), which are hidden by default.
 - `-q`, `--quiet` — suppress the stderr summary so stdout is the only output stream a capturing script has to parse.
 
 This is a read-only command; no commit lands on the repo. Missing `<org>/classroom50` points at `gh teacher init`. Exits 0 with empty stdout when no classrooms are registered yet.
@@ -197,6 +203,28 @@ At least one of `--name` / `--term` must be provided. Only the flags you pass ar
 **The short-name is immutable.** It flows into student repo names (`<short-name>-<assignment>-<username>`), so renaming it would orphan existing repos — to rename, add a new classroom instead.
 
 Lands as a single Tree commit on the default branch. Re-running with values that already match the file is a no-op (no commit). Missing config repo points at `gh teacher init`; a missing classroom points at `gh teacher classroom add`.
+
+## `gh teacher classroom archive` / `unarchive`
+
+Toggle a classroom's lifecycle state via the `active` flag in `<org>/classroom50/<short-name>/classroom.json`:
+
+```sh
+gh teacher classroom archive <org> <short-name>
+gh teacher classroom archive cs50-fall-2026 cs-principles
+gh teacher classroom unarchive cs50-fall-2026 cs-principles
+```
+
+**Archival semantics** (schema `classroom50/classroom/v1`, mirroring the web): `active: false` = archived; `active: true` **or absent** = active. Legacy classrooms that never wrote the key read as active. `archive` stamps `active: false`; `unarchive` **drops the key entirely** (rather than writing `active: true`) so a re-activated classroom is byte-identical to one that was never archived.
+
+**What archiving does:**
+
+- The classroom is **hidden from the default `gh teacher classroom list`** (pass `--all` to see it, tagged ` (archived)`).
+- `gh teacher assignment add` and `gh teacher assignment reuse` **refuse to write** into an archived target classroom, with an error pointing at `unarchive`.
+- **Existing student repos are untouched** — archiving is a config-repo state change only.
+
+**Student `accept` is blocked only after the next publish.** The student-facing accept guard reads `active` from the published `classrooms-index.json`, which only gains the flag on the next `publish-pages` run (and only once the classroom has re-run `gh teacher init` to pick up the updated `publish-pages.yaml`). Until then, archive is teacher-side only — a documented v1 limitation, matching the web. `archive` prints a stderr note to this effect.
+
+Both verbs land a single Tree commit and are **idempotent**: re-archiving an already-archived classroom (or unarchiving an active one) is a no-op with a `no changes` note and no commit. Missing config repo points at `gh teacher init`; a missing classroom points at `gh teacher classroom add`.
 
 ## `gh teacher classroom remove`
 
@@ -421,6 +449,42 @@ See the [Autograders](Autograders) wiki page for the entrypoint contract and cop
 - Repeated rebase failures (5 attempts with exponential backoff) → `lost the rebase race` with a retry hint.
 
 **Same-slug concurrent writes.** The rebase loop handles concurrent edits to *different* slugs cleanly — each teacher's retry sees the other's commit and re-applies their own upsert. For concurrent edits to the *same* slug (two teachers running `gh teacher assignment add hello ...` within the rebase window), the contract is last-writer-wins: the loser's retry observes the winner's entry and replaces it with theirs, without an on-CLI signal. Both commits remain in the config repo's git history, so a teacher who notices an unexpected overwrite can recover with `git revert` on the config repo.
+
+### `gh teacher assignment reuse`
+
+```sh
+gh teacher assignment reuse <org> <source-slug> --from <source-classroom> --to <target-classroom> [--slug <new-slug>] [--name "<new name>"] [--json]
+gh teacher assignment reuse cs50-fall-2026 hello --from cs-principles-2025 --to cs-principles-2026
+gh teacher assignment reuse cs50-fall-2026 hello --from old --to new --slug hello-redux --name "Hello (Redux)"
+gh teacher assignment reuse cs50-fall-2026 hello --from old --to new --json
+```
+
+Copy an existing assignment record from one classroom's `assignments.json` into another's, **within the same org** — the scriptable counterpart to the web's "reuse assignment", ideal for rebuilding last term's assignments in a new classroom. The source record is copied **verbatim** through the typed entry (template, due/due_meta, mode, autograder, max_group_size, feedback_pr, runtime, allowed_files, pass_threshold, tests, description); only the slug and name can change. Unknown/future top-level entry fields (added by a newer binary or the web GUI) are preserved too, so reuse never drops a field this CLI doesn't yet model.
+
+**Required flags:**
+
+- `--from <source-classroom>` — the classroom to copy from.
+- `--to <target-classroom>` — the classroom to copy into (same org).
+
+**Optional flags:**
+
+- `--slug <new-slug>` — slug for the copy in the target classroom. By default the source slug is reused; on a **case-insensitive** collision it auto-suffixes `-2`, `-3`, … (slugs become GitHub repo path segments, which are case-insensitive). Passing `--slug` explicitly **refuses** a colliding name instead of auto-suffixing. An auto-suffix that would exceed the 39-char slug cap errors with a hint to pass a shorter `--slug`.
+- `--name "<new name>"` — display name for the copy (default: the source name).
+- `--json` — emit the resolved copy as JSON on stdout — `{org, classroom, slug, source_slug, auto_suffixed, template}` — instead of the human summary. **Read the final slug from here**, not by parsing the prose: an auto-suffixed slug isn't known until the write resolves the collision, so scripts/agents should rely on the `slug` field. Advisory notes still go to stderr, keeping stdout a single parseable JSON value.
+
+**Template team grant.** When the copied assignment references a **private, in-org** template, reuse re-applies the target classroom's team read grant on it (the same grant `assignment add` performs) so rostered students in the target classroom can generate from it. A public template (or no template) needs no grant. A **private out-of-org** template can't be granted (reuse is in-org only for private templates in v1) — reuse warns and lands the copy anyway rather than failing; copy the template into the org and re-add to fix it. A template that 404s (deleted or invisible) warns similarly.
+
+**In-org only (v1).** Cross-org reuse of a private template is out of scope, since the target classroom's students can only be team-granted read on a template inside their own org.
+
+**Archived target refused.** Like `assignment add`, reuse refuses to write into an archived (`active: false`) target classroom, pointing at `gh teacher classroom unarchive`.
+
+**Errors:**
+
+- `<org>/classroom50` missing → `run gh teacher init <org> first`.
+- Source slug not found in the source classroom → lists the `gh teacher assignment list` command to see available slugs.
+- An explicit `--slug` that collides (case-insensitively) in the target → `choose a different --slug`.
+- `--from` and `--to` are the same classroom with no `--slug` → refused (an in-place reuse must rename to a distinct slug).
+- The post-commit template grant fails (missing team, transport error) **after the copy already landed** → the error makes the partial state clear; the copy is committed and re-running is safe (the grant is idempotent).
 
 ### `gh teacher assignment remove`
 

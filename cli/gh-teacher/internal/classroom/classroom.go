@@ -77,6 +77,8 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(classroomAddCmd())
 	cmd.AddCommand(classroomListCmd())
 	cmd.AddCommand(classroomEditCmd())
+	cmd.AddCommand(classroomArchiveCmd())
+	cmd.AddCommand(classroomUnarchiveCmd())
 	cmd.AddCommand(classroomRemoveCmd())
 	cmd.AddCommand(classroomMigrateCmd())
 	return cmd
@@ -123,15 +125,8 @@ func classroomAddCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			org := strings.TrimSpace(args[0])
-			shortName := strings.TrimSpace(args[1])
-			if org == "" {
-				return errors.New("org must not be empty")
-			}
-			if shortName == "" {
-				return errors.New("short-name must not be empty")
-			}
-			if err := validate.ShortName(shortName, "short-name"); err != nil {
+			org, shortName, err := parseOrgShortNameArgs(args)
+			if err != nil {
 				return err
 			}
 
@@ -262,18 +257,22 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 
 // classroomSummary is the per-classroom view emitted by
 // `classroom list --json`: the human-relevant subset of
-// classroom.json.
+// classroom.json. Active mirrors the classroom/v1 lifecycle flag
+// (omitted when active/absent, false when archived) so a JSON consumer
+// sees the same archived/active state the web does.
 type classroomSummary struct {
 	ShortName string              `json:"short_name"`
 	Name      string              `json:"name"`
 	Term      string              `json:"term"`
 	Team      *configrepo.TeamRef `json:"team,omitempty"`
+	Active    *bool               `json:"active,omitempty"`
 }
 
 func classroomListCmd() *cobra.Command {
 	var (
 		asJSON bool
 		quiet  bool
+		all    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list <org>",
@@ -281,6 +280,11 @@ func classroomListCmd() *cobra.Command {
 		Long: "List every classroom registered in <org>/classroom50.\n\n" +
 			"A classroom is a root-level directory holding a classroom.json;\n" +
 			"directories without one (e.g. .github) are skipped.\n\n" +
+			"Archived classrooms (classroom.json `active: false`) are hidden\n" +
+			"by default, mirroring the web's default classes list; pass --all\n" +
+			"to include them. In the default output an archived classroom is\n" +
+			"tagged ` (archived)` after its short-name; in --json it carries\n" +
+			"`\"active\": false`.\n\n" +
 			"Default output is one short-name per line on stdout — pipeable\n" +
 			"into `xargs`, `grep`, or an agent loop. Pass --json to emit the\n" +
 			"full array of {short_name, name, term} objects instead. A\n" +
@@ -288,6 +292,7 @@ func classroomListCmd() *cobra.Command {
 			"unless --quiet is set.\n\n" +
 			"This is a read-only command; no commit lands on the repo.",
 		Example: "  gh teacher classroom list cs50-fall-2026\n" +
+			"  gh teacher classroom list cs50-fall-2026 --all\n" +
 			"  gh teacher classroom list cs50-fall-2026 --json",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -300,17 +305,19 @@ func classroomListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runClassroomList(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, asJSON, quiet)
+			return runClassroomList(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, asJSON, quiet, all)
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the full JSON array of {short_name, name, term} objects instead of one short-name per line")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the full JSON array of {short_name, name, term, active} objects instead of one short-name per line")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress the stderr summary so stdout is the only output stream")
+	cmd.Flags().BoolVar(&all, "all", false, "Include archived classrooms (active:false), which are hidden by default")
 	return cmd
 }
 
 // runClassroomList: one branch resolve, one root listing, then one
-// classroom.json read per directory to recover name/term. No commit.
-func runClassroomList(client githubapi.Client, out, errOut io.Writer, org string, asJSON, quiet bool) error {
+// classroom.json read per directory to recover name/term/active. No
+// commit. Archived classrooms (active:false) are dropped unless `all`.
+func runClassroomList(client githubapi.Client, out, errOut io.Writer, org string, asJSON, quiet, all bool) error {
 	branch, err := configrepo.ResolveConfigRepoBranch(client, org)
 	if err != nil {
 		return err
@@ -332,11 +339,15 @@ func runClassroomList(client githubapi.Client, out, errOut io.Writer, org string
 		if !ok {
 			continue // a dir without classroom.json isn't a classroom
 		}
+		if c.IsArchived() && !all {
+			continue // hidden by default, like the web's classes list
+		}
 		classrooms = append(classrooms, classroomSummary{
 			ShortName: e.Name,
 			Name:      c.Name,
 			Term:      c.Term,
 			Team:      c.Team,
+			Active:    c.Active,
 		})
 	}
 
@@ -351,7 +362,11 @@ func runClassroomList(client githubapi.Client, out, errOut io.Writer, org string
 		_, _ = out.Write(data)
 	} else {
 		for _, c := range classrooms {
-			_, _ = fmt.Fprintln(out, c.ShortName)
+			if c.Active != nil && !*c.Active {
+				_, _ = fmt.Fprintf(out, "%s (archived)\n", c.ShortName)
+			} else {
+				_, _ = fmt.Fprintln(out, c.ShortName)
+			}
 		}
 	}
 
@@ -396,15 +411,8 @@ func classroomEditCmd() *cobra.Command {
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			org := strings.TrimSpace(args[0])
-			shortName := strings.TrimSpace(args[1])
-			if org == "" {
-				return errors.New("org must not be empty")
-			}
-			if shortName == "" {
-				return errors.New("short-name must not be empty")
-			}
-			if err := validate.ShortName(shortName, "short-name"); err != nil {
+			org, shortName, err := parseOrgShortNameArgs(args)
+			if err != nil {
 				return err
 			}
 			setName := cmd.Flags().Changed("name")
@@ -424,17 +432,17 @@ func classroomEditCmd() *cobra.Command {
 	return cmd
 }
 
-// editClassroom reads classroom.json inside the build callback (so it
-// stays consistent across rebase attempts), applies only the changed
-// fields, and re-commits. A proposed body identical to the on-disk
-// one short-circuits to a no-op.
-func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName string, setName bool, name string, setTerm bool, term string) error {
-	branch, err := configrepo.ResolveConfigRepoBranch(client, org)
+// commitClassroomMutation is the shared read-modify-write skeleton for the
+// classroom.json mutators (edit, archive/unarchive): it reads the file
+// inside the build callback (consistent across rebase attempts), applies
+// `mutate`, and re-commits, short-circuiting to a no-op when the body is
+// unchanged. The caller owns all output; this returns only the no-op flag
+// and the resolved branch (for the caller's "View at" line).
+func commitClassroomMutation(client githubapi.Client, org, shortName, message string, mutate func(*configrepo.ClassroomJSON)) (noop bool, branch string, err error) {
+	branch, err = configrepo.ResolveConfigRepoBranch(client, org)
 	if err != nil {
-		return err
+		return false, "", err
 	}
-
-	noop := false
 	path := configrepo.ClassroomFilePath(shortName)
 	build := func(parentSHA string) (map[string]string, error) {
 		noop = false
@@ -450,12 +458,7 @@ func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortNam
 		if err := json.Unmarshal(data, &c); err != nil {
 			return nil, fmt.Errorf("%s/%s/%s: %w", org, configrepo.ConfigRepoName, path, err)
 		}
-		if setName {
-			c.Name = name
-		}
-		if setTerm {
-			c.Term = term
-		}
+		mutate(&c)
 		updated, err := output.JSONPretty(c)
 		if err != nil {
 			return nil, fmt.Errorf("encode classroom.json: %w", err)
@@ -466,9 +469,26 @@ func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortNam
 		}
 		return map[string]string{path: string(updated)}, nil
 	}
-
-	message := fmt.Sprintf("Edit %s classroom (gh teacher classroom edit)", shortName)
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
+		return false, "", err
+	}
+	return noop, branch, nil
+}
+
+// editClassroom applies only the changed display name/term to
+// classroom.json. A proposed body identical to the on-disk one
+// short-circuits to a no-op.
+func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName string, setName bool, name string, setTerm bool, term string) error {
+	message := fmt.Sprintf("Edit %s classroom (gh teacher classroom edit)", shortName)
+	noop, branch, err := commitClassroomMutation(client, org, shortName, message, func(c *configrepo.ClassroomJSON) {
+		if setName {
+			c.Name = name
+		}
+		if setTerm {
+			c.Term = term
+		}
+	})
+	if err != nil {
 		return err
 	}
 	if noop {
@@ -476,6 +496,127 @@ func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortNam
 		return nil
 	}
 	_, _ = fmt.Fprintf(out, "%s/%s: updated classroom %s\n", org, configrepo.ConfigRepoName, shortName)
+	_, _ = fmt.Fprintf(errOut, "View at https://github.com/%s/%s/tree/%s/%s\n", org, configrepo.ConfigRepoName, branch, shortName)
+	return nil
+}
+
+// classroomArchiveCmd / classroomUnarchiveCmd toggle the classroom/v1
+// `active` flag (archive => active:false; unarchive => drop the field, so
+// absent = active per the web's contract). Two verbs rather than an
+// `--active` flag on `edit` so the intent is obvious in shell history and
+// `edit`'s "at least one of --name/--term" contract stays unchanged.
+func classroomArchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "archive <org> <short-name>",
+		Short: "Archive a classroom (set active:false)",
+		Long: "Mark <org>/classroom50/<short-name>/classroom.json as archived by\n" +
+			"setting `active: false` (schema classroom50/classroom/v1).\n\n" +
+			"Archived classrooms are hidden from the default `classroom list`\n" +
+			"(pass --all to see them) and refuse new `assignment add`/`reuse`\n" +
+			"writes, mirroring the web. Existing student repos are untouched.\n\n" +
+			"Student `accept` is blocked only once the archival flag has been\n" +
+			"published to Pages (the next `publish-pages` run surfaces `active`\n" +
+			"in classrooms-index.json); until then the accept-guard is the\n" +
+			"documented v1 limitation.\n\n" +
+			"Re-running on an already-archived classroom is a no-op. Reverse\n" +
+			"with `gh teacher classroom unarchive`.",
+		Example: "  gh teacher classroom archive cs50-fall-2026 cs-principles",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			org, shortName, err := parseOrgShortNameArgs(args)
+			if err != nil {
+				return err
+			}
+			client, err := githubapi.RequireAuthClient(cmd)
+			if err != nil {
+				return err
+			}
+			return setClassroomActive(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, shortName, false)
+		},
+	}
+	return cmd
+}
+
+func classroomUnarchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unarchive <org> <short-name>",
+		Short: "Unarchive a classroom (restore it to active)",
+		Long: "Restore an archived classroom to active by dropping the `active`\n" +
+			"flag from <org>/classroom50/<short-name>/classroom.json. Per the\n" +
+			"classroom50/classroom/v1 contract, an absent `active` reads as\n" +
+			"active (same state as a classroom that was never archived), so\n" +
+			"unarchive removes the key rather than writing `active: true`.\n\n" +
+			"Re-running on an already-active classroom is a no-op.",
+		Example: "  gh teacher classroom unarchive cs50-fall-2026 cs-principles",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			org, shortName, err := parseOrgShortNameArgs(args)
+			if err != nil {
+				return err
+			}
+			client, err := githubapi.RequireAuthClient(cmd)
+			if err != nil {
+				return err
+			}
+			return setClassroomActive(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, shortName, true)
+		},
+	}
+	return cmd
+}
+
+// parseOrgShortNameArgs is the shared <org> <short-name> validation for
+// the classroom subcommands that take exactly that pair.
+func parseOrgShortNameArgs(args []string) (org, shortName string, err error) {
+	org = strings.TrimSpace(args[0])
+	shortName = strings.TrimSpace(args[1])
+	if org == "" {
+		return "", "", errors.New("org must not be empty")
+	}
+	if shortName == "" {
+		return "", "", errors.New("short-name must not be empty")
+	}
+	if err := validate.ShortName(shortName, "short-name"); err != nil {
+		return "", "", err
+	}
+	return org, shortName, nil
+}
+
+// setClassroomActive flips the `active` flag on classroom.json: true clears
+// the field (absent = active), false stamps `active: false`. A no-op when
+// unchanged, so re-archiving / re-activating is harmless.
+func setClassroomActive(client githubapi.Client, out, errOut io.Writer, org, shortName string, active bool) error {
+	verb, verbCap := "archive", "Archive"
+	if active {
+		verb, verbCap = "unarchive", "Unarchive"
+	}
+	message := fmt.Sprintf("%s %s classroom (gh teacher classroom %s)", verbCap, shortName, verb)
+	noop, branch, err := commitClassroomMutation(client, org, shortName, message, func(c *configrepo.ClassroomJSON) {
+		if active {
+			c.Active = nil // drop the flag: absent = active
+		} else {
+			f := false
+			c.Active = &f
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if noop {
+		state := "archived"
+		if active {
+			state = "active"
+		}
+		_, _ = fmt.Fprintf(out, "%s/%s: classroom %s already %s (no changes)\n", org, configrepo.ConfigRepoName, shortName, state)
+		return nil
+	}
+	if active {
+		_, _ = fmt.Fprintf(out, "%s/%s: unarchived classroom %s (now active)\n", org, configrepo.ConfigRepoName, shortName)
+	} else {
+		_, _ = fmt.Fprintf(out, "%s/%s: archived classroom %s (active:false)\n", org, configrepo.ConfigRepoName, shortName)
+		_, _ = fmt.Fprintf(errOut, "Note: student `accept` is blocked only after the next publish-pages run surfaces `active` in classrooms-index.json.\n")
+	}
 	_, _ = fmt.Fprintf(errOut, "View at https://github.com/%s/%s/tree/%s/%s\n", org, configrepo.ConfigRepoName, branch, shortName)
 	return nil
 }
@@ -498,15 +639,8 @@ func classroomRemoveCmd() *cobra.Command {
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			org := strings.TrimSpace(args[0])
-			shortName := strings.TrimSpace(args[1])
-			if org == "" {
-				return errors.New("org must not be empty")
-			}
-			if shortName == "" {
-				return errors.New("short-name must not be empty")
-			}
-			if err := validate.ShortName(shortName, "short-name"); err != nil {
+			org, shortName, err := parseOrgShortNameArgs(args)
+			if err != nil {
 				return err
 			}
 			client, err := githubapi.RequireAuthClient(cmd)

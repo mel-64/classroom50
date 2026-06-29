@@ -20,7 +20,8 @@
     },
     "assignment": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
+      "description": "One assignment record. additionalProperties is true so a top-level field a newer binary or the web GUI adds survives a read-modify-write verbatim (the 'tolerate AND preserve' rule: CLI via AssignmentEntry.Extra, web via the `...source` spread). Known sub-objects (template/due_meta/runtime, and each tests item) stay closed so a typo inside one is still a hard error.",
       "required": ["slug", "name", "mode", "autograder"],
       "properties": {
         "slug": { "$ref": "#/$defs/shortName" },
