@@ -5,6 +5,7 @@ import { useState } from "react"
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
 import Breadcrumb from "@/components/breadcrumb"
 import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
+import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -14,6 +15,7 @@ import { ReuseFromClassroomModal } from "@/components/modals/ReuseFromClassroomM
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
@@ -97,6 +99,7 @@ const TeacherAssignmentsView = ({
     classroom,
   )
   const archived = isClassroomArchived(classroomData ?? {})
+  const emptyRoster = useEmptyRosterWarning(org, classroom)
 
   return (
     <div>
@@ -135,6 +138,13 @@ const TeacherAssignmentsView = ({
           </Link>{" "}
           to make changes.
         </ArchivedClassroomNotice>
+      ) : emptyRoster.show ? (
+        <EmptyRosterNotice
+          org={org}
+          classroom={classroom}
+          hasRosterRows={emptyRoster.hasRosterRows}
+          className="mb-4"
+        />
       ) : null}
       <AssignmentsTable
         org={org}

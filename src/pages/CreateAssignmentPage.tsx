@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "@tanstack/react-router"
 import Breadcrumb from "@/components/breadcrumb"
 import MissingParams from "@/components/MissingParams"
 import RequireTeacher from "@/components/RequireTeacher"
+import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
 import CreateAssignmentForm from "@/pages/assignments/CreateAssignmentForm"
 import Drawer, {
   DrawerContent,
@@ -15,6 +16,7 @@ import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
 import type {
@@ -33,6 +35,8 @@ const CreateAssignmentPage = () => {
 
   const { data: assignmentsData } = useGetClassroomAssignments(org, classroom)
   const takenSlugs = (assignmentsData?.assignments ?? []).map((a) => a.slug)
+
+  const emptyRoster = useEmptyRosterWarning(org, classroom)
 
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
@@ -113,6 +117,13 @@ const CreateAssignmentPage = () => {
                 </h1>
               </div>
             </div>
+            {emptyRoster.show ? (
+              <EmptyRosterNotice
+                org={org}
+                classroom={classroom}
+                hasRosterRows={emptyRoster.hasRosterRows}
+              />
+            ) : null}
             {errorMessage ? (
               <div className="alert alert-error mb-6">{errorMessage}</div>
             ) : (
