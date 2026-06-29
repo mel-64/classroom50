@@ -1308,7 +1308,9 @@ describe("reconcileOnboarding — onboarding-bypass (joined org directly)", () =
       classroom: "cs101",
     })
 
-    expect(result.reconciled).toEqual([{ email: "alice@x.edu", username: "alice" }])
+    expect(result.reconciled).toEqual([
+      { email: "alice@x.edu", username: "alice" },
+    ])
     const alice = rowsFromCsv(rosters.cs101).find((r) => r.username === "alice")
     expect(alice?.enrollment_status).toBe("enrolled")
     expect(alice?.enrolled_at).toBeTruthy()
@@ -1387,7 +1389,9 @@ describe("reconcileOnboarding — onboarding-bypass (joined org directly)", () =
     expect(result.reconciled).toEqual([
       { email: "erin@x.edu", username: "erin" },
     ])
-    const erin = rowsFromCsv(rosters.cs101).find((r) => r.email === "erin@x.edu")
+    const erin = rowsFromCsv(rosters.cs101).find(
+      (r) => r.email === "erin@x.edu",
+    )
     expect(erin?.username).toBe("erin")
     expect(erin?.github_id).toBe("55")
     expect(erin?.enrollment_status).toBe("enrolled")
@@ -1452,10 +1456,14 @@ describe("matchStudentToAccountWithConflictRetry — teacher manual match (email
         return Promise.reject(new Error(`unexpected request: ${path}`))
       })
 
-    return { client: { request, requestRaw } as unknown as GitHubClient, committed }
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      committed,
+    }
   }
 
-  const emailOnlyRow = ",,,frank@x.edu,,,invited,email,,tok-6,2026-01-01T00:00:00Z,\n"
+  const emailOnlyRow =
+    ",,,frank@x.edu,,,invited,email,,tok-6,2026-01-01T00:00:00Z,\n"
 
   it("writes the picked identity + enrolled for an active member", async () => {
     const { client, committed } = makeMatchClient({

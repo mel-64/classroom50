@@ -8,7 +8,12 @@ import type { Student } from "@/types/classroom"
 import type { GitHubUser } from "@/hooks/github/types"
 
 const member = (id: number, login: string, name?: string): GitHubUser =>
-  ({ id, login, name: name ?? null, avatar_url: `https://x/${login}` }) as GitHubUser
+  ({
+    id,
+    login,
+    name: name ?? null,
+    avatar_url: `https://x/${login}`,
+  }) as GitHubUser
 
 const student = (over: Partial<Student>): Student => ({
   username: "",

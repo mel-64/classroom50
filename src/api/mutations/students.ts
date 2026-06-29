@@ -1284,9 +1284,10 @@ export async function reconcileOnboarding(
   // redundant duplicate repos. A repo whose write didn't land, or whose row was
   // already enrolled, is never touched. Mode is per-classroom (default
   // "delete"); failures non-fatal. Never touch unmatched/pending.
-  const reposToCleanup = [...committed.map((c) => c.repo), ...redundantRepos].filter(
-    (repo) => repo.length > 0,
-  )
+  const reposToCleanup = [
+    ...committed.map((c) => c.repo),
+    ...redundantRepos,
+  ].filter((repo) => repo.length > 0)
   if (cleanupMode !== "keep" && reposToCleanup.length > 0) {
     let deleteScopeMissing = false
 

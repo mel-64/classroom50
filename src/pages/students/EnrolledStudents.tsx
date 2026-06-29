@@ -473,8 +473,7 @@ const MatchAccountButton = ({
     if (!q) return candidates
     return candidates.filter(
       (c) =>
-        c.login.toLowerCase().includes(q) ||
-        c.name.toLowerCase().includes(q),
+        c.login.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
     )
   }, [candidates, filter])
 
@@ -577,7 +576,9 @@ const MatchAccountButton = ({
                         <button
                           type="button"
                           className={`flex items-center justify-between gap-2${
-                            isSelected ? " active ring-2 ring-primary ring-inset" : ""
+                            isSelected
+                              ? " active ring-2 ring-primary ring-inset"
+                              : ""
                           }`}
                           aria-pressed={isSelected}
                           onClick={() => setSelected(c.github_id)}
