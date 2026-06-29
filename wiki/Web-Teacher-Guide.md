@@ -16,7 +16,7 @@ Welcome to the Classroom 50 Teacher's Guide for the web interface! The web inter
 - [Viewing and Creating Assignments](#viewing-and-creating-assignments)
 - [Viewing and Adding Students](#viewing-and-adding-students)
 - [Viewing and Collecting Submissions](#collecting-and-viewing-submissions)
-- [Editing Classroom Settings](#editing-classroom-settings)
+- [Editing Assignments and Classrooms](#editing-assignments-and-classrooms)
 
 > Throughout this documentation, we will do our best to explore all of the features that Classroom 50 has to offer; if you feel like we have missed a desired feature or see areas for improvement, please reach out to us in our [discussion forums](https://github.com/foundation50/classroom50/discussions); we look forward to hearing from you!
 
