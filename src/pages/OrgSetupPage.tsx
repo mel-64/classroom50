@@ -72,6 +72,7 @@ const INIT_STEP_ORDER: InitStepId[] = [
   "workflowPermissions",
   "reusableWorkflowAccess",
   "pages",
+  "rulesets",
 ]
 const OrgSteps = ({
   steps,
@@ -223,6 +224,11 @@ const initialSteps: Record<InitStepId, InitStepUpdate> = {
     id: "pages",
     status: "pending",
     title: "GitHub Pages",
+  },
+  rulesets: {
+    id: "rulesets",
+    status: "pending",
+    title: "Branch protection rulesets",
   },
 }
 

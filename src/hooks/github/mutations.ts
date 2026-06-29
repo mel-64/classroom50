@@ -18,6 +18,7 @@ import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 import { repairOrgDefaults } from "./orgChecks"
+import { repairRulesets } from "./rulesets"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -1936,6 +1937,7 @@ export type InitStepId =
   | "workflowPermissions"
   | "reusableWorkflowAccess"
   | "pages"
+  | "rulesets"
 
 export type InitStepUpdate = {
   id: InitStepId
@@ -2049,6 +2051,12 @@ export async function initClassroom50({
     id: "branchProtection",
     onStepUpdate,
     fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
+  })
+
+  results.rulesets = await tryStep({
+    id: "rulesets",
+    onStepUpdate,
+    fn: () => repairRulesets(client, org),
   })
 
   return buildResult("complete")
