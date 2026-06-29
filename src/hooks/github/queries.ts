@@ -579,6 +579,16 @@ export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   )
 }
 
+// Every org member across all pages. `listOrgMembers` (used by the per-classroom
+// roster, where the first 100 is effectively always enough) fetches a single
+// page; the org Members page needs the full list, so it pages to completion.
+export function listAllOrgMembers(client: GitHubClient, org: string) {
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
 // Server-side equivalent of useGetClasses: classroom dirs in the org's
 // classroom50 repo (root contents, dirs minus .github), for non-hook callers.
 export async function listClassroomDirs(
