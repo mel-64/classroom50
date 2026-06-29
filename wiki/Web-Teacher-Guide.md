@@ -215,6 +215,8 @@ This is a list of all of your students already added to this classroom. As a con
 
 ![View of existing assignment with no submissions](images/web_viewing_assignment.png)
 
+In the screenshot above, we can see that as a teacher, once you've created an assignment, you'll be able to send students a link via which they can accept the submission, at which point they will be able to then submit to it and trigger a workflow that will build a release and thereafter include any such scores as part of the score collection workflow for teachers. You need simply uncollapse the "How students accept" panel and copy the URL via its right-hand copy button, after which you can then paste to students. Should a student visit said URL, they will be taken to the following page to trigger the assignment acceptance process:
 
+![View of accepting an assignment as a student](images/web_accept_assignment.png)
 
 # Editing Classroom Settings
