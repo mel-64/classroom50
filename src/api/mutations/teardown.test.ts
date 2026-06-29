@@ -485,6 +485,48 @@ describe("executeTeardown", () => {
     expect(result.failed).toHaveLength(0)
   })
 
+  it("retains the marker when a team delete is throttled (recoverable, re-runnable)", async () => {
+    // A rate-limited team delete is recoverable, unlike a hard failure: the
+    // marker repo (which holds classroom.json) is preserved so a re-run can
+    // re-resolve and finish the throttled team. Without this the team would be
+    // silently orphaned once the marker — its only ref source — was gone.
+    const { client, deletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      failTeams: { "classroom50-cs101": "rate-limit" },
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsFailed).toEqual(["classroom50-cs101"])
+    expect(result.teamsDeleted).toHaveLength(0)
+    // Non-marker repos still deleted, but the marker is preserved (re-runnable).
+    expect(result.failed).toHaveLength(0)
+    expect(deletes).toContain("cs101-hw1-alice")
+    expect(deletes).not.toContain("classroom50")
+  })
+
+  it("ignores a team ref outside the classroom50- namespace or without a positive id", async () => {
+    // classroom.json is untrusted (config-repo-write authored, parsed without
+    // schema validation). A team ref naming a non-classroom50 slug, or one
+    // missing a positive id (which would skip deleteClassroomTeam's id-match
+    // guard and delete the slug blind), must never enter the delete set.
+    const { client, teamDeletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50"],
+      classrooms: [
+        { dir: "evil", team: { id: 0, slug: "admins" } },
+        { dir: "evil2", team: { id: 5, slug: "owners" } },
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+      ],
+    })
+    const plan = await planTeardown(client, "acme")
+    expect(plan.teams.map((t) => t.slug)).toEqual(["classroom50-cs101"])
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsDeleted).toEqual(["classroom50-cs101"])
+    expect(teamDeletes).toEqual(["classroom50-cs101"])
+  })
+
   it("refuses to delete a team whose live id no longer matches (reused slug)", async () => {
     // The slug now points at a different team (different id) than the one this
     // classroom recorded — deleteClassroomTeam refuses, and it lands in

@@ -67,7 +67,6 @@ const TeardownSection = ({ org }: { org: string }) => {
         const anyFailed =
           result.failed.length > 0 || result.teamsFailed.length > 0
         if (anyFailed) {
-          // Partial success — the marker is preserved, so teardown is re-runnable.
           const failedRepos =
             result.failed.length > 0
               ? `${result.failed.length} repositor${result.failed.length === 1 ? "y" : "ies"}`
@@ -77,8 +76,17 @@ const TeardownSection = ({ org }: { org: string }) => {
               ? `${result.teamsFailed.length} team${result.teamsFailed.length === 1 ? "" : "s"}`
               : ""
           const failedParts = [failedRepos, failedTeams].filter(Boolean)
+          // When a repo failed the marker is preserved, so a re-run finishes the
+          // job. When only teams failed, the marker (which holds classroom.json,
+          // the team-ref source) has already been deleted on this run, so a
+          // re-run would just refuse on the missing marker — the leftover teams
+          // must be removed by hand instead.
+          const remedy =
+            result.failed.length > 0
+              ? "Re-run teardown to finish."
+              : `Remove the leftover team${result.teamsFailed.length === 1 ? "" : "s"} by hand at https://github.com/orgs/${org}/teams.`
           setDone(
-            `Deleted ${repos}${teams}; ${failedParts.join(" and ")} could not be deleted. Re-run teardown to finish.`,
+            `Deleted ${repos}${teams}; ${failedParts.join(" and ")} could not be deleted. ${remedy}`,
           )
         } else {
           setDone(`Deleted ${repos}${teams}.`)

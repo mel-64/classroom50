@@ -18,6 +18,7 @@ import {
   getOrgRepos,
   getRepo,
   listClassroomDirs,
+  ONBOARDING_READ_CONCURRENCY,
   sleep,
 } from "@/hooks/github/queries"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
@@ -81,13 +82,27 @@ async function collectClassroomTeams(
   }
 
   const bySlug = new Map<string, ClassroomTeamRef>()
-  await mapWithConcurrency(dirs, 8, async (dir) => {
+  await mapWithConcurrency(dirs, ONBOARDING_READ_CONCURRENCY, async (dir) => {
     try {
       const json = await getClassroomJson(client, { org, classroom: dir.name })
-      if (json.team?.slug) {
-        bySlug.set(json.team.slug, {
-          id: json.team.id,
-          slug: json.team.slug,
+      // classroom.json is anyone-with-config-repo-write authored and parsed
+      // without schema validation, so the team ref it names is untrusted input
+      // to a destructive bulk DELETE. Only queue a ref that (a) carries a
+      // positive integer id — deleteClassroomTeam's live-id-match guard is
+      // skipped when the id is falsy, which would delete the slug blind — and
+      // (b) sits in the classroom50- namespace this app owns, so a crafted
+      // `team.slug` can never steer teardown into deleting an unrelated org
+      // team (e.g. "admins").
+      const team = json.team
+      if (
+        team?.slug &&
+        team.slug.startsWith("classroom50-") &&
+        Number.isInteger(team.id) &&
+        team.id > 0
+      ) {
+        bySlug.set(team.slug, {
+          id: team.id,
+          slug: team.slug,
         })
       }
     } catch {
@@ -212,26 +227,36 @@ async function deleteClassroomTeamWithRetry(
 }
 
 // Delete the per-classroom teams resolved from classroom.json. Deletes are
-// best-effort: a failure is recorded but never aborts teardown, mirroring the
-// repo flow's re-runnable contract.
+// best-effort: a hard failure is recorded but never aborts teardown, mirroring
+// the repo flow's re-runnable contract. A *throttle* is reported separately
+// (teamsRateLimited): unlike a hard failure it is recoverable, so the caller
+// retains the marker repo (which holds classroom.json, the only team-ref
+// source) rather than deleting it and orphaning a team that a re-run would
+// otherwise have cleaned up.
 async function deleteClassroomTeams(
   client: GitHubClient,
   org: string,
   teams: ClassroomTeamRef[],
-): Promise<{ teamsDeleted: string[]; teamsFailed: string[] }> {
+): Promise<{
+  teamsDeleted: string[]
+  teamsFailed: string[]
+  teamsRateLimited: boolean
+}> {
   const teamsDeleted: string[] = []
   const teamsFailed: string[] = []
+  let teamsRateLimited = false
 
   await mapWithConcurrency(teams, 4, async (team) => {
     const outcome = await deleteClassroomTeamWithRetry(client, org, team)
     if (outcome === "deleted") {
       teamsDeleted.push(team.slug)
     } else {
+      if (outcome === "rate-limited") teamsRateLimited = true
       teamsFailed.push(team.slug)
     }
   })
 
-  return { teamsDeleted, teamsFailed }
+  return { teamsDeleted, teamsFailed, teamsRateLimited }
 }
 
 // Execute the teardown plan with bounded concurrency, marker last. A scope 403
@@ -293,15 +318,22 @@ export async function executeTeardown(
   // is deleted — classroom.json lives in the marker repo, so reading it after
   // would be impossible. Best-effort: a team failure never blocks the marker.
   const teamRefs = await collectClassroomTeams(client, plan.org)
-  const { teamsDeleted, teamsFailed } = await deleteClassroomTeams(
-    client,
-    plan.org,
-    teamRefs,
-  )
+  const { teamsDeleted, teamsFailed, teamsRateLimited } =
+    await deleteClassroomTeams(client, plan.org, teamRefs)
+
+  // A throttled team delete is recoverable, so treat it like a repo throttle:
+  // retain the marker (don't run the block below) so classroom.json survives
+  // and a re-run can re-resolve and finish the team. A *hard* team failure
+  // (id mismatch, scope 403, exhausted 5xx) is accepted as best-effort and
+  // does NOT retain the marker — see the marker-gate note below.
+  if (teamsRateLimited) rateLimited = true
 
   // Marker deleted only on a fully-successful run; otherwise it's left behind so
-  // planTeardown's gate still passes and the run stays re-runnable.
-  if (failed.length === 0) {
+  // planTeardown's gate still passes and the run stays re-runnable. Gated on
+  // repo `failed` and a team *throttle* only: a hard team failure is best-effort
+  // and intentionally does not retain the marker (a permanently-refused team,
+  // e.g. a reused-slug id mismatch, would otherwise wedge teardown forever).
+  if (failed.length === 0 && !rateLimited) {
     for (const repo of marker) {
       await tryDelete(repo)
     }
