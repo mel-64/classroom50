@@ -4,6 +4,11 @@ import type {
   Student,
 } from "@/types/classroom"
 import type { InviteStatus } from "@/util/inviteStatus"
+import { normalizeStudentRow, splitName } from "@/api/mutations/students"
+
+// Re-exported so UI callers keep importing splitName from the roster util while
+// the single canonical implementation lives alongside the CSV write path.
+export { splitName }
 
 // Stable, position-independent per-row identity. Prefer github_id (survives a
 // rename), then username, then email. Rows always carry at least one
@@ -19,43 +24,23 @@ const ENROLLMENT_STATUSES: readonly EnrollmentStatus[] = [
 ]
 const ENROLLMENT_METHODS: readonly EnrollmentMethod[] = ["github", "email", ""]
 
-// Narrow a raw CSV row into a typed Student. enrollment_status/method are
-// string-literal unions; coerce unknown values to "" rather than letting an
-// off-list string masquerade as a valid union member.
+// Narrow a raw CSV row into a typed Student. Defaulting + trimming of every
+// column is delegated to the canonical normalizeStudentRow (one column list,
+// shared with the write path); toStudent only narrows enrollment_status/method
+// to their string-literal unions, coercing an unknown/off-list value to "".
 export function toStudent(row: Record<string, string>): Student {
+  const normalized = normalizeStudentRow(row)
   const status = ENROLLMENT_STATUSES.includes(
-    row.enrollment_status as EnrollmentStatus,
+    normalized.enrollment_status as EnrollmentStatus,
   )
-    ? (row.enrollment_status as EnrollmentStatus)
+    ? (normalized.enrollment_status as EnrollmentStatus)
     : ""
   const method = ENROLLMENT_METHODS.includes(
-    row.enrollment_method as EnrollmentMethod,
+    normalized.enrollment_method as EnrollmentMethod,
   )
-    ? (row.enrollment_method as EnrollmentMethod)
+    ? (normalized.enrollment_method as EnrollmentMethod)
     : ""
-  return {
-    username: row.username ?? "",
-    first_name: row.first_name ?? "",
-    last_name: row.last_name ?? "",
-    email: row.email ?? "",
-    section: row.section ?? "",
-    github_id: row.github_id ?? "",
-    enrollment_status: status,
-    enrollment_method: method,
-    email_hash: row.email_hash ?? "",
-    invite_token: row.invite_token ?? "",
-    invited_at: row.invited_at ?? "",
-    enrolled_at: row.enrolled_at ?? "",
-  }
-}
-
-// Split a full name: first token is first name, the rest is last name.
-export function splitName(name: string): {
-  first_name: string
-  last_name: string
-} {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
+  return { ...normalized, enrollment_status: status, enrollment_method: method }
 }
 
 // Remove rows matching `key` for the optimistic unenroll update. Removes ALL

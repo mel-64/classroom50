@@ -53,6 +53,10 @@ describe("splitName", () => {
     expect(splitName("   ")).toEqual({ first_name: "", last_name: "" })
     expect(splitName("Ada")).toEqual({ first_name: "Ada", last_name: "" })
   })
+
+  it("treats null as empty (GitHub display name may be null)", () => {
+    expect(splitName(null)).toEqual({ first_name: "", last_name: "" })
+  })
 })
 
 describe("toStudent", () => {
@@ -97,6 +101,23 @@ describe("toStudent", () => {
       enrollment_status: "onboarded",
     } as unknown as Record<string, string>)
     expect(s.enrollment_status).toBe("")
+  })
+
+  it("trims every field via the canonical normalizer (one defaulting rule)", () => {
+    // toStudent now delegates defaulting + trimming to normalizeStudentRow, so
+    // padded CSV cells are trimmed (the old toStudent skipped this).
+    const s = toStudent({
+      username: "  octocat  ",
+      first_name: " Mona ",
+      email: " octocat@x.io ",
+      github_id: " 42 ",
+      enrollment_status: " enrolled ",
+    } as unknown as Record<string, string>)
+    expect(s.username).toBe("octocat")
+    expect(s.first_name).toBe("Mona")
+    expect(s.email).toBe("octocat@x.io")
+    expect(s.github_id).toBe("42")
+    expect(s.enrollment_status).toBe("enrolled")
   })
 })
 

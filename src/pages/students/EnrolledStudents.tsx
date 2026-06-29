@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Copy,
   Link as LinkIcon,
+  Pencil,
   RefreshCw,
   Send,
   Trash,
@@ -38,8 +39,52 @@ import {
   applyReconciledToRoster,
   removeFromRoster,
   studentKey,
+  toStudent,
 } from "@/util/roster"
+import EditStudent from "@/pages/students/EditStudent"
+import type { StudentCsvRow } from "@/api/mutations/students"
 import { useEffect, useMemo, useRef, useState } from "react"
+
+const EditStudentButton = ({
+  org,
+  classroom,
+  student,
+  onSaved,
+}: {
+  org: string
+  classroom: string
+  student: Student
+  onSaved: (updated: StudentCsvRow) => void
+}) => {
+  const [open, setOpen] = useState(false)
+  const label = student.username || student.email
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="btn btn-ghost btn-square"
+        aria-label={`Edit ${label}`}
+        title="Edit student"
+      >
+        <Pencil className="size-4" />
+      </button>
+
+      <EditStudent
+        org={org}
+        classroom={classroom}
+        student={student}
+        open={open}
+        onClose={() => setOpen(false)}
+        onSaved={(updated) => {
+          onSaved(updated)
+          setOpen(false)
+        }}
+      />
+    </>
+  )
+}
 
 const UnenrollStudentButton = ({
   org,
@@ -771,6 +816,27 @@ const EnrolledStudents = ({
               )}
             </button>
           ) : null}
+
+          <EditStudentButton
+            org={org}
+            classroom={classroom}
+            student={student}
+            onSaved={(updated) => {
+              // Replace the edited row in the cached roster (see
+              // useUpdateRosterCache). studentKey is stable across any permitted
+              // edit — identity columns aren't editable, and an email-only row's
+              // email (its only key) can't be changed — so the captured rowKey
+              // still matches.
+              updateRosterCache((current) =>
+                current.map((s) =>
+                  studentKey(s) === rowKey ? toStudent(updated) : s,
+                ),
+              )
+              // A name/email change can affect invite display; keep parity with
+              // the other row actions.
+              invalidateInviteQueries()
+            }}
+          />
 
           <UnenrollStudentButton
             org={org}
