@@ -2043,8 +2043,7 @@ export async function updateStudent(
   if (nextEmail) {
     const emailKey = nextEmail.toLowerCase()
     const clash = currentStudents.some(
-      (row, idx) =>
-        idx !== targetIndex && row.email.toLowerCase() === emailKey,
+      (row, idx) => idx !== targetIndex && row.email.toLowerCase() === emailKey,
     )
     if (clash) {
       throw new Error(`Email already used by another student: ${nextEmail}`)

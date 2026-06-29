@@ -440,7 +440,9 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       },
     })
 
-    const alice = rowsFromCsv(committed.content!).find((r) => r.github_id === "42")
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "42",
+    )
     expect(alice?.first_name).toBe("Alicia")
     expect(alice?.last_name).toBe("Anderson")
     expect(alice?.section).toBe("Period 2")
@@ -471,7 +473,9 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       },
     })
 
-    const alice = rowsFromCsv(committed.content!).find((r) => r.github_id === "42")
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "42",
+    )
     expect(alice?.email).toBe("alice.new@x.edu")
     expect(alice?.email_hash).toBe(await emailHash("alice.new@x.edu"))
     expect(alice?.email_hash).not.toBe("oldhash")
@@ -487,7 +491,9 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       patch: { first_name: "Alice", last_name: "A", email: "", section: "" },
     })
 
-    const alice = rowsFromCsv(committed.content!).find((r) => r.username === "alice")
+    const alice = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "alice",
+    )
     expect(alice?.email).toBe("")
     expect(alice?.email_hash).toBe("")
   })
@@ -507,7 +513,9 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       },
     })
 
-    const bob = rowsFromCsv(committed.content!).find((r) => r.email === "bob@x.edu")
+    const bob = rowsFromCsv(committed.content!).find(
+      (r) => r.email === "bob@x.edu",
+    )
     expect(bob?.first_name).toBe("Bobby")
     expect(bob?.last_name).toBe("Brown")
     expect(bob?.section).toBe("Lab A")
@@ -569,7 +577,9 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
     const rows = rowsFromCsv(committed.content!)
     expect(rows.find((r) => r.github_id === "42")?.email).toBe("ALICE@x.edu")
     // bob untouched and still present
-    expect(rows.find((r) => r.username === "" && r.first_name === "Bob")).toBeTruthy()
+    expect(
+      rows.find((r) => r.username === "" && r.first_name === "Bob"),
+    ).toBeTruthy()
     expect(rows).toHaveLength(2)
   })
 
