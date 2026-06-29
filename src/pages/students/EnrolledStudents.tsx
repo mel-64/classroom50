@@ -823,11 +823,10 @@ const EnrolledStudents = ({
             student={student}
             onSaved={(updated) => {
               // Replace the edited row in the cached roster (see
-              // useUpdateRosterCache). studentKey (github_id -> username ->
-              // email) is stable across any permitted edit: identity columns
-              // are never editable, and the email — the only key an email-only
-              // row has — can't be changed for such a row (updateStudent and
-              // the modal both forbid it), so the captured rowKey still matches.
+              // useUpdateRosterCache). studentKey is stable across any permitted
+              // edit — identity columns aren't editable, and an email-only row's
+              // email (its only key) can't be changed — so the captured rowKey
+              // still matches.
               updateRosterCache((current) =>
                 current.map((s) =>
                   studentKey(s) === rowKey ? toStudent(updated) : s,

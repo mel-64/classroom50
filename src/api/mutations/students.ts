@@ -125,9 +125,8 @@ export function normalizeStudentRow(
 }
 
 // Split a full name: first token is first_name, the remainder is last_name.
-// Empty/whitespace-safe. Accepts null (GitHub's display name may be null).
-// The single canonical implementation, re-exported from util/roster as
-// splitName for UI callers.
+// Accepts null since GitHub's display name may be null. The single canonical
+// implementation; re-exported from util/roster as splitName for UI callers.
 export function splitName(name: string | null): {
   first_name: string
   last_name: string
@@ -1994,7 +1993,7 @@ export async function unenrollStudent(
 // The teacher-editable subset of a roster row. Identity (username, github_id)
 // and lifecycle columns (enrollment_status/method, invite_token, timestamps)
 // are deliberately excluded — they're bound by onboarding/reconcile, not the
-// teacher (#74).
+// teacher.
 export type StudentEditableFields = {
   first_name: string
   last_name: string
@@ -2016,10 +2015,10 @@ export type UpdateStudentResult = CreateClassroomResult & {
   student: StudentCsvRow
 }
 
-// Edit one roster row's teacher-facing fields in place (first/last name, email,
-// section) and commit the rewritten students.csv. Identity + lifecycle columns
-// are preserved verbatim from the matched row. Recomputes email_hash when the
-// email changes so email-based reconcile matching stays correct (#74).
+// Edit one roster row's teacher-facing fields in place and commit the rewritten
+// students.csv. Identity + lifecycle columns are preserved verbatim from the
+// matched row. Recomputes email_hash when the email changes so email-based
+// reconcile matching stays correct.
 export async function updateStudent(
   client: GitHubClient,
   input: UpdateStudentInput,
@@ -2070,7 +2069,7 @@ export async function updateStudent(
   // optimistic cache. Editing the email would re-key (or, if cleared, drop) the
   // row — stringifyStudentsCsv discards keyless rows, so a cleared email
   // silently deletes the student. Refuse any email change on such a row; the
-  // teacher should unenroll instead (#74).
+  // teacher should unenroll instead.
   if (emailChanged && !existing.username && !existing.github_id) {
     throw new Error(
       "Can't change the email for this student: they have no GitHub username " +
@@ -2091,17 +2090,15 @@ export async function updateStudent(
     }
   }
 
-  // Recompute the cached email hash only when the email changed: a new email
-  // gets a fresh hash; a cleared email clears it; an unchanged email keeps the
-  // stored hash untouched (avoids needless drift).
+  // Recompute the cached hash only when the email changed (a cleared email
+  // clears it), so an unchanged email keeps its stored hash without drift.
   let nextEmailHash = existing.email_hash
   if (emailChanged) {
     nextEmailHash = nextEmail ? await emailHash(nextEmail) : ""
   }
 
-  // Spread the existing row first so every identity/lifecycle column is
-  // preserved, then overwrite only the four editable fields. normalizeStudentRow
-  // trims and re-applies the canonical column set.
+  // Spread the existing row so every identity/lifecycle column is preserved,
+  // then overwrite only the four editable fields.
   const updatedStudent = normalizeStudentRow({
     ...existing,
     first_name: patch.first_name,

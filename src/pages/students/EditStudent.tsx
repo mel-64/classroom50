@@ -31,7 +31,7 @@ type EditStudentFormValues = {
 
 // Edit modal for a roster row's teacher-facing fields. Identity (username,
 // github_id) is shown read-only — it's bound by onboarding/reconcile, not the
-// teacher — and only first/last name, email, and section are editable (#74).
+// teacher — and only first/last name, email, and section are editable.
 const EditStudent = ({
   org,
   classroom,
@@ -103,11 +103,10 @@ const EditStudent = ({
     },
   })
 
-  // Drive the native dialog from the `open` prop. Reset the form to the
-  // student's CURRENT values each time it opens (argument-less reset reverts to
-  // the values captured at mount, which go stale after a save since this dialog
-  // is never remounted — the row key is stable across an edit), so a reopen
-  // always reflects what's persisted.
+  // Drive the native dialog from the `open` prop. Reset to the student's CURRENT
+  // values on open: this dialog is never remounted (its row key is stable), so
+  // an argument-less reset would restore mount-time values that go stale after a
+  // save.
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return

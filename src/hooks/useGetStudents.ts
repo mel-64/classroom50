@@ -21,10 +21,9 @@ const useGetStudents = (
   const client = useGitHubClient()
   // Coerce every roster row through toStudent so enrollment_status/method are
   // narrowed to their unions (an unknown/off-list value becomes "") rather than
-  // carried verbatim from a CLI-/hand-edited students.csv — otherwise an odd
-  // value bypasses inviteStatus's branches and can mis-bucket a row (#57/#52).
-  // toStudent is idempotent over an already-typed Student, so optimistic cache
-  // writes pass through unchanged.
+  // carried verbatim from a CLI-/hand-edited students.csv, which would bypass
+  // inviteStatus's branches and mis-bucket the row. toStudent is idempotent over
+  // an already-typed Student, so optimistic cache writes pass through unchanged.
   const { data: students, isLoading } = useQuery({
     ...csvFileQuery<Student>(
       client,
