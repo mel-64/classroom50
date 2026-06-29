@@ -39,6 +39,14 @@ export const isSameGitHubUser = (
   )
 }
 
+// Parse a roster row's github_id into a positive numeric GitHub id, or null
+// when it's absent/non-numeric. GitHub ids are positive integers; the CSV stores
+// them as strings.
+export const parseGitHubId = (githubId: string): number | null => {
+  const id = Number(githubId)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
 export const getName = (key: string, students: Student[]) => {
   const student = findByUsername(key, students)
   if (!student) return ""

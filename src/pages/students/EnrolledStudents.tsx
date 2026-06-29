@@ -106,12 +106,10 @@ const UnenrollStudentButton = ({
     mutationFn: (input: UnenrollStudentInput) => unenrollStudent(client, input),
   })
   const [open, setOpen] = useState(false)
-  const [removeFromOrg, setRemoveFromOrg] = useState(false)
 
-  // Only an active member offers the org-removal choice; pending invites are
-  // cancelled, non-members have nothing to remove, and self can't remove itself.
+  // Org removal now lives on the org Members page, where the student's full
+  // cross-classroom footprint is visible.
   const isMember = status === "member"
-  const canRemoveFromOrg = isMember && !isSelf
   // Email-invited rows have no username yet; show the email so the row is
   // identifiable before reconciliation.
   const label = student.username || student.email
@@ -129,7 +127,6 @@ const UnenrollStudentButton = ({
   const closeDialog = () => {
     if (submitting) return
     setOpen(false)
-    setRemoveFromOrg(false)
     setError(null)
   }
 
@@ -142,14 +139,12 @@ const UnenrollStudentButton = ({
         org,
         classroom,
         student,
-        removeFromOrg: canRemoveFromOrg ? removeFromOrg : false,
       })
       // Key the warning by a stable identity (username, else email): this button
       // unmounts on refetch, and keying stops a concurrent clean unenroll from
       // clobbering it.
       onRemoveStudent(student.username || student.email, result.teamWarning)
       setOpen(false)
-      setRemoveFromOrg(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
     } finally {
@@ -212,25 +207,14 @@ const UnenrollStudentButton = ({
             </div>
           ) : null}
 
-          {canRemoveFromOrg ? (
-            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-box border border-base-300 bg-base-200/50 p-4">
-              <input
-                type="checkbox"
-                className="checkbox checkbox-sm mt-0.5"
-                checked={removeFromOrg}
-                disabled={submitting}
-                onChange={(event) => setRemoveFromOrg(event.target.checked)}
-              />
-              <span className="text-sm text-base-content/80">
-                Also remove{" "}
-                <span className="font-semibold text-base-content">
-                  {student.username}
-                </span>{" "}
-                from the <span className="font-semibold">{org}</span>{" "}
-                organization. Leave unchecked if they are switching between your
-                classes, since keeping their membership avoids re-inviting them.
-              </span>
-            </label>
+          {isMember && !isSelf ? (
+            <p className="mt-3 text-sm text-base-content/60">
+              This only unenrolls them from this classroom — their{" "}
+              <span className="font-semibold">{org}</span> organization
+              membership is kept (they may be in your other classes). To remove
+              someone from the organization, use the Members page in
+              organization settings.
+            </p>
           ) : null}
 
           {error ? (
@@ -259,8 +243,6 @@ const UnenrollStudentButton = ({
                   <span className="loading loading-spinner loading-sm" />
                   Working...
                 </>
-              ) : isMember && removeFromOrg && !isSelf ? (
-                "Unenroll & remove from org"
               ) : (
                 "Unenroll student"
               )}

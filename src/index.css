@@ -8,3 +8,27 @@ html,
 body {
   font-family: "Inter", system-ui, sans-serif;
 }
+
+/* App-wide affordance for clickable list rows: a subtle hover lift + tint that
+   signals the whole row is interactive. Pairs with `group/row` so children
+   (e.g. a trailing chevron) can react via `group-hover/row:`. Respects reduced
+   motion by only transitioning color there. */
+@utility clickable-row {
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
+  &:hover {
+    background-color: var(--color-base-200);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: background-color 150ms ease;
+    &:hover {
+      transform: none;
+      box-shadow: none;
+    }
+  }
+}

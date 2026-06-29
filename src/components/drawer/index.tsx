@@ -714,6 +714,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
   const onSettings = settings || selected === "settings"
   const onPublished = selected === "published"
+  const onMembers = selected === "members"
   if (!org) return null
 
   const classesLabel = showTeacherUi ? "My Classes" : "My Assignments"
@@ -731,7 +732,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
               <SidebarItemBody
                 label={classesLabel}
                 icon={<BookText />}
-                active={!onSettings && !onPublished}
+                active={!onSettings && !onPublished && !onMembers}
               />
             </Link>
           </Tip>
@@ -743,6 +744,17 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
                 label="Published"
                 icon={<Globe />}
                 active={onPublished}
+              />
+            </Link>
+          </Tip>
+        )}
+        {showTeacherUi && (
+          <Tip label="Members">
+            <Link to="/$org/members" params={{ org }}>
+              <SidebarItemBody
+                label="Members"
+                icon={<UsersRound />}
+                active={onMembers}
               />
             </Link>
           </Tip>

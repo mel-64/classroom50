@@ -5,6 +5,7 @@ import {
   enrollStudentInClassroom,
   inviteStudentByEmail,
   markStudentEnrolledWithConflictRetry,
+  unenrollStudent,
   updateStudent,
   updateStudentWithConflictRetry,
 } from "./students"
@@ -911,5 +912,209 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       (r) => r.github_id === "42",
     )
     expect(alice?.first_name).toBe("Alicia")
+  })
+})
+
+// #76: unenroll is classroom-scoped — it never removes an ACTIVE org member
+// (that would leave other rosters showing them enrolled while non-member of the
+// org). A pending invite is still cancelled. The fake tracks org-membership
+// DELETEs and the committed roster so we can assert both.
+describe("unenrollStudent — classroom-scoped, no active-member org removal (#76)", () => {
+  const aliceEnrolled =
+    "alice,Alice,A,alice@x.edu,,42,enrolled,github,,tok-1,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
+  const bobInvited =
+    "bob,Bob,B,bob@x.edu,,43,invited,email,,tok-2,2026-01-01T00:00:00Z,\n"
+
+  const makeUnenrollClient = (opts: {
+    startingCsv: string
+    membershipState?: "active" | "pending" | null
+    viewer?: { login: string; id: number }
+  }) => {
+    const committed: { content: string | null } = { content: null }
+    const membershipState = opts.membershipState ?? null
+    const orgMembershipDeletes: string[] = []
+
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+
+    const request = vi
+      .fn()
+      .mockImplementation(
+        (path: string, options?: { method?: string; body?: unknown }) => {
+          if (path.includes("/contents/") && path.includes("students.csv")) {
+            const csv = committed.content ?? opts.startingCsv
+            return Promise.resolve({
+              type: "file",
+              encoding: "base64",
+              content: Buffer.from(csv, "utf-8").toString("base64"),
+            })
+          }
+          if (path === "/user" || path.startsWith("/users/")) {
+            return Promise.resolve(opts.viewer ?? { login: "teacher", id: 999 })
+          }
+          // Org membership: GET returns state; DELETE is the removal/cancel we
+          // assert on. Team memberships also hit /memberships/ but include
+          // /teams/.
+          if (path.includes("/memberships/") && !path.includes("/teams/")) {
+            if ((options?.method ?? "GET") === "DELETE") {
+              orgMembershipDeletes.push(path)
+              return Promise.resolve({})
+            }
+            if (membershipState === null) {
+              return Promise.reject(
+                new GitHubAPIError({
+                  status: 404,
+                  url: path,
+                  message: "not a member",
+                  body: null,
+                  rateLimit: {} as never,
+                }),
+              )
+            }
+            return Promise.resolve({ state: membershipState })
+          }
+          if (path.includes("/teams/")) {
+            return Promise.resolve({})
+          }
+          // Onboarding-repo listing for a not-yet-enrolled reset.
+          if (path.includes("/repos?")) {
+            return Promise.resolve([])
+          }
+          if (path.includes("/git/ref/")) {
+            return Promise.resolve({ object: { sha: "base-sha" } })
+          }
+          if (path.includes("/git/commits/")) {
+            return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+          }
+          if (path.endsWith("/git/trees")) {
+            const tree = (
+              options?.body as { tree?: { path: string; content?: string }[] }
+            )?.tree
+            const entry = tree?.find((t) => t.path.includes("students.csv"))
+            if (entry?.content) committed.content = entry.content
+            return Promise.resolve({ sha: "tree-sha" })
+          }
+          if (path.endsWith("/git/commits")) {
+            return Promise.resolve({ sha: "new-commit-sha" })
+          }
+          if (path.endsWith("/git/refs/heads/main")) {
+            return Promise.resolve({})
+          }
+          return Promise.reject(new Error(`unexpected request: ${path}`))
+        },
+      )
+
+    const client = { request, requestRaw } as unknown as GitHubClient
+    return { client, committed, orgMembershipDeletes }
+  }
+
+  it("removes the roster row but never removes an ACTIVE org member", async () => {
+    const { client, committed, orgMembershipDeletes } = makeUnenrollClient({
+      startingCsv: HEADER + aliceEnrolled,
+      membershipState: "active",
+    })
+
+    await unenrollStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      student: {
+        username: "alice",
+        first_name: "Alice",
+        last_name: "A",
+        email: "alice@x.edu",
+        section: "",
+        github_id: "42",
+        enrollment_status: "enrolled",
+      },
+    })
+
+    const rows = rowsFromCsv(committed.content!)
+    expect(rows.find((r) => r.username === "alice")).toBeUndefined()
+    // No org-membership DELETE for an active member.
+    expect(orgMembershipDeletes).toHaveLength(0)
+  })
+
+  it("cancels a PENDING invite on unenroll", async () => {
+    const { client, committed, orgMembershipDeletes } = makeUnenrollClient({
+      startingCsv: HEADER + bobInvited,
+      membershipState: "pending",
+    })
+
+    await unenrollStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      student: {
+        username: "bob",
+        first_name: "Bob",
+        last_name: "B",
+        email: "bob@x.edu",
+        section: "",
+        github_id: "43",
+        enrollment_status: "invited",
+      },
+    })
+
+    expect(
+      rowsFromCsv(committed.content!).find((r) => r.username === "bob"),
+    ).toBeUndefined()
+    // The pending invite is cancelled via the memberships DELETE.
+    expect(orgMembershipDeletes).toHaveLength(1)
+  })
+
+  it("does not touch other rosters: only the target classroom's CSV is committed", async () => {
+    const { client, committed, orgMembershipDeletes } = makeUnenrollClient({
+      startingCsv: HEADER + aliceEnrolled,
+      membershipState: "active",
+    })
+
+    await unenrollStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      student: {
+        username: "alice",
+        first_name: "Alice",
+        last_name: "A",
+        email: "alice@x.edu",
+        section: "",
+        github_id: "42",
+        enrollment_status: "enrolled",
+      },
+    })
+
+    // The only roster write is cs101's students.csv (the committed content),
+    // and no org-wide removal happened, so any other classroom Alice is on is
+    // untouched and her org seat is intact.
+    expect(committed.content).not.toBeNull()
+    expect(orgMembershipDeletes).toHaveLength(0)
+  })
+
+  it("keeps the signed-in teacher's pending invite (self-guard)", async () => {
+    const { client, orgMembershipDeletes } = makeUnenrollClient({
+      startingCsv: HEADER + bobInvited,
+      membershipState: "pending",
+      viewer: { login: "bob", id: 43 },
+    })
+
+    const result = await unenrollStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      student: {
+        username: "bob",
+        first_name: "Bob",
+        last_name: "B",
+        email: "bob@x.edu",
+        section: "",
+        github_id: "43",
+        enrollment_status: "invited",
+      },
+    })
+
+    // Self: invite NOT cancelled, and a warning explains why.
+    expect(orgMembershipDeletes).toHaveLength(0)
+    expect(result.teamWarning).toMatch(/signed-in account/i)
   })
 })

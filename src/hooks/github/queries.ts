@@ -51,6 +51,12 @@ export const githubKeys = {
 
   orgMembers: (org: string) => ["orgs", "list", "members", org] as const,
 
+  // Distinct from `orgMembers` (page-1 via listOrgMembers): this keys the
+  // all-pages fetch used by the org Members page. Sharing one key would let the
+  // page-1 and all-pages results overwrite each other in the cache.
+  orgMembersAll: (org: string) =>
+    ["orgs", "list", "members", "all", org] as const,
+
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
   repo: (owner: string, repo: string) =>
@@ -129,6 +135,14 @@ export function viewerQuery(client: GitHubClient) {
 
 export function getUser(client: GitHubClient, username: string) {
   return client.request<GitHubUser>(`/users/${username}`)
+}
+
+// Resolve a user by their immutable numeric account id (GET /user/{id}). The
+// stored CSV username can be stale if the student renamed their GitHub account,
+// but the id never changes — so this returns their CURRENT login. Used when
+// re-inviting a roster student whose username may have drifted.
+export function getUserById(client: GitHubClient, id: number | string) {
+  return client.request<GitHubUser>(`/user/${id}`)
 }
 
 export function getUserQuery(client: GitHubClient, username: string) {
@@ -579,6 +593,16 @@ export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   )
 }
 
+// Every org member across all pages. `listOrgMembers` (used by the per-classroom
+// roster, where the first 100 is effectively always enough) fetches a single
+// page; the org Members page needs the full list, so it pages to completion.
+export function listAllOrgMembers(client: GitHubClient, org: string) {
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
 // Server-side equivalent of useGetClasses: classroom dirs in the org's
 // classroom50 repo (root contents, dirs minus .github), for non-hook callers.
 export async function listClassroomDirs(
@@ -606,8 +630,11 @@ export async function paginateAll<T>(
 ): Promise<T[]> {
   const all: T[] = []
   let page = 1
+  // Hard cap (100 pages x 100/page = 10k items) so a server that ignores the
+  // page param and keeps returning full pages can't loop unbounded.
+  const MAX_PAGES = 100
 
-  while (true) {
+  while (page <= MAX_PAGES) {
     const batch = await client.request<T[]>(makePath(page))
     all.push(...batch)
     if (batch.length < 100) break
@@ -629,16 +656,6 @@ export async function listOnboardingRepos(
     (page) => `/orgs/${org}/repos?per_page=100&page=${page}&type=all`,
   )
   return repos.filter((repo) => repo.name.startsWith(ONBOARDING_REPO_PREFIX))
-}
-
-export async function getOrgMembers(
-  client: GitHubClient,
-  org: string,
-): Promise<GitHubUser[]> {
-  return paginateAll<GitHubUser>(
-    client,
-    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
-  )
 }
 
 // Owner-only (403 for non-owners). Expired invites drop off this list and

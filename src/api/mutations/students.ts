@@ -1784,16 +1784,12 @@ export type UnenrollStudentInput = {
   org: string
   classroom: string
   student: Student
-  // Teacher's choice for an ACTIVE member: also remove them from the org.
-  // Ignored for pending invitees (always cancelled) and non-members. Off by
-  // default so a student switching classes keeps their org seat.
-  removeFromOrg?: boolean
 }
 export async function unenrollStudent(
   client: GitHubClient,
   input: UnenrollStudentInput,
 ) {
-  const { org, classroom, student: toRemoveStudent, removeFromOrg } = input
+  const { org, classroom, student: toRemoveStudent } = input
   await assertClassroomNotArchived(client, org, classroom)
   const normalizedUsername = toRemoveStudent?.username.trim()
   const normalizedEmail = toRemoveStudent?.email?.trim()
@@ -1944,38 +1940,35 @@ export async function unenrollStudent(
     }
   }
 
-  // pending invite -> always cancel; active member -> remove only if opted in;
-  // neither -> nothing. DELETE /orgs/{org}/memberships/{username} does both.
-  const orgState = await orgStatePromise
+  // Cancel a pending invite (a not-yet-accepted invitee has no cross-classroom
+  // footprint). An ACTIVE member is never removed here — unenroll is
+  // classroom-scoped; org removal lives on the Members page.
+  // Resolve defensively: a reject after the roster commit landed would discard
+  // accumulated warnings and break the "commit landed -> non-fatal" guarantee.
+  const orgState = await orgStatePromise.catch(() => null)
 
-  // Never remove the signed-in teacher from their own org (GitHub would remove a
-  // non-sole owner, or 403 on the last owner).
+  // Never cancel the signed-in teacher's own invite (a teacher mid-enrollment).
   const viewer = await viewerPromise.catch(() => null)
   const isSelf = isSameGitHubUser(viewer, toRemoveStudent)
 
-  const shouldRemoveFromOrg =
-    orgState === "pending" || (orgState === "active" && removeFromOrg === true)
+  const shouldCancelInvite = orgState === "pending"
 
-  if (shouldRemoveFromOrg && isSelf) {
+  if (shouldCancelInvite && isSelf) {
     warnings.push(
       `${toRemoveStudent.username} was removed from the roster. Their ` +
-        `organization membership was kept because they are the signed-in ` +
-        `account. Remove yourself from the organization's people page if you ` +
-        `really intend to.`,
+        `pending organization invite was kept because they are the signed-in ` +
+        `account.`,
     )
-  } else if (shouldRemoveFromOrg) {
+  } else if (shouldCancelInvite) {
     try {
       await removeOrgMembership(client, { org, username: normalizedUsername })
     } catch (err) {
-      console.error("org membership removal failed (student unenrolled):", err)
+      console.error("org invite cancellation failed (student unenrolled):", err)
       const detail = getErrorMessage(err)
-      const what =
-        orgState === "pending"
-          ? "cancelling their pending org invite"
-          : "removing them from the organization"
       warnings.push(
-        `${toRemoveStudent.username} was removed from the roster, but ${what} ` +
-          `failed (${detail}); retry from the organization's people page.`,
+        `${toRemoveStudent.username} was removed from the roster, but ` +
+          `cancelling their pending org invite failed (${detail}); retry from ` +
+          `the organization's people page.`,
       )
     }
   }
