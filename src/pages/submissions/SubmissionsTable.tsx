@@ -325,16 +325,15 @@ const RegradeButton = ({
   // so only one outstanding dispatch at a time keeps the binding unambiguous.
   const blocked = anyRegrading && !inFlight
 
-  const title =
-    phase === "dispatching" || phase === "running"
-      ? "Regrade in progress…"
-      : blocked
-        ? "Another regrade is in progress"
-        : phase === "completed"
-          ? "Regrade started — grading runs in the background; collect to see new scores"
-          : phase === "failed"
-            ? "Regrade failed to start — try again"
-            : "Regrade this submission"
+  const title = inFlight
+    ? "Regrade in progress…"
+    : blocked
+      ? "Another regrade is in progress"
+      : phase === "completed"
+        ? "Regrade started — grading runs in the background; collect to see new scores"
+        : phase === "failed"
+          ? "Regrade failed to start — try again"
+          : "Regrade this submission"
 
   const handleClick = () => {
     if (inFlight || blocked) return

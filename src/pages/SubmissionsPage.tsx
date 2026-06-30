@@ -337,26 +337,23 @@ const SubmissionsPageContent = () => {
   // (if any) shows. Running takes precedence; otherwise the most recently
   // finished action; else null (both idle → link defaults to collect). Derived
   // fresh every render so the link can never get "stuck" on a stale action.
-  const activeAction: "collect" | "regrade" | null = collecting
-    ? "collect"
-    : regrading
-      ? "regrade"
-      : collectScores.phase !== "idle"
-        ? "collect"
-        : regradeAll.phase !== "idle"
-          ? "regrade"
-          : null
+  const activeAction: "collect" | "regrade" | null = (() => {
+    if (collecting) return "collect"
+    if (regrading) return "regrade"
+    if (collectScores.phase !== "idle") return "collect"
+    if (regradeAll.phase !== "idle") return "regrade"
+    return null
+  })()
 
-  const viewRun =
-    activeAction === "regrade" ? regradeAll.run : collectScores.run
-  const viewWorkflowUrl =
-    activeAction === "regrade" ? regradeWorkflowUrl : collectWorkflowUrl
-  const viewLabel = viewRun
-    ? activeAction === "regrade"
+  const isRegradeView = activeAction === "regrade"
+  const viewRun = isRegradeView ? regradeAll.run : collectScores.run
+  const viewWorkflowUrl = isRegradeView ? regradeWorkflowUrl : collectWorkflowUrl
+  const viewLabel = isRegradeView
+    ? viewRun
       ? "View regrade run"
-      : "View run"
-    : activeAction === "regrade"
-      ? "View regrade workflow"
+      : "View regrade workflow"
+    : viewRun
+      ? "View run"
       : "View workflow"
 
   const lastCollectedLabel =

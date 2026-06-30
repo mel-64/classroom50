@@ -15,11 +15,6 @@ export type RegradePhase =
   | "failed"
   | "timeout"
 
-// The regrade.yaml run only re-tags repos (fast); grading then happens
-// asynchronously inside the student repos. So the tracked run finishing means
-// "tags pushed, grading underway", not "grades ready" — the UI says as much and
-// the teacher pulls results with "Collect now" a little later.
-
 // Give up polling after this long so the UI doesn't spin forever on a run that
 // never registers or hangs. The dispatch itself is quick; this is generous.
 const POLL_TIMEOUT_MS = 5 * 60 * 1000

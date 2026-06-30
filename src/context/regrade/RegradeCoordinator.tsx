@@ -20,7 +20,6 @@ import {
 type RegradeCoordinator = {
   // True while ANY regrade (whole-assignment or per-student) is in flight.
   anyInFlight: boolean
-  // Register/unregister a tracker's in-flight state by its unique target key.
   setInFlight: (key: string, inFlight: boolean) => void
   // Whether a NEW regrade may be dispatched now. False while any regrade is in
   // flight, so concurrent dispatches against the shared run list are prevented

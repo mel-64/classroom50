@@ -1781,19 +1781,22 @@ export async function triggerRegrade(
   if (!classroom) throw new Error("classroom must be specified to regrade")
   if (!assignment) throw new Error("assignment must be specified to regrade")
 
-  const repo = await getRepo(client, org, "classroom50")
+  // getRepo (for the dispatch ref) and the baseline snapshot are independent
+  // reads; run them together. The baseline must still precede the POST below —
+  // run ids are monotonic, so the run this POST creates is the oldest dispatch
+  // run whose id exceeds the snapshot.
+  const [repo, baseline] = await Promise.all([
+    getRepo(client, org, "classroom50"),
+    client.request<{ workflow_runs: { id: number }[] }>(
+      `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+    ),
+  ])
   if (!repo) {
     throw new Error(
       `${org}/classroom50 not found; run setup for this org first`,
     )
   }
   const ref = repo.default_branch || "main"
-
-  // Snapshot the newest dispatch run id before the POST. Run ids are monotonic,
-  // so the run this POST creates is the oldest dispatch run whose id exceeds it.
-  const baseline = await client.request<{ workflow_runs: { id: number }[] }>(
-    `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
-  )
   const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
 
   // The workflow's `owner` input is optional; only send it when scoping to a
