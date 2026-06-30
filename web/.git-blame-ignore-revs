@@ -1,0 +1,6 @@
+# Revisions listed here are skipped by `git blame` so mass-reformatting commits
+# don't obscure real authorship. GitHub honors this file automatically; locally
+# run once:  git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: format repo with Prettier (#40)
+ff016b092ef53072137721b376fadeb1bfb0155a

@@ -1,0 +1,32 @@
+export const GITHUB_AUTH_STORAGE = {
+  TOKEN: "gh_access_token",
+  CLIENT_ID: "gh_client_id",
+  SCOPE_GRANTED: "gh_scope_granted",
+} as const
+
+export const GITHUB_AUTH_SESSION = {
+  VERIFIER: "gh_pkce_verifier",
+  STATE: "gh_oauth_state",
+  CLIENT_ID: "gh_oauth_client_id",
+  SCOPE: "gh_oauth_scope",
+} as const
+
+// Scopes: admin:org enables org-invite management + team writes; repo covers
+// roster commits and archiving onboarding repos; delete_repo lets onboarding
+// cleanup delete reconciled onboarding repos when the classroom's cleanup mode
+// is "delete" (without it, delete silently falls back to archiving).
+export const DEFAULT_GITHUB_SCOPE =
+  "read:user read:org repo workflow admin:org delete_repo"
+
+// An org's OAuth app policy page, where owners approve apps or relax the
+// restriction.
+export const githubOrgOAuthPolicyUrl = (org: string) =>
+  `https://github.com/organizations/${org}/settings/oauth_application_policy`
+
+// Public OAuth app identifier (not a secret); injected at build time.
+export const GITHUB_OAUTH_CLIENT_ID: string =
+  import.meta.env.VITE_GITHUB_CLIENT_ID ?? ""
+
+export const GITHUB_OAUTH_WORKER_BASE =
+  import.meta.env.VITE_GITHUB_OAUTH_WORKER_BASE ??
+  "https://tiny-bonus-7dc1.fifty-foundation.workers.dev"

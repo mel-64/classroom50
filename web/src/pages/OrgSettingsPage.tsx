@@ -1,0 +1,458 @@
+import { useEffect, useRef, useState } from "react"
+import Drawer, {
+  DrawerContent,
+  DrawerSidebar,
+  DrawerToggle,
+} from "@/components/drawer"
+import { useParams } from "@tanstack/react-router"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
+import { githubKeys } from "@/hooks/github/queries"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
+import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
+import RequireTeacher from "@/components/RequireTeacher"
+import OrgPolicyAuditPane from "@/pages/orgSettings/OrgPolicyAuditPane"
+import RerunOnboarding from "@/pages/orgSettings/RerunOnboarding"
+import TeardownSection from "@/pages/orgSettings/TeardownSection"
+import SettingsSection from "@/pages/orgSettings/SettingsSection"
+import {
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  ChevronUp,
+  ExternalLink,
+  TriangleAlert,
+} from "lucide-react"
+
+const DEFAULT_EXPIRY_DAYS = 120
+const MIN_EXPIRY_DAYS = 1
+const MAX_EXPIRY_DAYS = 366
+
+// One descriptor per service-token status, keeping the banner's style, icon, and
+// title in sync from a single source.
+const TOKEN_STATUS_BANNER = {
+  present: {
+    className: "border-success/30 bg-success/10",
+    Icon: CheckCircle2,
+    iconClassName: "text-success",
+    title: "A service token is already set",
+  },
+  missing: {
+    className: "border-error/30 bg-error/10",
+    Icon: TriangleAlert,
+    iconClassName: "text-error",
+    title: "No service token set yet",
+  },
+  unknown: {
+    className: "border-warning/30 bg-warning/10",
+    Icon: TriangleAlert,
+    iconClassName: "text-warning",
+    title: "Couldn’t check the service token",
+  },
+} as const
+
+export function ServiceTokenInfo() {
+  const [open, setOpen] = useState(false)
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        popupRef.current &&
+        !popupRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div ref={popupRef} className="dropdown">
+      <button
+        type="button"
+        className="btn btn-circle btn-ghost btn-xs text-base-content/60 hover:text-base-content"
+        aria-label="What is the service token?"
+        aria-expanded={open}
+        onClick={() => setOpen((open) => !open)}
+      >
+        <span className="flex h-4 w-4 items-center justify-center rounded-full border border-current text-[11px] font-bold">
+          i
+        </span>
+      </button>
+
+      {open && (
+        <div className="dropdown-content z-50 mt-2 w-80 rounded-box border border-base-300 bg-base-100 p-4 text-sm shadow-xl">
+          <p className="text-base-content/70">
+            Classroom 50 needs a service token, a fine-grained Personal Access
+            Token (PAT) with read and write access to the repositories in your
+            classroom’s GitHub organization. It is stored as the{" "}
+            <code className="text-xs">CLASSROOM50_SERVICE_TOKEN</code> secret on
+            your <span className="font-semibold">classroom50</span> config repo,
+            where the score-collection workflow uses it to read student
+            submissions and the regrade workflow uses it to re-run student
+            autograde workflows.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
+  const client = useGitHubClient()
+  const queryClient = useQueryClient()
+  const runPat = useSafeSubmit()
+  const { org } = useParams({ strict: false })
+  const [serviceToken, setServiceToken] = useState("")
+  const [savedKind, setSavedKind] = useState<null | "saved" | "updated">(null)
+  const [expiryDays, setExpiryDays] = useState(String(DEFAULT_EXPIRY_DAYS))
+  const tokenInputRef = useRef<HTMLInputElement>(null)
+  const expiryInputRef = useRef<HTMLInputElement>(null)
+
+  const { data: tokenStatus, isLoading: tokenStatusLoading } =
+    useGetServiceTokenStatus(org ?? "")
+  const tokenAlreadySet = tokenStatus?.status === "present"
+
+  // When a token is already set, collapse the configuration fields by default
+  // and let the user expand them. When the token is missing/unknown (an issue),
+  // they stay expanded. `manualOpen` lets the user override the default once
+  // they interact; until then it follows the token status.
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null)
+  const configOpen = manualOpen ?? !tokenAlreadySet
+
+  const [now] = useState(() => Date.now())
+
+  const parsedExpiry = Number(expiryDays)
+  const expiryValid =
+    Number.isInteger(parsedExpiry) &&
+    parsedExpiry >= MIN_EXPIRY_DAYS &&
+    parsedExpiry <= MAX_EXPIRY_DAYS
+
+  const expiresDate = expiryValid
+    ? new Date(now + parsedExpiry * 24 * 60 * 60 * 1000)
+    : null
+
+  const serviceTokenUrl =
+    "https://github.com/settings/personal-access-tokens/new?" +
+    new URLSearchParams({
+      name: `Classroom 50 Actions Token`,
+      description: `Service token for Classroom 50 score collection and regrading. Contents: Read and write + Actions: Read and write on all repositories in the ${org} organization`,
+      target_name: org ?? "",
+      expires_in: String(expiryValid ? parsedExpiry : DEFAULT_EXPIRY_DAYS),
+      contents: "write",
+      actions: "write",
+    }).toString()
+
+  const patMutation = useMutation({
+    mutationFn: async () => {
+      await validateServiceToken(serviceToken, org)
+      return putRepoSecret(
+        client,
+        org,
+        "classroom50",
+        "CLASSROOM50_SERVICE_TOKEN",
+        serviceToken,
+      )
+    },
+    onSuccess: () => {
+      setServiceToken("")
+      setSavedKind(tokenAlreadySet ? "updated" : "saved")
+      onSubmit?.()
+      queryClient.invalidateQueries({ queryKey: ["orgs"] })
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.serviceToken(org ?? ""),
+      })
+    },
+  })
+
+  return (
+    <SettingsSection
+      title="Service Token"
+      titleAdornment={<ServiceTokenInfo />}
+    >
+      {!tokenStatusLoading &&
+        tokenStatus &&
+        (() => {
+          const banner = TOKEN_STATUS_BANNER[tokenStatus.status]
+          const { Icon } = banner
+          return (
+            <div
+              className={[
+                "flex items-start gap-3 rounded-xl border p-4 text-sm",
+                banner.className,
+              ].join(" ")}
+            >
+              <Icon
+                className={`mt-0.5 size-5 shrink-0 ${banner.iconClassName}`}
+              />
+              <div className="min-w-0">
+                <p className="font-semibold text-base-content">
+                  {banner.title}
+                </p>
+                <p className="mt-1 text-base-content/70">
+                  {tokenStatus.message}
+                </p>
+                {tokenStatus.status === "present" && (
+                  <p className="mt-1 text-base-content/70">
+                    Saving below will replace the existing token (an update).
+                    The old token is overwritten in place.
+                  </p>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
+      {tokenAlreadySet && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm mt-4 gap-1"
+          aria-expanded={configOpen}
+          onClick={() => setManualOpen(!configOpen)}
+        >
+          {configOpen ? (
+            <ChevronUp className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+          {configOpen ? "Hide token configuration" : "Update or replace token"}
+        </button>
+      )}
+
+      {configOpen && (
+        <>
+          <div className="mt-5">
+            <label
+              htmlFor="token-expiry"
+              className="block text-sm font-semibold"
+            >
+              Token expiry
+            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label
+                className={[
+                  "input input-bordered flex w-36 items-center gap-2",
+                  expiryValid ? "" : "input-error",
+                ].join(" ")}
+              >
+                <input
+                  id="token-expiry"
+                  ref={expiryInputRef}
+                  type="number"
+                  min={MIN_EXPIRY_DAYS}
+                  max={MAX_EXPIRY_DAYS}
+                  value={expiryDays}
+                  onChange={(e) => setExpiryDays(e.target.value)}
+                  className="w-full [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="text-sm text-base-content/50">days</span>
+              </label>
+
+              {expiresDate ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-base-200 px-3 py-1 text-xs text-base-content/70">
+                  <CalendarClock className="size-3.5" />
+                  Expires {expiresDate.toLocaleDateString()}
+                </span>
+              ) : (
+                <span className="text-xs text-error">
+                  Enter {MIN_EXPIRY_DAYS}–{MAX_EXPIRY_DAYS} days
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-base-content/50">
+              Valid range is {MIN_EXPIRY_DAYS}–{MAX_EXPIRY_DAYS} days (GitHub’s
+              maximum).
+            </p>
+          </div>
+
+          <a
+            className={[
+              "btn btn-primary mt-4",
+              expiryValid ? "" : "btn-disabled",
+            ].join(" ")}
+            href={serviceTokenUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-disabled={!expiryValid}
+            onClick={(e) => {
+              // aria-disabled is visual only; also block activation so an invalid
+              // expiry can't navigate to GitHub with the silent default.
+              if (!expiryValid) {
+                e.preventDefault()
+                expiryInputRef.current?.focus()
+                return
+              }
+              // Focus the token field so the user can paste on return.
+              window.setTimeout(() => tokenInputRef.current?.focus(), 0)
+            }}
+          >
+            <ExternalLink className="size-4" />
+            Generate token on GitHub
+          </a>
+          <p className="mt-2 text-xs text-base-content/50">
+            Opens GitHub’s token form with the name, resource owner, expiry, and{" "}
+            <span className="font-semibold">
+              Contents: Read and write + Actions: Read and write
+            </span>{" "}
+            permissions pre-filled.
+          </p>
+
+          <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
+            <p className="font-semibold text-base-content">
+              On the GitHub page, before generating the token:
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-base-content/80">
+              <li>
+                Set <span className="font-semibold">Repository access</span> to{" "}
+                <span className="font-semibold">All repositories</span>.{" "}
+                <span className="text-base-content/60">
+                  “Only select repositories” will miss student repos created
+                  later and break score collection.
+                </span>
+              </li>
+              <li>
+                Under <span className="font-semibold">Permissions</span>,
+                confirm{" "}
+                <span className="font-semibold">Contents: Read and write</span>{" "}
+                and{" "}
+                <span className="font-semibold">Actions: Read and write</span>{" "}
+                (Metadata: Read is included automatically).{" "}
+                <span className="text-base-content/60">
+                  Read collects scores; write lets the regrade workflow re-run
+                  student autograde workflows.
+                </span>
+              </li>
+            </ul>
+            <p className="mt-3 text-base-content/80">
+              The token expires after the period you set above. When it expires,
+              the score-collection and regrade workflows will fail until you
+              generate a new token and save it here again, so set a reminder to
+              rotate it before then.
+            </p>
+          </div>
+
+          <p className="mt-3 text-sm text-base-content/60">
+            After generating the token on GitHub, copy it and paste it below.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (!patMutation.isPending)
+                void runPat(() => patMutation.mutateAsync())
+            }}
+          >
+            <div className="flex flex-col gap-2 w-full pb-10">
+              <label className="label font-bold mt-4 text-sm">
+                {tokenAlreadySet
+                  ? "Enter new service token"
+                  : "Enter service token"}
+              </label>
+              <input
+                ref={tokenInputRef}
+                type="password"
+                placeholder="Enter token (e.g., github_pat_123...)"
+                className="input input-bordered w-full"
+                autoComplete="off"
+                value={serviceToken}
+                onChange={(e) => {
+                  setServiceToken(e.target.value)
+                  setSavedKind(null)
+                  if (patMutation.isError) patMutation.reset()
+                }}
+              />
+              <p className="text-xs text-base-content/50">
+                We’ll check the token is valid before saving. Double-check you
+                chose <span className="font-semibold">All repositories</span>{" "}
+                when creating it.
+              </p>
+              {patMutation.isError && (
+                <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    {patMutation.error instanceof Error
+                      ? patMutation.error.message
+                      : "Could not validate or save the token."}
+                  </span>
+                </div>
+              )}
+              {savedKind && (
+                <p className="flex items-center gap-1 text-sm text-success">
+                  <CheckCircle2 className="size-4" />
+                  {savedKind === "updated"
+                    ? "Service token checked and updated."
+                    : "Service token checked and saved."}
+                </p>
+              )}
+              <button
+                disabled={patMutation.isPending || !serviceToken}
+                type="submit"
+                className="btn btn-primary self-end mt-2"
+              >
+                {patMutation.isPending ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Validating…
+                  </>
+                ) : tokenAlreadySet ? (
+                  "Update service token"
+                ) : (
+                  "Save service token"
+                )}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </SettingsSection>
+  )
+}
+
+const OrgSettingsPage = () => {
+  const { org } = useParams({ strict: false })
+
+  return (
+    <div className="min-h-screen">
+      <Drawer>
+        <DrawerToggle />
+        <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
+          <RequireTeacher>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+              <p className="mt-1 text-sm text-base-content/60">
+                Organization-level configuration for{" "}
+                <span className="font-mono font-semibold">{org}</span>.
+              </p>
+            </div>
+            <div className="mt-8 space-y-8">
+              <OrgSettingsPane />
+              {org && <OrgPolicyAuditPane org={org} />}
+              {org && <RerunOnboarding org={org} />}
+              {org && <TeardownSection org={org} />}
+            </div>
+          </RequireTeacher>
+        </DrawerContent>
+        <DrawerSidebar page="classes" settings selected="settings" />
+      </Drawer>
+    </div>
+  )
+}
+
+export default OrgSettingsPage

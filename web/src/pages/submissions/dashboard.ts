@@ -1,0 +1,345 @@
+// Pure derivation/filter/sort primitives for the assignment overview dashboard
+// (#59), over already-loaded scores/roster data — no fetches, no React, so the
+// classification is reusable and unit-testable.
+
+import type { SubmissionRow } from "@/hooks/useGetScores"
+import type { GitHubRepo } from "@/hooks/github/types"
+import type { Student } from "@/types/classroom"
+import { getName } from "@/util/students"
+import { studentRepoName } from "@/util/studentRepo"
+
+// `thresholdFraction` is the passing bar as a fraction of max, or `null` when
+// the assignment sets no threshold (the opt-in feature is off) — then every
+// row is "ungraded" (also the case for an ungraded/zero-max row).
+export type PassState = "passing" | "failing" | "ungraded"
+
+export function rowPassState(
+  row: {
+    score: number
+    "max-score": number
+  },
+  thresholdFraction: number | null,
+): PassState {
+  if (thresholdFraction == null) return "ungraded"
+  const max = row["max-score"]
+  if (!max || !Number.isFinite(max)) return "ungraded"
+  if (!Number.isFinite(row.score)) return "ungraded"
+  return row.score / max >= thresholdFraction ? "passing" : "failing"
+}
+
+// Top-line stat-strip counts. `rostered` is meaningless as a denominator for
+// group assignments (the UI hides it there); `ungraded` is kept separate so it
+// inflates neither passing nor failing.
+export type SubmissionStats = {
+  submitted: number
+  rostered: number
+  passing: number
+  failing: number
+  ungraded: number
+  late: number
+}
+
+export function computeStats(
+  rows: SubmissionRow[],
+  rosteredCount: number,
+  thresholdFraction: number | null,
+): SubmissionStats {
+  let passing = 0
+  let failing = 0
+  let ungraded = 0
+  let late = 0
+  for (const row of rows) {
+    switch (rowPassState(row, thresholdFraction)) {
+      case "passing":
+        passing++
+        break
+      case "failing":
+        failing++
+        break
+      default:
+        ungraded++
+    }
+    if (row.late) late++
+  }
+  return {
+    submitted: rows.length,
+    rostered: rosteredCount,
+    passing,
+    failing,
+    ungraded,
+    late,
+  }
+}
+
+// Mean of the numeric scores, rounded to 2 decimals, or null when none is
+// finite (rendered "N/A"). Avoids the old `sum/length || 1` bug where an
+// empty/NaN result showed "1" (`/` binds before `||`).
+export function classAverage(rows: SubmissionRow[]): number | null {
+  const numericScores = rows
+    .map((row) => Number(row["score"]))
+    .filter((n) => Number.isFinite(n))
+  if (numericScores.length === 0) return null
+  const avg =
+    numericScores.reduce((sum, n) => sum + n, 0) / numericScores.length
+  return Math.round(avg * 100) / 100
+}
+
+// Filters the dashboard exposes. Each is independent; an unset value ("all")
+// means "no constraint on this axis". Combined filters AND together. `section`
+// is "all" or an exact section value from the roster.
+export type SubmissionFilters = {
+  submission: "all" | "submitted" | "on-time" | "late" | "not-submitted"
+  passing: "all" | "passing" | "failing"
+  accepted: "all" | "accepted" | "not-accepted"
+  section: string
+}
+
+export const DEFAULT_FILTERS: SubmissionFilters = {
+  submission: "all",
+  passing: "all",
+  accepted: "all",
+  section: "all",
+}
+
+// Distinct, non-empty section values present on the roster, sorted for a
+// stable dropdown. Empty when no student has a section.
+export function distinctSections(students: Student[]): string[] {
+  const sections = new Set<string>()
+  for (const student of students) {
+    const section = student.section?.trim()
+    if (section) sections.add(section)
+  }
+  return [...sections].sort((a, b) => a.localeCompare(b))
+}
+
+// username (lowercased) -> section, for rows that carry only logins. Students
+// with no section are omitted, so a lookup miss means "no section".
+export function buildSectionLookup(students: Student[]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const student of students) {
+    const section = student.section?.trim()
+    if (section) map.set(student.username.trim().toLowerCase(), section)
+  }
+  return map
+}
+
+// Whether a row (any credited username) belongs to the given section.
+export function rowInSection(
+  row: SubmissionRow,
+  section: string,
+  sectionByUsername: Map<string, string>,
+): boolean {
+  return row.usernames.some(
+    (username) =>
+      sectionByUsername.get(username.trim().toLowerCase()) === section,
+  )
+}
+
+// Whether a roster student belongs to the given (non-"all") section.
+export function studentInSection(student: Student, section: string): boolean {
+  return (student.section?.trim() ?? "") === section
+}
+
+export type SubmissionSort = "recent" | "oldest" | "name-asc" | "name-desc"
+
+export const DEFAULT_SORT: SubmissionSort = "recent"
+
+// Who has accepted an INDIVIDUAL assignment, derived from the org repo list: a
+// student accepted iff `<classroom>-<assignment>-<username>` exists. Independent
+// of submission — a student can accept (repo exists) without a graded push.
+//
+// We forward-construct each roster student's expected name and test existence,
+// rather than reverse-parsing a `<classroom>-<assignment>-` prefix off repo
+// names — prefix-stripping over-matches a sibling assignment whose slug extends
+// this one (assignment "hw" would capture `cs-hw-bonus-alice` from "hw-bonus"),
+// polluting the set and risking a 404 when the modal rebuilds a URL from a bogus
+// owner. (See docs/solutions/.../forward-only-cross-binary-repo-name-contract.md.)
+//
+// Group assignments are excluded (the repo is named after the owner, not each
+// member), so callers offer the accepted filter for individual assignments only.
+export function acceptedUsernames(
+  repos: GitHubRepo[] | null | undefined,
+  classroom: string,
+  assignment: string,
+  students: Student[],
+): Set<string> {
+  const accepted = new Set<string>()
+  if (!repos) return accepted
+  // studentRepoName lowercases; match the repo list against it.
+  const repoNames = new Set(repos.map((repo) => repo.name.toLowerCase()))
+  for (const student of students) {
+    const username = student.username.trim()
+    if (!username) continue
+    if (repoNames.has(studentRepoName(classroom, assignment, username))) {
+      accepted.add(username.toLowerCase())
+    }
+  }
+  return accepted
+}
+
+// Whether a student (by username) has accepted, given the derived set.
+export function hasAccepted(username: string, accepted: Set<string>): boolean {
+  return accepted.has(username.trim().toLowerCase())
+}
+
+// Count of ROSTER students who accepted. Intersecting with the roster keeps the
+// "Accepted N / roster" stat from exceeding its denominator when `accepted`
+// includes non-roster owners (a since-unenrolled student, a stray test repo).
+export function acceptedRosterCount(
+  students: Student[],
+  accepted: Set<string>,
+): number {
+  return students.filter((student) => hasAccepted(student.username, accepted))
+    .length
+}
+
+// Case-insensitive match of a query against a row's identities: each credited
+// username plus its roster display name (so searching a real name works even
+// though scores.json only carries logins).
+export function rowMatchesQuery(
+  row: SubmissionRow,
+  query: string,
+  students: Student[],
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return row.usernames.some((username) => {
+    if (username.toLowerCase().includes(q)) return true
+    const name = getName(username, students)
+    return Boolean(name) && name.toLowerCase().includes(q)
+  })
+}
+
+// Search + filters + sort over the submitted rows. "not-submitted" lives in the
+// caller's nonSubmitters list, not here, so that filter hides every submitted
+// row; likewise "not-accepted", since a submitted row always has a repo.
+export function filterAndSortRows(
+  rows: SubmissionRow[],
+  {
+    query,
+    filters,
+    sort,
+    students,
+    sectionByUsername,
+    thresholdFraction,
+  }: {
+    query: string
+    filters: SubmissionFilters
+    sort: SubmissionSort
+    students: Student[]
+    sectionByUsername: Map<string, string>
+    thresholdFraction: number | null
+  },
+): SubmissionRow[] {
+  const filtered = rows.filter((row) => {
+    if (!rowMatchesQuery(row, query, students)) return false
+
+    // A submitted row always has a repo, so it's accepted by definition.
+    if (filters.accepted === "not-accepted") return false
+
+    if (
+      filters.section !== "all" &&
+      !rowInSection(row, filters.section, sectionByUsername)
+    ) {
+      return false
+    }
+
+    switch (filters.submission) {
+      case "not-submitted":
+        return false
+      case "late":
+        if (!row.late) return false
+        break
+      case "on-time":
+        if (row.late) return false
+        break
+    }
+
+    if (filters.passing !== "all") {
+      const state = rowPassState(row, thresholdFraction)
+      if (state !== filters.passing) return false
+    }
+
+    return true
+  })
+
+  const byName = (row: SubmissionRow) =>
+    (
+      getName(row.usernames[0], students) ||
+      row.usernames[0] ||
+      ""
+    ).toLowerCase()
+
+  // Key each row's name + time once before sorting: byName does a linear roster
+  // scan, so calling it inside the comparator would repeat it O(rows·log rows).
+  const keyed = filtered.map((row) => ({
+    row,
+    name: byName(row),
+    time: new Date(row.datetime).getTime(),
+  }))
+
+  keyed.sort((a, b) => {
+    switch (sort) {
+      case "oldest":
+        return a.time - b.time
+      case "name-asc":
+        return a.name.localeCompare(b.name)
+      case "name-desc":
+        return b.name.localeCompare(a.name)
+      case "recent":
+      default:
+        return b.time - a.time
+    }
+  })
+
+  return keyed.map((k) => k.row)
+}
+
+// Whether non-submitters should still appear under the current filters. Any
+// submission/passing constraint implies a submission exists, so it hides them;
+// the accepted filter does not (both accepted-not-submitted and not-accepted
+// are non-submitter states).
+export function showsNonSubmitters(filters: SubmissionFilters): boolean {
+  if (filters.passing !== "all") return false
+  return filters.submission === "all" || filters.submission === "not-submitted"
+}
+
+// Filters non-submitters by search query and the accepted filter. `accepted`
+// is the set from acceptedUsernames (empty for group assignments, where the UI
+// disables the accepted filter).
+export function filterNonSubmitters(
+  nonSubmitters: Student[],
+  query: string,
+  filters: SubmissionFilters,
+  accepted: Set<string>,
+): Student[] {
+  const q = query.trim().toLowerCase()
+  return nonSubmitters.filter((student) => {
+    if (q) {
+      const name = `${student.first_name} ${student.last_name}`
+        .trim()
+        .toLowerCase()
+      if (
+        !student.username.toLowerCase().includes(q) &&
+        !(Boolean(name) && name.includes(q))
+      ) {
+        return false
+      }
+    }
+
+    if (
+      filters.section !== "all" &&
+      !studentInSection(student, filters.section)
+    ) {
+      return false
+    }
+
+    if (filters.accepted !== "all") {
+      const didAccept = hasAccepted(student.username, accepted)
+      if (filters.accepted === "accepted" && !didAccept) return false
+      if (filters.accepted === "not-accepted" && didAccept) return false
+    }
+
+    return true
+  })
+}

@@ -1,0 +1,30 @@
+import { useParams } from "@tanstack/react-router"
+
+import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import useGetClasses from "@/hooks/useGetClasses"
+
+const OrgPage = () => {
+  const { org } = useParams({ strict: false })
+  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org)
+  const { classes } = useGetClasses(org)
+
+  return (
+    <div>
+      <div>Is student: {String(isStudent)}</div>
+      <div>Is teacher: {String(isTeacher)}</div>
+      <div>Is blocked: {String(isBlocked)}</div>
+      <hr />
+
+      <div>
+        <h3>Classes</h3>
+        <ul>
+          {classes.map((cl) => (
+            <li key={cl.name}>{cl.name}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+export default OrgPage
