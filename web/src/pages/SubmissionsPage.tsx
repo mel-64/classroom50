@@ -45,6 +45,8 @@ import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
+import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
+import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
@@ -125,6 +127,10 @@ const SubmissionsPageContent = () => {
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
+  // Gate Regrade all / Collect now on an empty roster: dispatching a workflow
+  // with no students to act on is wasted effort. `show` is loading-aware (won't
+  // flash before the roster resolves), matching AssignmentsPage's usage.
+  const emptyRoster = useEmptyRosterWarning(org, classroom)
   // This is a teacher-only page, so reading the classroom's capability-URL
   // secret from the (teacher-readable) classroom.json is fine. When the
   // classroom is protected, the shared accept link must carry the key as
@@ -440,6 +446,14 @@ const SubmissionsPageContent = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Submissions" />
+          {emptyRoster.show && (
+            <EmptyRosterNotice
+              org={org}
+              classroom={classroom}
+              hasRosterRows={emptyRoster.hasRosterRows}
+              className="mt-4"
+            />
+          )}
           {scoresError && (
             <div className="alert alert-error mt-4">
               <div>
@@ -511,16 +525,18 @@ const SubmissionsPageContent = () => {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline"
-                  disabled={regrading || collecting}
+                  disabled={regrading || collecting || emptyRoster.show}
                   title={
-                    collecting
-                      ? "Wait for collection to finish before regrading"
-                      : regrading
-                        ? "A regrade is already in progress"
-                        : "Re-run the autograder on every submitted repo (submission times don’t change)"
+                    emptyRoster.show
+                      ? "Add students to the roster before regrading"
+                      : collecting
+                        ? "Wait for collection to finish before regrading"
+                        : regrading
+                          ? "A regrade is already in progress"
+                          : "Re-run the autograder on every submitted repo (submission times don’t change)"
                   }
                   onClick={() => {
-                    if (regrading || collecting) return
+                    if (regrading || collecting || emptyRoster.show) return
                     setRegradeConfirmOpen(true)
                   }}
                 >
@@ -532,13 +548,18 @@ const SubmissionsPageContent = () => {
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  disabled={collecting || regrading}
+                  disabled={collecting || regrading || emptyRoster.show}
                   title={
-                    regrading
-                      ? "Wait for the regrade to finish before collecting"
-                      : "Collect submissions now"
+                    emptyRoster.show
+                      ? "Add students to the roster before collecting"
+                      : regrading
+                        ? "Wait for the regrade to finish before collecting"
+                        : "Collect submissions now"
                   }
-                  onClick={() => collectScores.collect()}
+                  onClick={() => {
+                    if (collecting || regrading || emptyRoster.show) return
+                    collectScores.collect()
+                  }}
                 >
                   {collecting && (
                     <span className="loading loading-spinner loading-xs" />
