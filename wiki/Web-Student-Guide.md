@@ -15,6 +15,7 @@ This guide will cover the following topics, roughly in the order a student is li
 - [Accepting Assignments](#accepting-assignments)
 - [Submitting Assignments](#submitting-assignments)
 - [Group Assignments](#group-assignments)
+- [Viewing Submissions](#viewing-submissions)
 
 > As you use Classroom 50, if you have feature requests, discover bugs, or would like to suggest ideas for improvements, please reach out to us in our [discussion forums](https://github.com/foundation50/classroom50/discussions); we look forward to hearing from you!
 
@@ -98,5 +99,3 @@ On the same edit URL we were just visiting, it's also possible to view your subm
 Classroom 50 is set up to run autograding for assignments by default (though this can be customized by your teacher). Clicking on "View grade" will take you to a link on GitHub where you view the results for your grade, as for example in the following screenshot:
 
 ![View of assignment submission on GitHub](images/web_assignment_github_release_student.png)
-
-
