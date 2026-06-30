@@ -13,6 +13,12 @@ __pycache__/
 # from there.
 .pytest_cache/
 
+# Stray root-level node_modules / Vite cache created when npm or
+# `npx vitest` is run from the repo root instead of inside web/.
+# The real web dependencies live in web/node_modules (ignored by
+# web/.gitignore). Nothing at the repo root needs node_modules.
+/node_modules/
+
 # Internal planning docs — kept out of git entirely so drafts never
 # end up in the public mirror or shared review surface.
 plans/

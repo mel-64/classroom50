@@ -4,7 +4,7 @@
 // ../shared, so `go build`/`go test` work with GOWORK=off and inside a single
 // module too. The shared module is consumed via a relative replace while the
 // CLIs live in this monorepo; when an extension is split into its own repo the
-// replace is swapped for a published version (see CLEANUP_PLAN.md Phase 5a).
+// replace is swapped for a published version.
 go 1.26
 
 use (
