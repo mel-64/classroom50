@@ -1,5 +1,11 @@
 import { useGitHubRepo } from "./github/hooks"
-import { GitHubAPIError } from "./github/errors"
+import { useParams } from "@tanstack/react-router"
+import {
+  GitHubAPIError,
+  retryTransientNotFoundForbidden,
+} from "./github/errors"
+import { useRoleView } from "@/context/roleView/RoleViewProvider"
+import type { ViewAsRole } from "./useClassroomRole"
 
 export type CourseManifest = {
   course: {
@@ -68,21 +74,31 @@ export function resolveTeacherVerdict(
   return { isTeacher, isStudent, isBlocked, roleResolved, showTeacherUi }
 }
 
+// Apply a "view as" preview to the coarse teacher/student verdict (#221), so
+// every surface reading showTeacherUi/isStudent transforms together.
+// DOWNGRADE-ONLY: a preview can only hide teacher UI, never reveal it. Only
+// "student" affects this coarse switch (a TA still sees staff content); the
+// TA/instructor split lives in useClassroomRole.
+export function applyViewAsToVerdict(
+  verdict: TeacherVerdict,
+  viewAs: ViewAsRole | null,
+): TeacherVerdict {
+  if (viewAs !== "student" || !verdict.isTeacher) return verdict
+  return {
+    ...verdict,
+    isTeacher: false,
+    isStudent: true,
+    showTeacherUi: false,
+  }
+}
+
 export function useCourseTeacherAccess(org: string | undefined) {
   const teacherRepo = "classroom50"
   // Bounded retry on transient errors only: a 404 (student) / 403 (blocked) is
   // a definitive verdict and must not be retried, but a 5xx/429/network blip
   // should self-heal instead of stranding the role unresolved.
   const repoQuery = useGitHubRepo(org, teacherRepo, {
-    retry: (failureCount, error) => {
-      if (
-        error instanceof GitHubAPIError &&
-        (error.status === 404 || error.status === 403)
-      ) {
-        return false
-      }
-      return failureCount < 2
-    },
+    retry: retryTransientNotFoundForbidden,
   })
 
   const verdict = resolveTeacherVerdict({
@@ -92,9 +108,17 @@ export function useCourseTeacherAccess(org: string | undefined) {
     error: repoQuery.error,
   })
 
+  // Apply the "view as" preview, but only on a classroom route — the preview is
+  // classroom-scoped, so org-level surfaces keep the real verdict.
+  const { classroom } = useParams({ strict: false })
+  const { viewAs } = useRoleView()
+  const effectiveVerdict = classroom
+    ? applyViewAsToVerdict(verdict, viewAs)
+    : verdict
+
   return {
     ...repoQuery,
     teacherRepo,
-    ...verdict,
+    ...effectiveVerdict,
   }
 }

@@ -28,6 +28,10 @@ type ClassroomJSON struct {
 	// Populated by `classroom add`; omitted on classrooms created
 	// before this feature.
 	Team *TeamRef `json:"team,omitempty"`
+	// Per-classroom staff teams (instructor, ta) backing the web GUI's in-app
+	// roles. Web-authored; the CLI only tolerates and round-trips it. Omitted
+	// on classrooms created before the feature.
+	Teams *StaffTeamsRef `json:"teams,omitempty"`
 	// Active is the classroom/v1 lifecycle flag: `false` = archived,
 	// `true` or ABSENT = active. A *pointer so "archived" stays distinct
 	// from "legacy classroom that never wrote the key" (both nil/true =
@@ -49,7 +53,7 @@ type ClassroomJSON struct {
 // the json tags on ClassroomJSON above.
 var knownClassroomKeys = map[string]struct{}{
 	"schema": {}, "name": {}, "short_name": {}, "term": {}, "org": {},
-	"secret": {}, "team": {}, "active": {}, "migrated_from": {},
+	"secret": {}, "team": {}, "teams": {}, "active": {}, "migrated_from": {},
 }
 
 // UnmarshalJSON captures unknown top-level keys into Extra, then decodes

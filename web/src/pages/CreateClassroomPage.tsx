@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { createClassroomFilesWithConflictRetry } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import Drawer, {
@@ -25,6 +26,7 @@ const CreateClassroomPage = () => {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { notify } = useToast()
+  const { user } = useGithubAuth()
   const { org } = useParams({ strict: false })
 
   const createClassroomMutation = useMutation<
@@ -86,7 +88,7 @@ const CreateClassroomPage = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="New Classroom" />
-          <RequireTeacher>
+          <RequireTeacher allow="owner">
             <div className="flex justify-between">
               <div>
                 <h1 className="text-xl pt-8 pb-10 font-bold">
@@ -104,6 +106,7 @@ const CreateClassroomPage = () => {
                       org,
                       term: values.term,
                       secret: values.secret || undefined,
+                      creator: user?.login,
                     })
                   }}
                 />

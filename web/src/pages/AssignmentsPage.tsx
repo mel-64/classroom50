@@ -17,6 +17,8 @@ import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import { useClassroomRole, roleLabel } from "@/hooks/useClassroomRole"
+import { useGithubAuth } from "@/auth/useGithubAuth"
 import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
 
@@ -98,6 +100,9 @@ const TeacherAssignmentsView = ({
     org,
     classroom,
   )
+  const { user } = useGithubAuth()
+  const { role: myRole } = useClassroomRole(org, classroom, user?.login)
+  const myRoleLabel = roleLabel(myRole)
   const archived = isClassroomArchived(classroomData ?? {})
   const emptyRoster = useEmptyRosterWarning(org, classroom)
 
@@ -108,8 +113,13 @@ const TeacherAssignmentsView = ({
           {classroomLoading ? (
             <div className="skeleton mt-8 mb-2 h-6 w-48" />
           ) : (
-            <h1 className="text-lg pt-8 pb-2 font-bold">
+            <h1 className="text-lg pt-8 pb-2 font-bold flex items-center gap-2">
               {classroomData?.name || classroomData?.short_name || classroom}
+              {myRoleLabel ? (
+                <span className="badge badge-soft badge-primary badge-sm align-middle">
+                  {myRoleLabel}
+                </span>
+              ) : null}
             </h1>
           )}
           <h3 className="pb-10">

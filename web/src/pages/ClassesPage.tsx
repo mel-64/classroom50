@@ -369,6 +369,10 @@ const ClassesPage = () => {
     useGetOwnOrgMembership(org)
 
   const isMember = membership?.state === "active"
+  // The org preflight (service token + policy audit) is an OWNER concern: a
+  // non-owner can't read the service-token secret, which would surface a false
+  // "failed" alert. Gate it on org ownership, not the broad teacher signal.
+  const isOwner = membership?.role === "admin"
   const [filter, setFilter] = useState<ClassFilter>("active")
 
   if (!org) {
@@ -427,7 +431,7 @@ const ClassesPage = () => {
               <JoinOrgCard org={org} />
             )}
           </div>
-          {isTeacher && <OrgPreflightNotice org={org} />}
+          {isOwner && <OrgPreflightNotice org={org} />}
           {roleLoading ? (
             <div className="grid grid-cols-12 gap-4 mb-6">
               {Array.from({ length: 3 }).map((_, i) => (

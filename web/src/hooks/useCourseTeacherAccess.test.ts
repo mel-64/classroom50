@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { resolveTeacherVerdict } from "./useCourseTeacherAccess"
+import {
+  resolveTeacherVerdict,
+  applyViewAsToVerdict,
+} from "./useCourseTeacherAccess"
 import { GitHubAPIError } from "./github/errors"
 
 const apiError = (status: number) =>
@@ -121,5 +124,44 @@ describe("resolveTeacherVerdict", () => {
       // org-scoped, so an org-less route can't surface teacher UI.
       expect(v.isTeacher).toBe(true)
     })
+  })
+})
+
+describe("applyViewAsToVerdict (#221 full-fidelity preview)", () => {
+  const teacher = resolveTeacherVerdict({
+    org: "acme",
+    isSuccess: true,
+    permissions: { push: true },
+    error: null,
+  })
+  const student = resolveTeacherVerdict({
+    org: "acme",
+    isSuccess: false,
+    permissions: undefined,
+    error: apiError(404),
+  })
+
+  it("a teacher previewing 'student' is downgraded to the student verdict", () => {
+    const v = applyViewAsToVerdict(teacher, "student")
+    expect(v.isTeacher).toBe(false)
+    expect(v.isStudent).toBe(true)
+    expect(v.showTeacherUi).toBe(false)
+  })
+
+  it("a teacher previewing 'ta' keeps teacher UI (TA still sees staff content)", () => {
+    const v = applyViewAsToVerdict(teacher, "ta")
+    expect(v).toEqual(teacher)
+  })
+
+  it("no preview is a no-op", () => {
+    expect(applyViewAsToVerdict(teacher, null)).toEqual(teacher)
+  })
+
+  it("NEVER escalates: a real student previewing 'student' stays a student (no teacher UI granted)", () => {
+    const v = applyViewAsToVerdict(student, "student")
+    expect(v.showTeacherUi).toBe(false)
+    expect(v.isTeacher).toBe(false)
+    // unchanged — the guard `verdict.isTeacher` is false, so nothing applies.
+    expect(v).toEqual(student)
   })
 })

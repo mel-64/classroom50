@@ -12,6 +12,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import {
   deleteClassroomTeam,
   deleteRepo,
+  isDeletableClassroomTeamRef,
   type ClassroomTeamRef,
 } from "@/hooks/github/mutations"
 import {
@@ -86,24 +87,14 @@ async function collectClassroomTeams(
     try {
       const json = await getClassroomJson(client, { org, classroom: dir.name })
       // classroom.json is anyone-with-config-repo-write authored and parsed
-      // without schema validation, so the team ref it names is untrusted input
-      // to a destructive bulk DELETE. Only queue a ref that (a) carries a
-      // positive integer id — deleteClassroomTeam's live-id-match guard is
-      // skipped when the id is falsy, which would delete the slug blind — and
-      // (b) sits in the classroom50- namespace this app owns, so a crafted
-      // `team.slug` can never steer teardown into deleting an unrelated org
-      // team (e.g. "admins").
-      const team = json.team
-      if (
-        team?.slug &&
-        team.slug.startsWith("classroom50-") &&
-        Number.isInteger(team.id) &&
-        team.id > 0
-      ) {
-        bySlug.set(team.slug, {
-          id: team.id,
-          slug: team.slug,
-        })
+      // without schema validation, so the team refs it names are untrusted
+      // input to a destructive bulk DELETE. Only queue refs the app owns and
+      // can safely delete — see isDeletableClassroomTeamRef.
+      const candidates = [json.team, json.teams?.instructor, json.teams?.ta]
+      for (const team of candidates) {
+        if (isDeletableClassroomTeamRef(team)) {
+          bySlug.set(team.slug, { id: team.id, slug: team.slug })
+        }
       }
     } catch {
       // Missing/unreadable classroom.json or no team block: contributes nothing.

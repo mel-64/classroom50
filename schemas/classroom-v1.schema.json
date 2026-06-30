@@ -41,13 +41,16 @@
       }
     },
     "team": {
+      "$ref": "#/$defs/teamRef",
+      "description": "The per-classroom GitHub team (created by `gh teacher classroom add`/`migrate`) that grants rostered students read on private, org-owned assignment templates. Omitted on classrooms created before this feature."
+    },
+    "teams": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "slug"],
-      "description": "The per-classroom GitHub team (created by `gh teacher classroom add`/`migrate`) that grants rostered students read on private, org-owned assignment templates. Omitted on classrooms created before this feature.",
+      "description": "Per-classroom GitHub staff teams (created by the web GUI) backing in-app roles. Each is a `secret` team named `classroom50-<short_name>-<role>` granted write on the config repo. Instructor/owner-only surfaces (org + classroom settings) are hidden from TAs client-side. Omitted on classrooms created before this feature.",
       "properties": {
-        "id": { "type": "integer", "description": "Immutable GitHub team id; the handle `classroom remove` deletes by." },
-        "slug": { "type": "string", "minLength": 1, "description": "GitHub team slug; the authoritative addressing key for membership and repo-grant operations." }
+        "instructor": { "$ref": "#/$defs/teamRef", "description": "The instructor staff team (`classroom50-<short_name>-instructor`)." },
+        "ta": { "$ref": "#/$defs/teamRef", "description": "The teaching-assistant staff team (`classroom50-<short_name>-ta`)." }
       }
     },
     "secret": {
@@ -64,6 +67,15 @@
     "shortName": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{1,38}$"
+    },
+    "teamRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "slug"],
+      "properties": {
+        "id": { "type": "integer", "description": "Immutable GitHub team id." },
+        "slug": { "type": "string", "minLength": 1, "description": "GitHub team slug; the authoritative addressing key for membership/repo-grant ops." }
+      }
     }
   }
 }

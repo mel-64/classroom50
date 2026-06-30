@@ -1,12 +1,21 @@
-import { createRootRouteWithContext, Outlet } from "@tanstack/react-router"
+import {
+  createRootRouteWithContext,
+  Outlet,
+  useParams,
+} from "@tanstack/react-router"
 import type { RouterContext } from "@/types/router"
 import { TriangleAlert } from "lucide-react"
+import { RoleViewProvider } from "@/context/roleView/RoleViewProvider"
 
 const RootComponent = () => {
+  // Scope the "view as" preview (#221) to the current org (reset across orgs via
+  // the key); the provider re-syncs on classroom change so it's classroom-scoped.
+  // Reading params at the root keeps the provider inside the router.
+  const { org, classroom } = useParams({ strict: false })
   return (
-    <>
+    <RoleViewProvider key={org ?? "no-org"} org={org} classroom={classroom}>
       <Outlet />
-    </>
+    </RoleViewProvider>
   )
 }
 

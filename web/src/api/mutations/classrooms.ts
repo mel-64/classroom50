@@ -10,11 +10,15 @@ import {
   deleteClassroomTeam,
   editClassroom,
   ensureClassroomTeam,
-  getErrorMessage,
+  ensureStaffTeams,
+  addUserToTeam,
+  isDeletableClassroomTeamRef,
   updateRef,
+  type ClassroomTeamRef,
   type EditClassroomInput,
   type GitTreeEntry,
   type GitTreeFileMode,
+  type StaffTeamRefs,
 } from "@/hooks/github/mutations"
 
 export type CreateClassroomResult = {
@@ -28,20 +32,42 @@ export async function createClassroomFiles(
   client: GitHubClient,
   input: CreateClassroomInput,
 ): Promise<CreateClassroomResult> {
-  // Create (or adopt) the team BEFORE scaffolding so its { id, slug } lands in
-  // classroom.json (mirrors the CLI's ordering); it later grants students read
-  // on private org templates.
+  // Create (or adopt) the teams BEFORE scaffolding so their { id, slug } land in
+  // classroom.json (mirrors the CLI's ordering). The students team grants
+  // rostered students read on private org templates; the staff teams
+  // (instructor, ta) get config-repo write and back the in-app roles.
   const { created: teamCreated, ...team } = await ensureClassroomTeam(
     client,
     input.org,
     input.classroom,
   )
+  const { teams, created: staffCreated } = await ensureStaffTeams(
+    client,
+    input.org,
+    input.classroom,
+  )
 
-  // If scaffolding fails after the team exists, a team we CREATED would be
-  // orphaned — best-effort delete it before re-throwing. Never delete an ADOPTED
-  // team. A 409 (concurrent commit) is re-thrown untouched so
-  // withGitConflictRetry can re-run, whose ensureClassroomTeam then adopts the
-  // just-created team rather than deleting it out from under the retry.
+  // The creator becomes an instructor (the only way to seed staff membership in
+  // a serverless app). Best-effort: a membership hiccup must not fail creation —
+  // an owner can re-add via the roster UI.
+  if (input.creator && teams.instructor) {
+    try {
+      await addUserToTeam(client, {
+        org: input.org,
+        teamSlug: teams.instructor.slug,
+        username: input.creator,
+        role: "maintainer",
+      })
+    } catch {
+      // Non-fatal; surface nothing — the classroom still scaffolds.
+    }
+  }
+
+  // If scaffolding fails after the teams exist, any team we CREATED would be
+  // orphaned — best-effort delete them before re-throwing. Never delete an
+  // ADOPTED team. A 409 (concurrent commit) is re-thrown untouched so
+  // withGitConflictRetry can re-run, whose ensure* calls then adopt the
+  // just-created teams rather than deleting them out from under the retry.
   let ref, commit, tree, newCommit, updatedRef
   try {
     ref = await getBranchRef(client, input.org)
@@ -51,6 +77,7 @@ export async function createClassroomFiles(
       base_tree: commit.tree.sha,
       term: input.term,
       team,
+      teams,
     })
     newCommit = await createCommit(client, {
       ...input,
@@ -59,12 +86,12 @@ export async function createClassroomFiles(
     })
     updatedRef = await updateRef(client, input.org, newCommit.sha)
   } catch (err) {
-    if (teamCreated && !(err instanceof GitHubAPIError && err.status === 409)) {
-      try {
-        await deleteClassroomTeam(client, input.org, team)
-      } catch {
-        // Best-effort cleanup; surface the original scaffolding error.
-      }
+    if (!(err instanceof GitHubAPIError && err.status === 409)) {
+      await rollbackCreatedTeams(client, input.org, {
+        students: teamCreated ? team : undefined,
+        staff: teams,
+        staffCreated,
+      })
     }
     throw err
   }
@@ -75,6 +102,31 @@ export async function createClassroomFiles(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
+  }
+}
+
+// Best-effort rollback of teams THIS run created (never adopted ones) after a
+// scaffolding failure. Each delete is swallowed so the original error surfaces.
+async function rollbackCreatedTeams(
+  client: GitHubClient,
+  org: string,
+  args: {
+    students?: { id: number; slug: string }
+    staff: StaffTeamRefs
+    staffCreated: ReadonlyArray<"instructor" | "ta">
+  },
+): Promise<void> {
+  const toDelete = [
+    args.students,
+    ...args.staffCreated.map((role) => args.staff[role]),
+  ].filter((t): t is { id: number; slug: string } => Boolean(t?.slug))
+
+  for (const t of toDelete) {
+    try {
+      await deleteClassroomTeam(client, org, t)
+    } catch {
+      // Best-effort cleanup; surface the original scaffolding error.
+    }
   }
 }
 
@@ -112,6 +164,10 @@ export type CreateClassroomInput = {
   // `<classroom>/<secret>/...`. Validated to `[a-z0-9]{4,64}` before the
   // mutation runs.
   secret?: string
+  // The viewer's GitHub login, added to the instructor staff team on create so
+  // the creator gets the instructor role. Optional — the classroom still
+  // scaffolds without it.
+  creator?: string
 }
 export async function createClassroomFilesWithConflictRetry(
   client: GitHubClient,
@@ -201,6 +257,40 @@ export type DeleteClassroomInput = {
   classroom: string
   branch?: string
 }
+
+// Whether a failed team delete is worth retrying: a rate limit or 5xx is a
+// transient blip; everything else is permanent and recorded without retrying.
+function isTransientDeleteError(err: unknown): boolean {
+  return (
+    err instanceof GitHubAPIError && (err.isRateLimited || err.status >= 500)
+  )
+}
+
+// Delete one classroom team, retrying a transient failure a few times with
+// jittered backoff so a single hiccup doesn't strand a team. A permanent
+// refusal throws immediately (the caller records it as a non-fatal warning).
+async function deleteClassroomTeamWithRetry(
+  client: GitHubClient,
+  org: string,
+  team: ClassroomTeamRef,
+): Promise<void> {
+  const attempts = 4
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await deleteClassroomTeam(client, org, team)
+      return
+    } catch (err) {
+      lastError = err
+      if (!isTransientDeleteError(err) || attempt === attempts) {
+        throw err
+      }
+      await sleep(300 * attempt + Math.random() * 400)
+    }
+  }
+  throw lastError
+}
+
 export async function deleteClassroom(
   client: GitHubClient,
   input: DeleteClassroomInput,
@@ -208,10 +298,12 @@ export async function deleteClassroom(
   const { org, classroom, branch = "main" } = input
   const prefix = `${classroom}/`
 
-  // Resolve the team ref from classroom.json BEFORE the deletion commit
+  // Resolve the team refs from classroom.json BEFORE the deletion commit
   // removes the file. No team block (pre-feature) or a read failure yields no
-  // ref, making the delete below a no-op. Mirrors the CLI's ordering.
+  // refs, making the deletes below no-ops. Both the students team and the staff
+  // teams are removed so repo deletion doesn't orphan them.
   let team: { id: number; slug: string } | undefined
+  let staffTeams: StaffTeamRefs
   try {
     const classroomJson = await getClassroomJson(client, {
       org,
@@ -219,8 +311,10 @@ export async function deleteClassroom(
       ref: branch,
     })
     team = classroomJson.team
+    staffTeams = classroomJson.teams ?? {}
   } catch {
     team = undefined
+    staffTeams = {}
   }
 
   const ref = await getBranchRef(client, org, branch)
@@ -292,19 +386,33 @@ export async function deleteClassroom(
     },
   })
 
-  // Delete the per-classroom team (idempotent; 404 = already gone). A delete
-  // failure must NOT undo the already-committed config removal — surface it
-  // as a non-fatal warning, matching the CLI.
-  let teamDeleteWarning: string | undefined
-  if (team?.slug) {
+  // Delete the per-classroom teams (idempotent; 404 = already gone): the
+  // students team plus the staff teams. Filtered through the shared guard so a
+  // drifted/hand-edited ref outside the classroom50- namespace never enters the
+  // delete set. A delete failure must NOT undo the already-committed config
+  // removal — surface it as a non-fatal warning. Each delete retries a transient
+  // blip; a permanent refusal is recorded without retrying.
+  const refsToDelete = [team, staffTeams.instructor, staffTeams.ta].filter(
+    isDeletableClassroomTeamRef,
+  )
+  const failedTeamSlugs: string[] = []
+  for (const teamRef of refsToDelete) {
     try {
-      await deleteClassroomTeam(client, org, team)
-    } catch (err) {
-      teamDeleteWarning = `Removed the classroom config but could not delete its team "${team.slug}" (${getErrorMessage(
-        err,
-      )}); delete it by hand at https://github.com/orgs/${org}/teams if it lingers.`
+      await deleteClassroomTeamWithRetry(client, org, teamRef)
+    } catch {
+      failedTeamSlugs.push(teamRef.slug)
     }
   }
+  const teamDeleteWarning =
+    failedTeamSlugs.length > 0
+      ? `Removed the classroom config but could not delete ${
+          failedTeamSlugs.length === 1 ? "its team" : "its teams"
+        } ${failedTeamSlugs
+          .map((s) => `"${s}"`)
+          .join(
+            ", ",
+          )}; delete by hand at https://github.com/orgs/${org}/teams if they linger.`
+      : undefined
 
   return {
     deleted: true,

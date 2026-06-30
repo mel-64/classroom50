@@ -165,3 +165,55 @@ func TestClassroomJSON_NoExtraOmitsCleanly(t *testing.T) {
 		t.Errorf("no-Extra classroom should round-trip with nil Extra, got %v", back.Extra)
 	}
 }
+
+// TestClassroomJSON_TeamsRoundTrip pins that the web-authored `teams` block
+// decodes into the typed Teams field (NOT Extra) and survives a
+// read-modify-write verbatim.
+func TestClassroomJSON_TeamsRoundTrip(t *testing.T) {
+	in := []byte(`{"schema":"classroom50/classroom/v1","name":"n","short_name":"cs101","term":"","org":"o","teams":{"instructor":{"id":11,"slug":"classroom50-cs101-instructor"},"ta":{"id":12,"slug":"classroom50-cs101-ta"}}}`)
+	var c ClassroomJSON
+	if err := json.Unmarshal(in, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// teams is a known field, so it must NOT be diverted to Extra.
+	if c.Extra != nil {
+		if _, leaked := c.Extra["teams"]; leaked {
+			t.Errorf("teams should decode into the typed field, not Extra: %v", c.Extra)
+		}
+	}
+	if c.Teams == nil || c.Teams.Instructor == nil || c.Teams.TA == nil {
+		t.Fatalf("teams not decoded into typed Teams field: %+v", c.Teams)
+	}
+	if c.Teams.Instructor.Slug != "classroom50-cs101-instructor" || c.Teams.Instructor.ID != 11 {
+		t.Errorf("instructor team ref wrong: %+v", c.Teams.Instructor)
+	}
+	if c.Teams.TA.Slug != "classroom50-cs101-ta" || c.Teams.TA.ID != 12 {
+		t.Errorf("ta team ref wrong: %+v", c.Teams.TA)
+	}
+
+	// Re-encode (the read-modify-write path) and confirm the block survives.
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back ClassroomJSON
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("re-parse: %v\n%s", err, out)
+	}
+	if back.Teams == nil || back.Teams.Instructor == nil || back.Teams.TA == nil {
+		t.Errorf("teams lost on round-trip: %s", out)
+	}
+}
+
+// TestClassroomJSON_NoTeamsOmitsKey confirms a classroom without staff teams
+// never serializes a `teams` key (the omitempty contract).
+func TestClassroomJSON_NoTeamsOmitsKey(t *testing.T) {
+	c := ClassroomJSON{Schema: "classroom50/classroom/v1", Name: "n", ShortName: "s", Term: "", Org: "o"}
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "teams") {
+		t.Errorf("classroom with no staff teams should omit the teams key: %s", out)
+	}
+}

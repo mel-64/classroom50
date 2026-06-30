@@ -13,9 +13,13 @@ export type Classroom = {
   org: string
   // Per-classroom GitHub team granting rostered students read on private org
   // templates. Absent on classrooms created before this feature.
-  team?: {
-    id: number
-    slug: string
+  team?: TeamRef
+  // Per-classroom GitHub staff teams backing in-app roles. Each is a `secret`
+  // team `classroom50-<short_name>-<role>` granted config-repo write;
+  // ensured-on-touch. Absent on classrooms created before this feature.
+  teams?: {
+    instructor?: TeamRef
+    ta?: TeamRef
   }
   // Optional capability-URL secret. When present, this classroom's Pages
   // resources live under `<classroom>/<secret>/...` (every consumer inserts it);
@@ -28,6 +32,19 @@ export type Classroom = {
   // warning when missing), "archive" hides it reversibly, "keep" leaves it.
   onboarding_cleanup?: OnboardingCleanupMode
 }
+
+// A minimal GitHub team identity (slug is authoritative for ops; id is the
+// immutable handle). Mirrors classroom-v1's `teamRef` $def.
+export type TeamRef = {
+  id: number
+  slug: string
+}
+
+// The two staff roles modeled as per-classroom GitHub teams, named
+// `classroom50-<short_name>-<StaffRole>`.
+export type StaffRole = "instructor" | "ta"
+
+export const STAFF_ROLES: readonly StaffRole[] = ["instructor", "ta"]
 
 // A classroom is archived when `active` is explicitly false. Absent or true
 // reads as active, so legacy classrooms (which never wrote `active`) are active.

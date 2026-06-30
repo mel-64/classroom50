@@ -61,6 +61,9 @@ export const githubKeys = {
 
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
+  teamMembers: (org: string, teamSlug: string) =>
+    [...githubKeys.all, "team-members", org, teamSlug] as const,
+
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
 
@@ -156,7 +159,7 @@ export function viewerQuery(client: GitHubClient) {
 }
 
 export function getUser(client: GitHubClient, username: string) {
-  return client.request<GitHubUser>(`/users/${username}`)
+  return client.request<GitHubUser>(`/users/${encodeURIComponent(username)}`)
 }
 
 // Resolve a user by their immutable numeric account id (GET /user/{id}). The
@@ -164,14 +167,14 @@ export function getUser(client: GitHubClient, username: string) {
 // but the id never changes — so this returns their CURRENT login. Used when
 // re-inviting a roster student whose username may have drifted.
 export function getUserById(client: GitHubClient, id: number | string) {
-  return client.request<GitHubUser>(`/user/${id}`)
+  return client.request<GitHubUser>(`/user/${encodeURIComponent(String(id))}`)
 }
 
 export function getUserQuery(client: GitHubClient, username: string) {
   return queryOptions({
     queryKey: githubKeys.user(username),
     queryFn: ({ signal }) =>
-      client.request<GitHubUser>(`/users/${username}`, {
+      client.request<GitHubUser>(`/users/${encodeURIComponent(username)}`, {
         method: "GET",
         signal,
       }),
@@ -466,16 +469,26 @@ export function releasesQuery(
   return queryOptions({
     queryKey: githubKeys.releases(owner, repo),
     queryFn: async ({ signal }): Promise<GitHubRelease[]> => {
-      const releases = await client.request<GitHubRelease[]>(
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-          repo,
-        )}/releases?per_page=100`,
-        { method: "GET", signal },
-      )
+      try {
+        const releases = await client.request<GitHubRelease[]>(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo,
+          )}/releases?per_page=100`,
+          { method: "GET", signal },
+        )
 
-      return releases
-        .filter((r) => r.tag_name.startsWith(SUBMISSION_TAG_PREFIX))
-        .sort((a, b) => releaseTime(b) - releaseTime(a))
+        return releases
+          .filter((r) => r.tag_name.startsWith(SUBMISSION_TAG_PREFIX))
+          .sort((a, b) => releaseTime(b) - releaseTime(a))
+      } catch (err) {
+        // A missing repo (student hasn't accepted, or a previewing teacher with
+        // no repo) 404s here — no releases. Return [] so the page falls through
+        // to its empty state instead of erroring. Other errors throw.
+        if (err instanceof GitHubAPIError && err.status === 404) {
+          return []
+        }
+        throw err
+      }
     },
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,
@@ -1126,12 +1139,48 @@ export async function isTeamMember(
 ): Promise<boolean> {
   try {
     const membership = await client.request<{ state?: string }>(
-      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+      `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(
+        teamSlug,
+      )}/memberships/${encodeURIComponent(username)}`,
     )
     return membership.state === "active"
   } catch {
     return false
   }
+}
+
+// List a team's members across all pages. 404 (team doesn't exist yet) returns
+// [] so a classroom whose staff team hasn't been created reads as "no members".
+export async function listTeamMembers(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+): Promise<GitHubUser[]> {
+  try {
+    return await paginateAll<GitHubUser>(
+      client,
+      (page) =>
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(
+          teamSlug,
+        )}/members?per_page=100&page=${page}`,
+    )
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) return []
+    throw error
+  }
+}
+
+export function teamMembersQuery(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.teamMembers(org, teamSlug),
+    queryFn: () => listTeamMembers(client, org, teamSlug),
+    enabled: Boolean(org && teamSlug),
+    staleTime: 60 * 1000,
+  })
 }
 
 export type GitHubPullRequest = {

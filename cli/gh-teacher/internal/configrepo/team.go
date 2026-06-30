@@ -43,6 +43,13 @@ type TeamRef struct {
 	Slug string `json:"slug"`
 }
 
+// StaffTeamsRef holds the per-classroom staff team refs the web GUI persists
+// under classroom.json `teams`. Mirrors classroom-v1's `teams` $def.
+type StaffTeamsRef struct {
+	Instructor *TeamRef `json:"instructor,omitempty"`
+	TA         *TeamRef `json:"ta,omitempty"`
+}
+
 // ResolveClassroomTeam reads the persisted team ref from the
 // classroom's classroom.json at `ref`. This is the authoritative slug
 // + id for every team operation — never re-derive the slug from the

@@ -7,6 +7,7 @@ import Drawer, {
 } from "@/components/drawer"
 import { useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
+import ClassroomStaffSection from "./classes/ClassroomStaffSection"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { githubKeys } from "@/hooks/github/queries"
@@ -16,6 +17,7 @@ import {
   type EditClassroomResult,
 } from "@/hooks/github/mutations"
 import { editClassroomWithConflictRetry } from "@/api/mutations/classrooms"
+import { isClassroomArchived } from "@/types/classroom"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
@@ -124,6 +126,11 @@ const EditClassroomContent = ({
               )
             }
           />
+          <ClassroomStaffSection
+            org={org}
+            classroom={classroom}
+            disabled={isClassroomArchived(cl)}
+          />
         </div>
       </div>
     </>
@@ -139,7 +146,7 @@ const EditClassroomPage = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Settings" />
-          <RequireTeacher>
+          <RequireTeacher allow="instructor">
             {!org || !classroom ? (
               <MissingParams message="Missing organization or classroom." />
             ) : (

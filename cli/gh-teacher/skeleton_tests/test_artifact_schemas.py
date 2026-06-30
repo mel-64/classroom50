@@ -563,6 +563,40 @@ class TestClassroomSchema:
         }
         assert _errs(CLASSROOM_V, doc) == []
 
+    def test_staff_teams_block_accepted(self):
+        # The schema must accept the web-authored `teams` staff-team block.
+        doc = {
+            "schema": "classroom50/classroom/v1", "name": "CS Principles",
+            "short_name": "cs-principles", "term": "Fall 2026", "org": "cs50",
+            "teams": {
+                "instructor": {"id": 11, "slug": "classroom50-cs-principles-instructor"},
+                "ta": {"id": 12, "slug": "classroom50-cs-principles-ta"},
+            },
+        }
+        assert _errs(CLASSROOM_V, doc) == []
+
+    def test_staff_teams_partial_block_accepted(self):
+        # Each sub-team is optional: a classroom may carry only one role.
+        doc = {
+            "schema": "classroom50/classroom/v1", "name": "X",
+            "short_name": "cs1", "term": "", "org": "o",
+            "teams": {"instructor": {"id": 11, "slug": "classroom50-cs1-instructor"}},
+        }
+        assert _errs(CLASSROOM_V, doc) == []
+
+    @pytest.mark.parametrize("teams, why", [
+        ({"instructor": {"slug": "classroom50-cs1-instructor"}}, "teamRef missing id"),
+        ({"instructor": {"id": 11}}, "teamRef missing slug"),
+        ({"instructor": {"id": 11, "slug": "x", "extra": 1}}, "teamRef extra key"),
+        ({"owner": {"id": 11, "slug": "classroom50-cs1-owner"}}, "unknown role key"),
+    ])
+    def test_staff_teams_malformed_rejected(self, teams, why):
+        doc = {
+            "schema": "classroom50/classroom/v1", "name": "X",
+            "short_name": "cs1", "term": "", "org": "o", "teams": teams,
+        }
+        assert _errs(CLASSROOM_V, doc) != [], f"expected rejection: {why}"
+
     @pytest.mark.parametrize("doc", [
         {"schema": "classroom50/classroom/v2", "name": "X", "short_name": "x", "term": "", "org": "o"},
         {"schema": "classroom50/classroom/v1", "name": "X", "short_name": "Bad_Name", "term": "", "org": "o"},

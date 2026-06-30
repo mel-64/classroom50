@@ -53,6 +53,30 @@ import type { StudentCsvRow } from "@/api/mutations/students"
 import { Link2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
+// #218: group students by roster `section`, sorted by name with the unlabeled
+// ("No section") bucket last. Section labels are trimmed; blank/absent folds
+// into the unlabeled bucket.
+const NO_SECTION = "No section"
+export function groupStudentsBySection(
+  students: Student[],
+): Array<{ section: string; students: Student[] }> {
+  const bySection = new Map<string, Student[]>()
+  for (const student of students) {
+    const label = student.section?.trim() || NO_SECTION
+    const bucket = bySection.get(label)
+    if (bucket) bucket.push(student)
+    else bySection.set(label, [student])
+  }
+  return Array.from(bySection.entries())
+    .sort(([a], [b]) => {
+      // Unlabeled bucket always last; otherwise locale-compare section names.
+      if (a === NO_SECTION) return 1
+      if (b === NO_SECTION) return -1
+      return a.localeCompare(b, undefined, { numeric: true })
+    })
+    .map(([section, group]) => ({ section, students: group }))
+}
+
 const EditStudentButton = ({
   org,
   classroom,
@@ -684,6 +708,9 @@ const EnrolledStudents = ({
   const [resendingUsernames, setResendingUsernames] = useState<Set<string>>(
     new Set(),
   )
+  // #218: optional "group by section" view. Off by default; only meaningful when
+  // the roster carries sections.
+  const [groupBySection, setGroupBySection] = useState(false)
 
   const { data: viewer } = useGitHubViewer()
   const { notify } = useToast()
@@ -706,6 +733,19 @@ const EnrolledStudents = ({
     rosterReady,
     partition: { readyToConfirm, awaitingEnrollment, enrolled },
   } = useRosterStatus(org, classroom, students)
+
+  // #218: does the roster carry any section labels? (gates the toggle)
+  const hasSections = useMemo(
+    () => students.some((s) => s.section?.trim()),
+    [students],
+  )
+
+  // Enrolled students grouped by section. Computed regardless of the toggle so
+  // the data is ready when grouping is turned on.
+  const enrolledBySection = useMemo(
+    () => groupStudentsBySection(enrolled),
+    [enrolled],
+  )
 
   // Non-members still needing an invite re-sent: pending, expired, or never
   // invited. Excludes onboarded/awaiting rows — they've accepted.
@@ -1313,14 +1353,47 @@ const EnrolledStudents = ({
         <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
           <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
             <h2 className="text-lg font-semibold">Enrolled students</h2>
-            <div className="badge badge-primary badge-soft text-base">
-              {enrolled.length}
+            <div className="flex items-center gap-3">
+              {hasSections && enrolled.length > 0 && (
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-base-content/70">
+                  <input
+                    type="checkbox"
+                    className="toggle toggle-sm"
+                    checked={groupBySection}
+                    onChange={(e) => setGroupBySection(e.target.checked)}
+                  />
+                  Group by section
+                </label>
+              )}
+              <div className="badge badge-primary badge-soft text-base">
+                {enrolled.length}
+              </div>
             </div>
           </div>
           {enrolled.length > 0 ? (
-            <ul className="divide-y divide-base-300">
-              {enrolled.map((student) => renderStudentRow(student))}
-            </ul>
+            groupBySection && hasSections ? (
+              <div className="divide-y divide-base-300">
+                {enrolledBySection.map(({ section, students: group }) => (
+                  <div key={section}>
+                    <div className="flex items-center justify-between bg-base-200/60 px-6 py-2">
+                      <h3 className="text-sm font-semibold text-base-content/70">
+                        {section}
+                      </h3>
+                      <span className="badge badge-ghost badge-sm">
+                        {group.length}
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-base-300">
+                      {group.map((student) => renderStudentRow(student))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul className="divide-y divide-base-300">
+                {enrolled.map((student) => renderStudentRow(student))}
+              </ul>
+            )
           ) : (
             <div className="px-6 py-10 text-center text-sm text-base-content/50">
               No students enrolled yet.

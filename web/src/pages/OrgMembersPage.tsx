@@ -443,7 +443,7 @@ const OrgMembersPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
-          <RequireTeacher>
+          <RequireTeacher allow="owner">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Members</h1>
               <p className="mt-1 text-sm text-base-content/60">

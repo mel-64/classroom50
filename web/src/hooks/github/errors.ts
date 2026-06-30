@@ -49,6 +49,22 @@ export class GitHubAPIError extends Error {
   }
 }
 
+// Shared React Query `retry` predicate for fail-closed role/permission reads: a
+// 404 (not found / not a member) or 403 (blocked) is DEFINITIVE and must NOT
+// retry, while a transient 5xx/429/network blip self-heals (bounded to 2).
+export function retryTransientNotFoundForbidden(
+  failureCount: number,
+  error: unknown,
+): boolean {
+  if (
+    error instanceof GitHubAPIError &&
+    (error.status === 404 || error.status === 403)
+  ) {
+    return false
+  }
+  return failureCount < 2
+}
+
 export function readGitHubRateLimitHeaders(res: Response): GitHubRateLimit {
   const numberHeader = (name: string) => {
     const value = res.headers.get(name)

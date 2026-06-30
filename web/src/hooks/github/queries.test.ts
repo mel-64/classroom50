@@ -3,9 +3,11 @@ import {
   pagesAssignmentUrl,
   classroomsIndexUrl,
   listAllOrgMembers,
+  releasesQuery,
 } from "./queries"
+import { GitHubAPIError } from "./errors"
 import type { GitHubClient } from "./client"
-import type { GitHubUser } from "./types"
+import type { GitHubUser, GitHubRelease } from "./types"
 
 describe("pagesAssignmentUrl", () => {
   it("builds the plain classroom path when no secret is set", () => {
@@ -87,5 +89,60 @@ describe("listAllOrgMembers (#76 — pages to completion)", () => {
     const all = await listAllOrgMembers(client, "acme")
     expect(request).toHaveBeenCalledTimes(100)
     expect(all).toHaveLength(100 * 100)
+  })
+})
+
+describe("releasesQuery", () => {
+  const apiError = (status: number) =>
+    new GitHubAPIError({
+      status,
+      url: "https://api.github.com/repos/acme/cs50-a1-bob/releases",
+      message: status === 404 ? "Not Found" : `boom ${status}`,
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  const run = (client: GitHubClient) =>
+    // The query is enabled only with owner+repo; invoke the queryFn directly.
+    (
+      releasesQuery(client, "acme", "cs50-a1-bob").queryFn as (ctx: {
+        signal?: AbortSignal
+      }) => Promise<GitHubRelease[]>
+    )({})
+
+  it("returns [] when the repo is missing (404) — no submission, not an error", async () => {
+    const request = vi.fn().mockRejectedValue(apiError(404))
+    const releases = await run({ request } as unknown as GitHubClient)
+    expect(releases).toEqual([])
+  })
+
+  it("rethrows a non-404 (e.g. 403/5xx) so it surfaces as an error", async () => {
+    const request = vi.fn().mockRejectedValue(apiError(403))
+    await expect(run({ request } as unknown as GitHubClient)).rejects.toThrow()
+  })
+
+  it("keeps only submit/* tags, newest first", async () => {
+    const rel = (tag: string, when: string): GitHubRelease =>
+      ({
+        id: tag.length,
+        tag_name: tag,
+        name: tag,
+        published_at: when,
+        created_at: when,
+      }) as GitHubRelease
+    const request = vi.fn().mockResolvedValue([
+      rel("submit/1", "2026-01-01T00:00:00Z"),
+      rel("v1.0", "2026-02-01T00:00:00Z"), // non-submission tag, filtered out
+      rel("submit/2", "2026-03-01T00:00:00Z"),
+    ])
+    const releases = await run({ request } as unknown as GitHubClient)
+    expect(releases.map((r) => r.tag_name)).toEqual(["submit/2", "submit/1"])
   })
 })

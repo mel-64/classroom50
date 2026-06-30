@@ -18,6 +18,7 @@ import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetSubmissionReleases from "@/hooks/useGetSubmissionReleases"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
+import useGetClassroom from "@/hooks/useGetClassroom"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import { studentRepoName } from "@/util/studentRepo"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
@@ -91,10 +92,14 @@ const SubmissionBody = ({
   org,
   classroom,
   assignment,
+  secret,
 }: {
   org: string
   classroom: string
   assignment: string
+  // Capability-URL secret for a protected classroom; threads into the accept
+  // link. Undefined for unprotected.
+  secret?: string
 }) => {
   const { user } = useGithubAuth()
   const {
@@ -148,6 +153,7 @@ const SubmissionBody = ({
             className="underline"
             to="/$org/$classroom/assignments/$assignment/accept"
             params={{ org, classroom, assignment }}
+            search={secret ? { k: secret } : undefined}
           >
             Accept it
           </Link>{" "}
@@ -211,14 +217,21 @@ const SubmissionBody = ({
 const StudentSubmissionPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const { user } = useGithubAuth()
-  // The capability-URL secret (if the classroom is protected) lives in the
-  // student's own repo's .classroom50.yaml — the source they can read. Empty
-  // for an unprotected classroom -> plain Pages path.
+  // Resolve the capability-URL secret (if the classroom is protected) from two
+  // sources, in order: (1) the student's own accepted repo's .classroom50.yaml —
+  // the only source a real student can read; (2) the private classroom.json —
+  // readable only by staff (incl. an instructor previewing as a student), so a
+  // not-yet-accepted preview still gets a working link. Empty when unprotected.
   const repoName =
     classroom && assignment && user?.login
       ? studentRepoName(classroom, assignment, user.login)
       : ""
-  const { secret } = useDotClassroom50(org ?? "", repoName)
+  const { secret: repoSecret } = useDotClassroom50(org ?? "", repoName)
+  // classroom.json 404s for a real student (private) — fine, it just yields no
+  // secret; the repo secret covers the post-accept case.
+  const { data: classroomMeta } = useGetClassroom(org, classroom)
+  const secret = repoSecret || classroomMeta?.secret || undefined
+
   const { assignment: assignmentData } = useGetPublicAssignment(
     org,
     classroom,
@@ -241,6 +254,7 @@ const StudentSubmissionPage = () => {
               org={org}
               classroom={classroom}
               assignment={assignment}
+              secret={secret}
             />
           ) : (
             <MissingParams message="Missing course or assignment information." />
