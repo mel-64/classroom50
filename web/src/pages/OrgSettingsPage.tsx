@@ -27,7 +27,16 @@ import {
 
 const DEFAULT_EXPIRY_DAYS = 120
 const MIN_EXPIRY_DAYS = 1
-const MAX_EXPIRY_DAYS = 366
+// GitHub caps a token at one calendar year, so the max day count is 366 when that
+// window spans a leap day and 365 otherwise. `from` is a proxy for the token's
+// start (GitHub's clock actually starts at "Generate"); pass a real start date
+// here if we ever add a picker.
+function maxExpiryDays(from: Date): number {
+  const oneYearOut = new Date(from)
+  oneYearOut.setFullYear(oneYearOut.getFullYear() + 1)
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.round((oneYearOut.getTime() - from.getTime()) / msPerDay)
+}
 
 // One descriptor per service-token status, keeping the banner's style, icon, and
 // title in sync from a single source.
@@ -139,11 +148,13 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
 
   const [now] = useState(() => Date.now())
 
+  const maxExpiry = maxExpiryDays(new Date(now))
+
   const parsedExpiry = Number(expiryDays)
   const expiryValid =
     Number.isInteger(parsedExpiry) &&
     parsedExpiry >= MIN_EXPIRY_DAYS &&
-    parsedExpiry <= MAX_EXPIRY_DAYS
+    parsedExpiry <= maxExpiry
 
   const expiresDate = expiryValid
     ? new Date(now + parsedExpiry * 24 * 60 * 60 * 1000)
@@ -257,7 +268,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                   ref={expiryInputRef}
                   type="number"
                   min={MIN_EXPIRY_DAYS}
-                  max={MAX_EXPIRY_DAYS}
+                  max={maxExpiry}
                   value={expiryDays}
                   onChange={(e) => setExpiryDays(e.target.value)}
                   className="w-full [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
@@ -272,12 +283,12 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                 </span>
               ) : (
                 <span className="text-xs text-error">
-                  Enter {MIN_EXPIRY_DAYS}–{MAX_EXPIRY_DAYS} days
+                  Enter {MIN_EXPIRY_DAYS}–{maxExpiry} days
                 </span>
               )}
             </div>
             <p className="mt-2 text-xs text-base-content/50">
-              Valid range is {MIN_EXPIRY_DAYS}–{MAX_EXPIRY_DAYS} days (GitHub’s
+              Valid range is {MIN_EXPIRY_DAYS}–{maxExpiry} days (GitHub’s
               maximum).
             </p>
           </div>
