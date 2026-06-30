@@ -1,0 +1,187 @@
+// Read-only org audit — the web mirror of the CLI's buildAuditReport.
+// Deliberate divergence: the CLI is three-state (OK / WARN / FAIL), but the GUI
+// collapses WARN into FAIL — any drift is treated as actionable (deriveVerdict).
+
+import type { GitHubClient } from "@/hooks/github/client"
+import {
+  checkBranchProtection,
+  checkOrgActions,
+  checkOrgDefaults,
+  checkOrgPrCreation,
+  checkPages,
+  checkReusableWorkflowAccess,
+  checkWorkflowPermissions,
+  type CheckVerdict,
+} from "@/hooks/github/orgChecks"
+import { checkRulesets } from "@/hooks/github/rulesets"
+import {
+  manualHardeningSteps,
+  memberPrivilegesUrl,
+  type DefaultVerdict,
+  type ManualStep,
+  type MemberDefaultSetting,
+} from "./desiredState"
+
+export type AuditVerdict = "ok" | "fail"
+
+export type ConcernId =
+  | "orgDefaults"
+  | "orgActions"
+  | "orgPrCreation"
+  | "branchProtection"
+  | "workflowPermissions"
+  | "reusableWorkflowAccess"
+  | "pages"
+  | "rulesets"
+
+export type ConcernCheck = {
+  id: ConcernId
+  title: string
+  verdict: CheckVerdict
+  // The GitHub settings page where a teacher can inspect/fix this concern.
+  settingsUrl: string
+}
+
+export type OrgAuditReport = {
+  org: string
+  plan: string | undefined
+  verdict: AuditVerdict
+  // readOk is false when GET /orgs/{org} itself failed — the member-default
+  // audit is inconclusive (distinct from "read fine, all enforced").
+  readOk: boolean
+  // lockdownComplete mirrors the CLI: no critical member-default is unenforced.
+  lockdownComplete: boolean
+  // Per-field member-default drift, each carrying its manualFix.
+  unenforcedDefaults: MemberDefaultSetting[]
+  // The full member-default lockdown we configure, each with whether the live
+  // org value currently matches — so teachers can see every permission we set,
+  // not just the drifted ones. Empty when the org couldn't be read.
+  defaultVerdicts: DefaultVerdict[]
+  // Per-concern check verdicts (Actions, Pages, rulesets, …).
+  concerns: ConcernCheck[]
+  // The four API-less settings the teacher confirms by hand; never fail.
+  manualUnreadable: ManualStep[]
+}
+
+const CONCERN_TITLES: Record<ConcernId, string> = {
+  orgDefaults: "Member-privilege lockdown",
+  orgActions: "Actions permissions",
+  orgPrCreation: "Actions pull request creation",
+  branchProtection: "Branch protection",
+  workflowPermissions: "Workflow permissions",
+  reusableWorkflowAccess: "Reusable workflow access",
+  pages: "GitHub Pages",
+  rulesets: "Branch protection rulesets",
+}
+
+// The GitHub settings page each concern maps to, so a teacher can jump
+// straight to where they'd inspect or fix it. Org-level concerns point at the
+// org settings; repo-level concerns point at the classroom50 config repo.
+function concernSettingsUrl(id: ConcernId, org: string): string {
+  const orgBase = `https://github.com/organizations/${org}/settings`
+  const repoBase = `https://github.com/${org}/classroom50/settings`
+  switch (id) {
+    case "orgDefaults":
+      return memberPrivilegesUrl(org)
+    case "orgActions":
+    case "orgPrCreation":
+      return `${orgBase}/actions`
+    case "rulesets":
+      return `${orgBase}/rules`
+    case "branchProtection":
+      return `${repoBase}/branches`
+    case "reusableWorkflowAccess":
+    case "workflowPermissions":
+      return `${repoBase}/actions`
+    case "pages":
+      return `${repoBase}/pages`
+  }
+}
+
+// Any drift fails the audit — stricter than the CLI, which warns on
+// non-critical drift (see header). An unreadable concern also fails: a partial
+// read outage is "needs attention", not a clean bill of health.
+function deriveVerdict(
+  readOk: boolean,
+  lockdownComplete: boolean,
+  concerns: ConcernCheck[],
+): AuditVerdict {
+  if (!readOk) return "fail"
+  if (!lockdownComplete) return "fail"
+  const anyUnresolved = concerns.some(
+    (c) => c.verdict.state === "unenforced" || c.verdict.state === "unreadable",
+  )
+  return anyUnresolved ? "fail" : "ok"
+}
+
+export async function buildOrgAuditReport(
+  client: GitHubClient,
+  org: string,
+  plan: string | undefined,
+): Promise<OrgAuditReport> {
+  // All eight checks run in parallel — independent reads, none throw (each
+  // swallows its error into a verdict).
+  const [
+    defaults,
+    actions,
+    prCreation,
+    branchProtection,
+    workflowPermissions,
+    reusableAccess,
+    pages,
+    rulesets,
+  ] = await Promise.all([
+    checkOrgDefaults(client, org, plan),
+    checkOrgActions(client, org),
+    checkOrgPrCreation(client, org),
+    checkBranchProtection(client, org),
+    checkWorkflowPermissions(client, org),
+    checkReusableWorkflowAccess(client, org),
+    checkPages(client, org),
+    checkRulesets(client, org),
+  ])
+
+  const readOk = defaults.verdict.state !== "unreadable"
+  const unenforcedDefaults =
+    defaults.classification?.verdicts
+      .filter((v) => !v.enforced)
+      .map((v) => v.setting) ?? []
+  const defaultVerdicts = defaults.classification?.verdicts ?? []
+  // lockdownComplete mirrors the CLI: critical defaults only. Non-critical
+  // drift leaves it true but still fails the verdict via the orgDefaults
+  // concern being "unenforced" (see deriveVerdict).
+  const lockdownComplete =
+    readOk && !(defaults.classification?.criticalMissed ?? false)
+
+  const concerns: ConcernCheck[] = (
+    [
+      { id: "orgDefaults", verdict: defaults.verdict },
+      { id: "orgActions", verdict: actions },
+      { id: "orgPrCreation", verdict: prCreation },
+      { id: "branchProtection", verdict: branchProtection },
+      { id: "workflowPermissions", verdict: workflowPermissions },
+      { id: "reusableWorkflowAccess", verdict: reusableAccess },
+      { id: "pages", verdict: pages },
+      { id: "rulesets", verdict: rulesets },
+    ] as const
+  ).map(({ id, verdict }) => ({
+    id,
+    title: CONCERN_TITLES[id],
+    verdict,
+    settingsUrl: concernSettingsUrl(id, org),
+  }))
+  // Sort the audit list alphabetically by title for predictable scanning.
+  concerns.sort((a, b) => a.title.localeCompare(b.title))
+
+  return {
+    org,
+    plan,
+    verdict: deriveVerdict(readOk, lockdownComplete, concerns),
+    readOk,
+    lockdownComplete,
+    unenforcedDefaults,
+    defaultVerdicts,
+    concerns,
+    manualUnreadable: manualHardeningSteps(org),
+  }
+}

@@ -1,0 +1,89 @@
+name: web Deploy to GitHub Pages
+
+# Builds the web app (web/) and publishes it to classroom50.org via this
+# monorepo's GitHub Pages on every merge to v1 (scoped to web/** so unrelated
+# CLI changes don't redeploy the site). Manual runs available via the Actions
+# tab.
+#
+# DOMAIN CUTOVER (one-time, manual): classroom50.org is a custom domain and
+# GitHub Pages allows only ONE repo per custom domain. The standalone
+# foundation50/classroom50-web repo currently owns it. Before this workflow's
+# deploy can succeed on the domain, that repo's Pages custom domain must be
+# released and this repo's Pages enabled (Settings -> Pages, source: GitHub
+# Actions) with the classroom50.org custom domain. The web/CNAME file carries
+# the domain into the published artifact. The Vite build serves from root "/"
+# (default base), which is correct for classroom50.org.
+
+on:
+  push:
+    branches: [v1]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # `npm run build` runs `tsc -b && vite build`; the type-check is
+      # blocking, so a regression fails the deploy instead of silently
+      # shipping. Served from the root of the custom domain (classroom50.org),
+      # so the default base of "/" is correct.
+      - run: npm run build
+        env:
+          # OAuth client IDs are public identifiers, so a repo variable
+          # (Settings -> Secrets and variables -> Actions -> Variables)
+          # is sufficient; no secret needed.
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+
+      # GitHub Pages has no SPA rewrites; serve the app for unknown deep links.
+      - name: Add SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      # The Actions Pages deploy publishes only the dist/ artifact, so the
+      # custom domain must be written into dist/ (web/CNAME is at the web root,
+      # which Vite does not copy — only web/public/ is copied). Source it from
+      # web/CNAME so the domain has a single source of truth.
+      - name: Write CNAME into dist
+        run: cp CNAME dist/CNAME
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          # Path is repo-root-relative, not affected by working-directory.
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,59 @@
+name: web CI
+
+# Quality gate for the web app (web/): type-check, lint, format, and tests.
+# Blocks merge and can't be bypassed like a local hook. Scoped to web/** so
+# it only runs when the frontend changes, independent of the Go/Python CI.
+
+on:
+  push:
+    branches: [main, v1]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yaml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yaml'
+
+# Cancel superseded runs on the same ref so a quick succession of pushes
+# doesn't pile up redundant CI.
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # Full project type-check (tsc -b). Blocking: the build depends on this
+      # staying green.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # ESLint. Fails on errors; advisory rules are configured as warnings in
+      # eslint.config.js and do not block.
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test

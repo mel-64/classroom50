@@ -1,0 +1,156 @@
+import { useMemo, useRef, useState } from "react"
+
+import useGetClasses from "@/hooks/useGetClasses"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import type { Assignment } from "@/types/classroom"
+import { useReuseAssignment } from "@/hooks/useReuseAssignment"
+import {
+  ReuseModalShell,
+  reuseSlugStatus,
+} from "@/components/modals/ReuseModalShell"
+
+// Reuse ("Duplicate") an assignment into another classroom in the same org —
+// our equivalent of GitHub Classroom's "Reuse assignment". v1 is in-org only:
+// the target picker lists sibling classrooms under classroom50/, never a
+// different org (a private template can only be team-granted within its org).
+export const ReuseAssignmentModal = ({
+  org,
+  classroom,
+  assignment,
+  onClose,
+}: {
+  org: string
+  classroom: string
+  assignment: Assignment
+  onClose: () => void
+}) => {
+  const { classes } = useGetClasses(org)
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  // Sibling classrooms only — can't reuse into the assignment's own classroom.
+  const targets = useMemo(
+    () => classes.filter((c) => c.name !== classroom),
+    [classes, classroom],
+  )
+
+  const [targetClassroom, setTargetClassroom] = useState("")
+
+  // Preload the chosen target's assignments to auto-suffix/validate the slug
+  // (lazy: only once a target is picked).
+  const {
+    data: targetData,
+    isLoading: targetLoading,
+    isError: targetError,
+  } = useGetClassroomAssignments(org, targetClassroom || undefined, {
+    enabled: Boolean(targetClassroom),
+  })
+  const takenSlugs = useMemo(
+    () => (targetData?.assignments ?? []).map((a) => a.slug),
+    [targetData],
+  )
+
+  const reuse = useReuseAssignment({
+    org,
+    targetClassroom,
+    source: assignment,
+    takenSlugs,
+    takenLoading: targetLoading,
+    closeDialog: () => dialogRef.current?.close(),
+  })
+
+  const handlePickTarget = (value: string) => {
+    setTargetClassroom(value)
+    reuse.resetSlug()
+  }
+
+  return (
+    <ReuseModalShell
+      dialogRef={dialogRef}
+      title="Reuse assignment"
+      description={
+        <>
+          Copy{" "}
+          <span className="font-semibold text-base-content">
+            {assignment.name || assignment.slug}
+          </span>{" "}
+          into another classroom in {org}. Name, template, tests, runtime, due
+          date, and other settings are copied; student repositories and scores
+          are not.
+        </>
+      }
+      isPending={reuse.isPending}
+      warning={reuse.warning}
+      errorMessage={reuse.errorMessage}
+      canSubmit={reuse.canSubmit}
+      showSubmit={targets.length > 0}
+      onSubmit={reuse.submit}
+      onClose={onClose}
+    >
+      {targets.length === 0 ? (
+        <div className="mt-6 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
+          There are no other classrooms in {org} to reuse this assignment into.
+          Create another classroom first.
+        </div>
+      ) : (
+        <div className="mt-6 space-y-4">
+          <label className="form-control w-full">
+            <span className="label-text mb-1 font-medium">
+              Target classroom
+            </span>
+            <select
+              className="select select-bordered w-full"
+              value={targetClassroom}
+              disabled={reuse.isPending}
+              onChange={(e) => handlePickTarget(e.target.value)}
+            >
+              <option value="" disabled>
+                Choose a classroom…
+              </option>
+              {targets.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="form-control w-full">
+            <span className="label-text mb-1 font-medium">
+              Slug in the new classroom
+            </span>
+            <input
+              type="text"
+              className={`input input-bordered w-full font-mono ${
+                reuse.slugTaken ? "input-error" : ""
+              }`}
+              value={reuse.displayedSlug}
+              disabled={reuse.isPending || !targetClassroom || targetLoading}
+              onChange={(e) => reuse.onSlugChange(e.target.value)}
+              onBlur={reuse.onSlugBlur}
+            />
+            <span
+              className={`label-text-alt mt-1 ${
+                reuse.slugTaken ? "text-error" : "text-base-content/50"
+              }`}
+            >
+              {!targetClassroom
+                ? "Choose a classroom first."
+                : reuseSlugStatus({
+                    loading: targetLoading,
+                    error: targetError,
+                    slugTaken: reuse.slugTaken,
+                    slugTouched: reuse.slugTouched,
+                    normalizedSlug: reuse.normalizedSlug,
+                    displayedSlug: reuse.displayedSlug,
+                    classroomLabel: targetClassroom,
+                    uniqueHint: "Must be unique within the target classroom.",
+                  })}
+            </span>
+          </label>
+        </div>
+      )}
+    </ReuseModalShell>
+  )
+}
+
+export default ReuseAssignmentModal

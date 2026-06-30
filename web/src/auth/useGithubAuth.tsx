@@ -1,0 +1,536 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PropsWithChildren,
+} from "react"
+import { DEFAULT_GITHUB_SCOPE, GITHUB_OAUTH_CLIENT_ID } from "./constants"
+import {
+  buildGithubAuthorizeUrl,
+  exchangeWebCode,
+  pollDeviceToken,
+  requestDeviceCode,
+} from "./github-oauth-api"
+import { fetchGithubUser } from "./github-user-api"
+import { deriveChallenge, generateVerifier, randomBase64Url } from "./pkce"
+import {
+  clearGithubToken,
+  consumeOAuthSession,
+  getStoredGithubClientId,
+  getStoredGithubScope,
+  getStoredGithubToken,
+  persistGithubClientId,
+  persistGithubToken,
+  saveOAuthSession,
+} from "./storage"
+import type { DeviceAuthState, GithubAuthScreen } from "./types"
+import type { AuthStatus } from "@/types/router"
+
+function formatError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err)
+
+  if (
+    message.toLowerCase().includes("failed to fetch") ||
+    message.toLowerCase().includes("networkerror")
+  ) {
+    return "Network error reaching the Cloudflare Worker proxy; it may be down or unreachable."
+  }
+
+  return message
+}
+
+function sleep(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const timer = window.setTimeout(resolve, ms)
+
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
+// Holds all auth state. Must only be instantiated once, by GitHubAuthProvider;
+// every other consumer goes through the useGithubAuth() context hook below.
+function useGithubAuthState() {
+  const queryClient = useQueryClient()
+  const abortRef = useRef<AbortController | null>(null)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [screen, setScreen] = useState<GithubAuthScreen>("config")
+  const [clientId, setClientId] = useState(GITHUB_OAUTH_CLIENT_ID)
+  const [token, setToken] = useState<string | null>(null)
+  const [tokenScope, setTokenScope] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [device, setDevice] = useState<DeviceAuthState | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const [hasLoadedStoredAuth, setHasLoadedStoredAuth] = useState(false)
+
+  const githubUserQuery = useQuery({
+    queryKey: ["github", "user", token],
+    queryFn: () => fetchGithubUser(token!),
+    enabled: Boolean(token),
+    staleTime: 60 * 60 * 1000,
+    retry: 1,
+  })
+
+  const exchangeCodeMutation = useMutation({
+    mutationFn: exchangeWebCode,
+  })
+
+  const requestDeviceCodeMutation = useMutation({
+    mutationFn: requestDeviceCode,
+  })
+
+  // Shared landing point for both web and device flows. Shows the success
+  // screen; once the profile loads, the /login route guard redirects to "/".
+  // The timeout below settles the screen state in case that doesn't happen
+  // (e.g. the profile fetch fails and the user stays on the card).
+  const completeSignIn = useCallback(
+    (data: { access_token: string; scope?: string }) => {
+      persistGithubToken(data.access_token, data.scope || "")
+      setToken(data.access_token)
+      setTokenScope(data.scope || "")
+      setDevice(null)
+      setScreen("success")
+
+      queryClient.prefetchQuery({
+        queryKey: ["github", "user", data.access_token],
+        queryFn: () => fetchGithubUser(data.access_token),
+      })
+
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => {
+        setScreen("authed")
+      }, 3500)
+    },
+    [queryClient],
+  )
+
+  // On unmount mid-flow, abort the device poll loop and clear the pending
+  // success-screen timer so neither runs (or setStates) after teardown.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const storedToken = getStoredGithubToken()
+    const storedClientId = getStoredGithubClientId()
+    const storedScope = getStoredGithubScope()
+
+    // The build-time client ID wins; localStorage is a dev-only fallback.
+    if (!GITHUB_OAUTH_CLIENT_ID && storedClientId) {
+      setClientId(storedClientId)
+    }
+    setTokenScope(storedScope)
+
+    if (storedToken) {
+      setToken(storedToken)
+      setScreen("authed")
+    }
+
+    setHasLoadedStoredAuth(true)
+  }, [])
+
+  useEffect(() => {
+    if (screen !== "device-prompt") return
+
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+    }, 500)
+
+    return () => window.clearInterval(timer)
+  }, [screen])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get("code")
+    const returnedState = params.get("state")
+
+    if (!code) return
+
+    window.history.replaceState({}, "", window.location.pathname)
+
+    const {
+      verifier,
+      expectedState,
+      clientId: callbackClientId,
+    } = consumeOAuthSession()
+
+    if (!returnedState || returnedState !== expectedState) {
+      setError("State mismatch -- possible CSRF. Please try signing in again.")
+      setScreen("config")
+      return
+    }
+
+    if (!verifier || !callbackClientId) {
+      setError(
+        "Missing PKCE verifier or client ID. Please try signing in again.",
+      )
+      setScreen("config")
+      return
+    }
+
+    setClientId(callbackClientId)
+    persistGithubClientId(callbackClientId)
+
+    setScreen("exchanging")
+    setError(null)
+
+    exchangeCodeMutation.mutate(
+      {
+        clientId: callbackClientId,
+        code,
+        verifier,
+      },
+      {
+        onSuccess: (data) => {
+          completeSignIn(data)
+        },
+        onError: (err) => {
+          setError(formatError(err))
+          setScreen("config")
+        },
+      },
+    )
+  }, [])
+
+  const validateConfig = useCallback(() => {
+    const trimmedClientId = clientId.trim()
+
+    if (!trimmedClientId) {
+      setError(
+        "GitHub OAuth client ID is not configured (VITE_GITHUB_CLIENT_ID).",
+      )
+      return null
+    }
+
+    persistGithubClientId(trimmedClientId)
+    setError(null)
+
+    return {
+      clientId: trimmedClientId,
+      scope: DEFAULT_GITHUB_SCOPE,
+    }
+  }, [clientId])
+
+  const startWebFlow = useCallback(async () => {
+    const config = validateConfig()
+    if (!config) return
+
+    setScreen("exchanging")
+
+    const verifier = generateVerifier()
+    const challenge = await deriveChallenge(verifier)
+    const oauthState = randomBase64Url(16)
+
+    saveOAuthSession({
+      verifier,
+      state: oauthState,
+      clientId: config.clientId,
+      scope: config.scope,
+    })
+
+    window.location.href = buildGithubAuthorizeUrl({
+      clientId: config.clientId,
+      scope: config.scope,
+      state: oauthState,
+      challenge,
+    })
+  }, [validateConfig])
+
+  const failDeviceFlow = useCallback((message: string) => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setError(message)
+    setDevice(null)
+    setScreen("config")
+  }, [])
+
+  const startDevicePolling = useCallback(
+    async (input: {
+      clientId: string
+      deviceCode: string
+      expiresAt: number
+      initialIntervalSeconds: number
+    }) => {
+      abortRef.current?.abort()
+
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      let intervalSeconds = input.initialIntervalSeconds
+      let attempts = 0
+
+      while (!controller.signal.aborted) {
+        if (Date.now() > input.expiresAt) {
+          failDeviceFlow("Device code expired. Please try again.")
+          return
+        }
+
+        setDevice((current) =>
+          current
+            ? {
+                ...current,
+                intervalSeconds,
+                nextPollAt: Date.now() + intervalSeconds * 1000,
+              }
+            : current,
+        )
+
+        await sleep(intervalSeconds * 1000, controller.signal)
+
+        if (controller.signal.aborted) return
+
+        attempts += 1
+
+        setDevice((current) =>
+          current
+            ? {
+                ...current,
+                attempts,
+              }
+            : current,
+        )
+
+        let data
+
+        try {
+          data = await pollDeviceToken({
+            clientId: input.clientId,
+            deviceCode: input.deviceCode,
+            signal: controller.signal,
+          })
+        } catch (err) {
+          if (controller.signal.aborted) return
+          failDeviceFlow(formatError(err))
+          return
+        }
+
+        if (data.error === "authorization_pending") continue
+
+        if (data.error === "slow_down") {
+          intervalSeconds += 5
+          continue
+        }
+
+        if (data.error === "access_denied") {
+          failDeviceFlow("You declined the authorization request.")
+          return
+        }
+
+        if (data.error === "expired_token") {
+          failDeviceFlow("Device code expired. Please try again.")
+          return
+        }
+
+        if (data.error) {
+          failDeviceFlow(data.error_description || data.error)
+          return
+        }
+
+        if (!data.access_token) {
+          failDeviceFlow(
+            "Token endpoint returned no access_token and no error.",
+          )
+          return
+        }
+
+        completeSignIn({ access_token: data.access_token, scope: data.scope })
+
+        return
+      }
+    },
+    [completeSignIn, failDeviceFlow],
+  )
+
+  const startDeviceFlow = useCallback(async () => {
+    const config = validateConfig()
+    if (!config) return
+
+    setError(null)
+
+    requestDeviceCodeMutation.mutate(config, {
+      onSuccess: (data) => {
+        const intervalSeconds = data.interval || 5
+        const expiresAt = Date.now() + data.expires_in! * 1000
+
+        setDevice({
+          userCode: data.user_code!,
+          verificationUri: data.verification_uri!,
+          deviceCode: data.device_code!,
+          expiresAt,
+          intervalSeconds,
+          attempts: 0,
+          nextPollAt: Date.now() + intervalSeconds * 1000,
+          progress: 0,
+        })
+
+        setScreen("device-prompt")
+
+        void startDevicePolling({
+          clientId: config.clientId,
+          deviceCode: data.device_code!,
+          expiresAt,
+          initialIntervalSeconds: intervalSeconds,
+        })
+      },
+      onError: (err) => {
+        failDeviceFlow(formatError(err))
+      },
+    })
+  }, [
+    failDeviceFlow,
+    requestDeviceCodeMutation,
+    startDevicePolling,
+    validateConfig,
+  ])
+
+  const cancelDeviceFlow = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setDevice(null)
+    setError(null)
+    setScreen("config")
+  }, [])
+
+  const markDeviceCodeCopied = useCallback(() => {
+    setDevice((current) =>
+      current && current.progress < 1
+        ? {
+            ...current,
+            progress: 1,
+          }
+        : current,
+    )
+  }, [])
+
+  const markVerificationOpened = useCallback(() => {
+    setDevice((current) =>
+      current && current.progress < 2
+        ? {
+            ...current,
+            progress: 2,
+          }
+        : current,
+    )
+  }, [])
+
+  const signOut = useCallback(() => {
+    abortRef.current?.abort()
+    clearGithubToken()
+    setToken(null)
+    setTokenScope("")
+    setDevice(null)
+    setError(null)
+    setScreen("config")
+    queryClient.removeQueries({ queryKey: ["github"] })
+  }, [queryClient])
+
+  const deviceStatus = useMemo(() => {
+    if (!device) return null
+
+    const remainingSeconds = Math.max(
+      0,
+      Math.floor((device.expiresAt - now) / 1000),
+    )
+
+    const nextPollSeconds = Math.max(
+      0,
+      Math.ceil((device.nextPollAt - now) / 1000),
+    )
+
+    const minutes = Math.floor(remainingSeconds / 60)
+    const seconds = String(remainingSeconds % 60).padStart(2, "0")
+
+    return {
+      attempts: device.attempts,
+      nextPollSeconds,
+      expiresDisplay: `${minutes}:${seconds}`,
+    }
+  }, [device, now])
+
+  const status = useMemo<AuthStatus>(() => {
+    if (!hasLoadedStoredAuth) {
+      return "loading"
+    }
+
+    if (!token) {
+      return "unauthenticated"
+    }
+
+    if (githubUserQuery.isLoading || githubUserQuery.isPending) {
+      return "loading"
+    }
+
+    if (githubUserQuery.isError || !githubUserQuery.data) {
+      return "unauthenticated"
+    }
+
+    return "authenticated"
+  }, [
+    hasLoadedStoredAuth,
+    token,
+    githubUserQuery.isLoading,
+    githubUserQuery.isPending,
+    githubUserQuery.isError,
+    githubUserQuery.data,
+  ])
+
+  return {
+    screen,
+    token,
+    tokenScope,
+    error,
+    device,
+    deviceStatus,
+    user: githubUserQuery.data ?? null,
+    isLoadingUser: githubUserQuery.isLoading,
+    isStartingWebFlow: screen === "exchanging",
+    isRequestingDeviceCode: requestDeviceCodeMutation.isPending,
+    startWebFlow,
+    startDeviceFlow,
+    cancelDeviceFlow,
+    markDeviceCodeCopied,
+    markVerificationOpened,
+    signOut,
+    status,
+  }
+}
+
+type GitHubAuth = ReturnType<typeof useGithubAuthState>
+
+const GitHubAuthContext = createContext<GitHubAuth | null>(null)
+
+export function GitHubAuthProvider({ children }: PropsWithChildren) {
+  const githubAuth = useGithubAuthState()
+
+  return (
+    <GitHubAuthContext.Provider value={githubAuth}>
+      {children}
+    </GitHubAuthContext.Provider>
+  )
+}
+
+export function useGithubAuth() {
+  const value = useContext(GitHubAuthContext)
+
+  if (!value) {
+    throw new Error("useGithubAuth must be used within GitHubAuthProvider")
+  }
+
+  return value
+}
