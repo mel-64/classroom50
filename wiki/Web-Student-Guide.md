@@ -75,7 +75,7 @@ Once you've accepted an assignment, visiting your organization page again will s
 
 # Submitting Assignments
 
-Because Classroom 50 is built atop GitHub, the process for assignment submission is itself as well. Therefore, the process of submission involves [committing](https://github.com/git-guides/git-commit) and [pushing](https://github.com/git-guides/git-push) changes to the repository you created when accepting your assignment. Thankfully, the Classroom 50 CLI has simplified this process for students; [see here](https://github.com/foundation50/classroom50/wiki/CLI-Student-Guide) for further details on how to submit your assignments as a student.
+Because Classroom 50 is built atop GitHub, the process for assignment submission is itself as well. Therefore, the process of submission involves [committing](https://github.com/git-guides/git-commit) and [pushing](https://github.com/git-guides/git-push) changes to the repository you created when accepting your assignment. Thankfully, the Classroom 50 CLI has simplified this process for students; [see here](https://github.com/foundation50/classroom50/wiki/CLI-Student-Guide#4-submit) for further details on how to submit your assignments as a student.
 
 # Group Assignments
 
