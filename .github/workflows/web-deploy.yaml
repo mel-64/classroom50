@@ -1,17 +1,25 @@
 name: web Deploy to GitHub Pages
 
-# Builds the web app (web/) and publishes it to this repo's GitHub Pages.
+# Builds the web app (web/) and publishes it to classroom50.org via this
+# monorepo's GitHub Pages on every merge to v1 (scoped to web/** so unrelated
+# CLI changes don't redeploy the site). Manual runs available via the Actions
+# tab.
 #
-# DORMANT BY DESIGN (monorepo migration): the production domain
-# classroom50.org is currently served by GitHub Pages from the standalone
-# foundation50/classroom50-web repo. GitHub Pages allows only ONE repo per
-# custom domain, so this workflow is intentionally `workflow_dispatch`-only
-# (no push trigger) until the domain is cut over to this monorepo. Enabling a
-# push trigger before retiring the old repo's Pages would conflict on the
-# custom domain. The Vite build serves from root "/" (default base), which is
-# correct for classroom50.org once cut over.
+# DOMAIN CUTOVER (one-time, manual): classroom50.org is a custom domain and
+# GitHub Pages allows only ONE repo per custom domain. The standalone
+# foundation50/classroom50-web repo currently owns it. Before this workflow's
+# deploy can succeed on the domain, that repo's Pages custom domain must be
+# released and this repo's Pages enabled (Settings -> Pages, source: GitHub
+# Actions) with the classroom50.org custom domain. The web/CNAME file carries
+# the domain into the published artifact. The Vite build serves from root "/"
+# (default base), which is correct for classroom50.org.
 
 on:
+  push:
+    branches: [v1]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-deploy.yaml'
   workflow_dispatch:
 
 permissions:
@@ -55,6 +63,13 @@ jobs:
       # GitHub Pages has no SPA rewrites; serve the app for unknown deep links.
       - name: Add SPA fallback
         run: cp dist/index.html dist/404.html
+
+      # The Actions Pages deploy publishes only the dist/ artifact, so the
+      # custom domain must be written into dist/ (web/CNAME is at the web root,
+      # which Vite does not copy — only web/public/ is copied). Source it from
+      # web/CNAME so the domain has a single source of truth.
+      - name: Write CNAME into dist
+        run: cp CNAME dist/CNAME
 
       - uses: actions/configure-pages@v6
 
