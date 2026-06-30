@@ -91,6 +91,12 @@ Then, click the "Manage collaborators" button for the assignment to be taken to 
 
 # Viewing Submissions
 
-On the same edit URL we were just visiting, it's also possible to view your submissions thus far; simply click the "My Submission" link in the lefthand drawer menu to see them.
+On the same edit URL we were just visiting, it's also possible to view your submissions thus far; simply click the "My Submission" link in the lefthand drawer menu to see them. Assuming you've submitted at least once, you should see something like this:
+
+![View of assignment submission for student](images/web_assignment_submission_student.png)
+
+Classroom 50 is set up to run autograding for assignments by default (though this can be customized by your teacher). Clicking on "View grade" will take you to a link on GitHub where you view the results for your grade, as for example in the following screenshot:
+
+![View of assignment submission on GitHub](images/web_assignment_github_release_student.png)
 
 
