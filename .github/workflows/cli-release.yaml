@@ -33,6 +33,11 @@ on:
         description: 'Release tag (e.g. cli-v1.0.0). VERSION is this with the cli- prefix stripped.'
         required: true
         type: string
+      attest:
+        description: 'Attach build provenance (needs a public repo or supported plan).'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -156,10 +161,18 @@ jobs:
           sha256sum gh-* >checksums.txt
           cat checksums.txt
 
+      # Provenance attestation requires a public repo (or an upgraded plan);
+      # on a private repo the API rejects it. Attest on public repos, or when a
+      # dispatch run forces it; otherwise skip so testing still publishes.
       - name: Attest build provenance
+        if: ${{ !github.event.repository.private || github.event.inputs.attest == 'true' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: 'dist/gh-*'
+
+      - name: Note skipped attestation
+        if: ${{ github.event.repository.private && github.event.inputs.attest != 'true' }}
+        run: echo "::warning::Provenance attestation skipped (private repo). The release publishes without provenance; run on the public repo to attach it."
 
       - name: Publish release
         env:
