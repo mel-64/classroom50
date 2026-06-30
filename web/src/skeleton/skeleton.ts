@@ -70,12 +70,17 @@ export type SkeletonFile = {
   content: string
 }
 
-// Resolve the GUI's skeleton set into target-repo files with the default-branch
-// placeholder substituted. Throws if a declared path isn't bundled (a build
-// bug, caught by skeleton.test.ts before deploy).
-export function buildSkeletonFiles(defaultBranch: string): SkeletonFile[] {
-  return SKELETON_PATHS.map((rel) => {
-    const content = BUNDLED_SKELETON.get(rel)
+// Resolve a declared skeleton set into target-repo files from a given bundle,
+// with the default-branch placeholder substituted. Throws if a declared path
+// isn't in the bundle. Extracted from buildSkeletonFiles so the missing-path
+// throw is exercisable in skeleton.test.ts without faking the build-time glob.
+export function buildSkeletonFilesFromBundle(
+  paths: readonly string[],
+  bundle: ReadonlyMap<string, string>,
+  defaultBranch: string,
+): SkeletonFile[] {
+  return paths.map((rel) => {
+    const content = bundle.get(rel)
     if (content === undefined) {
       throw new Error(
         `Bundled skeleton file missing: ${rel}. The web build did not include ` +
@@ -84,11 +89,22 @@ export function buildSkeletonFiles(defaultBranch: string): SkeletonFile[] {
     }
     return {
       path: `${ORG_GITHUB_DIR}/${rel}`,
-      mode: "100644",
-      type: "blob",
+      mode: "100644" as const,
+      type: "blob" as const,
       content: content.replaceAll(DEFAULT_BRANCH_PLACEHOLDER, defaultBranch),
     }
   })
+}
+
+// Resolve the GUI's skeleton set into target-repo files with the default-branch
+// placeholder substituted. Throws if a declared path isn't bundled (a build
+// bug, caught by skeleton.test.ts before deploy).
+export function buildSkeletonFiles(defaultBranch: string): SkeletonFile[] {
+  return buildSkeletonFilesFromBundle(
+    SKELETON_PATHS,
+    BUNDLED_SKELETON,
+    defaultBranch,
+  )
 }
 
 // Org-relative paths present in the bundle; for the parity test.

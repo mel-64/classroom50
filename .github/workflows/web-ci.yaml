@@ -3,16 +3,24 @@ name: web CI
 # Quality gate for the web app (web/): type-check, lint, format, and tests.
 # Blocks merge and can't be bypassed like a local hook. Scoped to web/** so
 # it only runs when the frontend changes, independent of the Go/Python CI.
+#
+# Also triggered by the CLI-owned skeleton source (cli/gh-teacher/skeleton/
+# dotgithub/**): the web build bundles that tree, and skeleton.test.ts is the
+# only guard that turns a renamed/removed/extension-swapped skeleton file into
+# a build failure instead of a buildSkeletonFiles throw at a teacher's first
+# org setup. Without this path the parity guard never runs on a CLI-side change.
 
 on:
   push:
     branches: [main, v1]
     paths:
       - 'web/**'
+      - 'cli/gh-teacher/skeleton/dotgithub/**'
       - '.github/workflows/web-ci.yaml'
   pull_request:
     paths:
       - 'web/**'
+      - 'cli/gh-teacher/skeleton/dotgithub/**'
       - '.github/workflows/web-ci.yaml'
 
 # Cancel superseded runs on the same ref so a quick succession of pushes

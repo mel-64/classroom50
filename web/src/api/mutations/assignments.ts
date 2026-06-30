@@ -1104,25 +1104,44 @@ export function buildReusedEntry(
   return entry
 }
 
-// Keys the edit form fully owns: buildAssignmentEntry rebuilds each from input,
-// so an edit clearing one must win. Anything else is preserved on a
-// read-modify-write.
-const EDIT_MANAGED_ASSIGNMENT_KEYS = new Set<string>([
-  "slug",
-  "name",
-  "description",
-  "template",
-  "due",
-  "due_meta",
-  "mode",
-  "autograder",
-  "max_group_size",
-  "feedback_pr",
-  "runtime",
-  "allowed_files",
-  "pass_threshold",
-  "tests",
-])
+// Ownership of every Assignment entry-level key on the edit path. Typed as a
+// total Record<keyof Assignment, ...>, so adding a field to the Assignment type
+// fails to compile here until it is classified — closing the silent-desync trap
+// where a new managed field omitted from the set lets an edit that clears it get
+// re-populated from the stale existing entry (the bug preserveUnmanaged fixes,
+// inverted). "managed": buildAssignmentEntry rebuilds it from input, so an edit
+// clearing it must win. "unmanaged": the form never touches it; preserve it
+// verbatim on a read-modify-write (mirrors the CLI's AssignmentEntry.Extra).
+const ASSIGNMENT_KEY_OWNERSHIP: Record<
+  keyof Assignment,
+  "managed" | "unmanaged"
+> = {
+  slug: "managed",
+  name: "managed",
+  description: "managed",
+  template: "managed",
+  due: "managed",
+  due_meta: "managed",
+  mode: "managed",
+  autograder: "managed",
+  max_group_size: "managed",
+  feedback_pr: "managed",
+  runtime: "managed",
+  allowed_files: "managed",
+  pass_threshold: "managed",
+  tests: "managed",
+  // Written only by the CLI's `migrate`; the form never manages it, so it must
+  // ride through a GUI edit untouched.
+  migrated_from: "unmanaged",
+}
+
+// Keys the edit form fully owns, derived from the ownership map above so it can
+// never drift from the Assignment type.
+const EDIT_MANAGED_ASSIGNMENT_KEYS = new Set<string>(
+  Object.entries(ASSIGNMENT_KEY_OWNERSHIP)
+    .filter(([, ownership]) => ownership === "managed")
+    .map(([key]) => key),
+)
 
 // Copy forward entry-level keys the edit form doesn't manage (e.g.
 // `migrated_from`, unknown future keys) onto the rebuilt edit, without
