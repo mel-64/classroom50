@@ -99,7 +99,7 @@ const CreateClassroomPage = () => {
             <div className="flex flex-col">
               <div className="mb-8">
                 <CreateClassroomForm
-                  onSubmit={(values) => {
+                  onSubmit={(values) =>
                     createClassroomMutation.mutateAsync({
                       name: values.name,
                       classroom: values.slug,
@@ -108,7 +108,7 @@ const CreateClassroomPage = () => {
                       secret: values.secret || undefined,
                       creator: user?.login,
                     })
-                  }}
+                  }
                 />
               </div>
             </div>

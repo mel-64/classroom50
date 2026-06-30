@@ -24,7 +24,9 @@ export type CreateClassroomFormValues = {
 
 type CreateClassroomFormProps = {
   defaultValues?: Partial<CreateClassroomFormValues>
-  onSubmit: (values: CreateClassroomFormValues) => void | Promise<void>
+  // Returns the submit's settling promise (or void) so the form can await the
+  // real write and only latch its loading state on success.
+  onSubmit: (values: CreateClassroomFormValues) => void | Promise<unknown>
 }
 
 const CreateClassroomForm = ({
@@ -73,6 +75,9 @@ const CreateClassroomForm = ({
       },
     },
     onSubmit: async ({ value }) => {
+      // Latch `submitted` only on success: a rejected create skips it (the
+      // page's mutation onError toasts), so the button re-enables for a retry
+      // instead of sticking on "Creating...".
       await onSubmit({
         name: value.name.trim(),
         slug: slugify(value.slug),
@@ -288,15 +293,27 @@ const CreateClassroomForm = ({
           <form.Subscribe
             selector={(state) => [state.canSubmit, state.isSubmitting]}
           >
-            {([canSubmit, isSubmitting]) => (
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={!canSubmit || isSubmitting || submitted}
-              >
-                {isSubmitting ? "Creating..." : "Create Classroom"}
-              </button>
-            )}
+            {([canSubmit, isSubmitting]) => {
+              // Hold the loading state through the post-create navigation, so
+              // the button never reverts to a bare disabled state.
+              const busy = isSubmitting || submitted
+              return (
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!canSubmit || busy}
+                >
+                  {busy ? (
+                    <>
+                      <span className="loading loading-spinner loading-sm" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create Classroom"
+                  )}
+                </button>
+              )
+            }}
           </form.Subscribe>
         </div>
       </div>

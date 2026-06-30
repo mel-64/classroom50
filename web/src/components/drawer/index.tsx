@@ -428,13 +428,13 @@ const AssignmentSidebarMenu = ({
                   />
                 </Link>
               </Tip>
-              <Tip label="Assignment Settings">
+              <Tip label="Settings">
                 <Link
                   to="/$org/$classroom/assignments/$assignment/edit"
                   params={{ org, classroom, assignment }}
                 >
                   <SidebarItemBody
-                    label="Assignment Settings"
+                    label="Settings"
                     icon={<Settings />}
                     active={onSettings}
                   />

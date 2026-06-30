@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, ShieldCheck, UserPlus, X } from "lucide-react"
+import { GitHubLink } from "@/components/GitHubLink"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useToast } from "@/context/notifications/NotificationProvider"
@@ -42,9 +43,17 @@ const ClassroomStaffSection = ({
   return (
     <div className="card bg-base-100 w-full shadow-sm mt-8">
       <div className="card-body">
-        <div className="flex items-center gap-2 pb-1">
-          <ShieldCheck className="size-5 text-base-content/70" />
-          <h3 className="text-lg font-bold">Staff &amp; roles</h3>
+        <div className="flex items-center gap-3 pb-1">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-5 text-base-content/70" />
+            <h3 className="text-lg font-bold">Staff &amp; roles</h3>
+          </div>
+          <GitHubLink
+            href={`https://github.com/orgs/${org}/teams`}
+            label="GitHub teams"
+            title="Open this organization's teams on GitHub"
+            className="shrink-0"
+          />
         </div>
         <p className="text-sm text-base-content/60 pb-4">
           Instructors and TAs get write access to this organization&apos;s

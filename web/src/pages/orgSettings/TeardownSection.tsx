@@ -1,10 +1,10 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { TriangleAlert } from "lucide-react"
 
 import { ConfirmModal } from "@/components/modals"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import {
   executeTeardown,
@@ -23,7 +23,7 @@ import SettingsSection from "./SettingsSection"
 const TeardownSection = ({ org }: { org: string }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
-  const runTeardown = useSafeSubmit()
+  const navigate = useNavigate()
 
   const { data: membership } = useGetOrgMembership(org)
   const isOwner = membership?.role === "admin"
@@ -65,18 +65,24 @@ const TeardownSection = ({ org }: { org: string }) => {
         )
       }
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
+      // Redirect home only on a fully-clean run. executeTeardown RESOLVES on
+      // partial failure (marker retained, run re-runnable); on that path the
+      // `done` banner carries the re-run remedy, so stay on the page to show it.
+      const cleanRun =
+        !!result &&
+        result.markerDeleted &&
+        result.failed.length === 0 &&
+        result.teamsFailed.length === 0
+      if (cleanRun) {
+        void navigate({ to: "/" })
+      }
     },
     onError: (err) => {
-      if (err instanceof TeardownScopeError) {
-        setError(err.message)
-      } else if (err instanceof TeardownRateLimitError) {
-        setError(err.message)
-        // Some repos may already be gone; refresh the org view.
+      // onConfirm rethrows so ConfirmModal owns failure display; here we only
+      // refresh the org view, since a scope/rate-limit failure may have already
+      // deleted some repos.
+      if (err instanceof TeardownRateLimitError) {
         void queryClient.invalidateQueries({ queryKey: ["orgs"] })
-      } else {
-        setError(
-          "Teardown failed. Some repositories may not have been deleted.",
-        )
       }
     },
   })
@@ -123,7 +129,7 @@ const TeardownSection = ({ org }: { org: string }) => {
         open={open}
         dangerous
         needsConfirm
-        confirmText={org}
+        confirmText={`delete ${org}`}
         confirmLabel="Delete all resources"
         title="Delete every repository in this org?"
         description={
@@ -166,14 +172,27 @@ const TeardownSection = ({ org }: { org: string }) => {
                 </ul>
               </div>
             )}
-            <p>
-              Type <span className="font-mono font-semibold">{org}</span> to
-              confirm.
-            </p>
           </div>
         }
         onConfirm={async () => {
-          await runTeardown(() => runMutation.mutateAsync())
+          // Let a failure REJECT so ConfirmModal's catch keeps the modal open
+          // with the error inline (its submittingRef already guards double
+          // submits). Scope/rate-limit errors carry user-facing messages;
+          // anything else is normalized.
+          try {
+            await runMutation.mutateAsync()
+          } catch (err) {
+            if (
+              err instanceof TeardownScopeError ||
+              err instanceof TeardownRateLimitError
+            ) {
+              throw err
+            }
+            throw new Error(
+              "Teardown failed. Some repositories may not have been deleted.",
+              { cause: err },
+            )
+          }
         }}
         onClose={() => setOpen(false)}
       />

@@ -1047,14 +1047,15 @@ const EnrolledStudents = ({
             subtitle={displayHandle ? `@${displayHandle}` : undefined}
             initials={displayInitials}
           />
-          {student.section?.trim() ? (
-            <span className="badge badge-sm badge-ghost mt-1">
-              {student.section.trim()}
-            </span>
-          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {student.section?.trim() ? (
+            <span className="badge badge-sm badge-ghost shrink-0">
+              {student.section.trim()}
+            </span>
+          ) : null}
+
           {statusAvailable && invitedAtLabel ? (
             <span className="whitespace-nowrap text-xs text-base-content/50">
               Invited {invitedAtLabel}

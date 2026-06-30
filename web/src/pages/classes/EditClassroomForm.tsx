@@ -12,6 +12,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react"
+import { GitHubLink } from "@/components/GitHubLink"
 import { useState } from "react"
 import {
   DEFAULT_ONBOARDING_CLEANUP,
@@ -273,7 +274,14 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
     >
       <div className="card-body">
         <div className="flex justify-between">
-          <h3 className="text-lg font-bold pb-4">Basic Information</h3>
+          <div className="flex items-center gap-3 pb-4">
+            <h3 className="text-lg font-bold">Basic Information</h3>
+            <GitHubLink
+              href={`https://github.com/${org}/classroom50/tree/main/${classroom}`}
+              label="Config repo"
+              title="Open this classroom's folder in the classroom50 config repo on GitHub"
+            />
+          </div>
           <div className="flex items-center gap-2">
             <ArchiveClassroomButton
               org={org}

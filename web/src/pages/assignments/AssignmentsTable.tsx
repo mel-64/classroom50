@@ -198,9 +198,14 @@ const AssignmentsTable = ({
                       params: { org, classroom, assignment: assignment.slug },
                     })
                   }
-                  className="font-bold link link-info no-underline truncate"
+                  className="truncate"
                 >
-                  {assignment.name}
+                  <div className="font-bold link link-info no-underline">
+                    {assignment.name}
+                  </div>
+                  <div className="font-mono text-xs text-base-content/40">
+                    {assignment.slug}
+                  </div>
                 </td>
                 <td
                   onClick={() =>

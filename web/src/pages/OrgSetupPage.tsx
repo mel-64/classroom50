@@ -1,4 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router"
+import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 
 import Drawer, {
@@ -59,40 +60,72 @@ const OrgSteps = ({
             ></li>
           </ul>
           <div className="card-actions col-start-3 justify-self-end">
-            {!nextStep ? (
-              <button
-                disabled={mutation.isPending}
-                className="btn btn-primary ml-auto"
-                onClick={() => void runSetup(() => mutation.mutateAsync())}
-              >
-                {mutation.isPending ? (
-                  <span className="loading loading-spinner" />
-                ) : (
-                  "Run setup"
-                )}
+            {stage === 1 &&
+              (!nextStep ? (
+                <button
+                  disabled={mutation.isPending}
+                  className="btn btn-primary ml-auto"
+                  onClick={() => void runSetup(() => mutation.mutateAsync())}
+                >
+                  {mutation.isPending ? (
+                    <span className="loading loading-spinner" />
+                  ) : (
+                    "Run setup"
+                  )}
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary ml-auto"
+                  onClick={() => setStage(2)}
+                >
+                  Next: service token
+                  <ArrowRight className="size-4" />
+                </button>
+              ))}
+            {stage === 2 && (
+              <button className="btn btn-ghost" onClick={() => setStage(1)}>
+                <ArrowLeft className="size-4" />
+                Back
               </button>
-            ) : (
-              <></>
             )}
           </div>
         </div>
 
         {stage === 1 ? (
-          <InitStepBoard steps={steps} org={org} />
+          <div className="grid gap-4">
+            {nextStep && (
+              <div className="alert alert-success">
+                <CheckCircle2 className="size-5 shrink-0" />
+                <div>
+                  Organization setup is complete. Review the steps below, then
+                  continue to set the service token.
+                </div>
+              </div>
+            )}
+            <InitStepBoard steps={steps} org={org} />
+          </div>
         ) : stage === 2 ? (
           <div className="px-20">
             <OrgSettingsPane onSubmit={() => setStage(3)} />
           </div>
         ) : (
-          <div className="alert alert-success">
-            <div>
-              You have finished setting up your organization for Classroom 50.
-              Please click{" "}
-              <Link className="underline" to="/$org" params={{ org }}>
-                here
-              </Link>{" "}
-              to view your organization and its classrooms.
+          <div className="flex flex-col items-center gap-4 py-8 text-center">
+            <div className="flex size-16 items-center justify-center rounded-full bg-success/10 text-success">
+              <CheckCircle2 className="size-9" />
             </div>
+            <div>
+              <h2 className="text-xl font-bold">You're all set!</h2>
+              <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+                Your organization is ready to use Classroom 50. Head to your
+                organization to create your first classroom and assignments.
+              </p>
+            </div>
+            <Link className="btn btn-primary" to="/$org" params={{ org }}>
+              <span className="truncate">
+                Go to {org || "your organization"}
+              </span>
+              <ArrowRight className="size-4 shrink-0" />
+            </Link>
           </div>
         )}
       </div>
@@ -168,8 +201,9 @@ const OrgSetupPage = () => {
       if (data && data.status === "error") {
         return
       }
+      // Stay on step 1 after setup so the teacher can review per-step results;
+      // they advance with the explicit "Next" button.
       setNextStep(true)
-      setCurrentStage(2)
     },
   })
 

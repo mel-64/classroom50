@@ -27,6 +27,22 @@ import {
 
 const DEFAULT_EXPIRY_DAYS = 120
 const MIN_EXPIRY_DAYS = 1
+
+// GitHub rejects a fine-grained PAT *name* over 40 chars, so the prefill must
+// fit. We don't interpolate the org (most slugs overflow it) — the prefilled
+// `target_name` and description identify the org instead.
+const GITHUB_TOKEN_NAME_MAX = 40
+
+// Guarded at module load so a future edit that overflows the 40-char limit
+// fails fast in dev/CI instead of shipping a name GitHub's form rejects.
+const SERVICE_TOKEN_NAME = "Classroom 50 Actions Token"
+if (SERVICE_TOKEN_NAME.length > GITHUB_TOKEN_NAME_MAX) {
+  throw new Error(
+    `Service token name "${SERVICE_TOKEN_NAME}" is ${SERVICE_TOKEN_NAME.length} chars; ` +
+      `GitHub rejects PAT names longer than ${GITHUB_TOKEN_NAME_MAX}.`,
+  )
+}
+
 // GitHub caps a token at one calendar year, so the max day count is 366 when that
 // window spans a leap day and 365 otherwise. `from` is a proxy for the token's
 // start (GitHub's clock actually starts at "Generate"); pass a real start date
@@ -163,7 +179,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   const serviceTokenUrl =
     "https://github.com/settings/personal-access-tokens/new?" +
     new URLSearchParams({
-      name: `Classroom 50 Actions Token`,
+      name: SERVICE_TOKEN_NAME,
       description: `Service token for Classroom 50 score collection and regrading. Contents: Read and write + Actions: Read and write on all repositories in the ${org} organization`,
       target_name: org ?? "",
       expires_in: String(expiryValid ? parsedExpiry : DEFAULT_EXPIRY_DAYS),

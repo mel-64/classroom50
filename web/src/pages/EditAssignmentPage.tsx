@@ -181,7 +181,7 @@ const EditAssignmentPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <Breadcrumb endpoint="Edit Assignment" />
+          <Breadcrumb endpoint="Assignment Settings" />
           {editError && (
             <div className="alert alert-error mt-6">{editError}</div>
           )}
@@ -193,7 +193,7 @@ const EditAssignmentPage = () => {
           {editWarning && (
             <div className="alert alert-warning mt-6">{editWarning}</div>
           )}
-          <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
+          <h1 className="text-2xl font-bold mt-4 mb-6">Assignment Settings</h1>
           {isTeacher && archived && (
             <ArchivedClassroomNotice>
               This classroom is archived — its assignments are read-only.

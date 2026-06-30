@@ -644,7 +644,10 @@ const SubmissionsPageContent = () => {
               </div>
             )}
           </div>
-          <details className="card bg-base-100 rounded-xl border border-[#eee] mb-4 group">
+          <details
+            open
+            className="card bg-base-100 rounded-xl border border-[#eee] mb-4 group"
+          >
             <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
               <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
                 <LinkIcon className="size-5" />
@@ -656,14 +659,6 @@ const SubmissionsPageContent = () => {
                   this assignment.
                 </p>
               </div>
-              <CopyIconButton
-                copied={copiedSubmitLink}
-                onCopy={(e) => {
-                  e.preventDefault()
-                  copySubmitLink()
-                }}
-                label="Copy accept link"
-              />
               <ChevronRight className="size-5 shrink-0 text-base-content/40 transition-transform group-open:rotate-90" />
             </summary>
             <div className="card-body gap-4 pt-0">
