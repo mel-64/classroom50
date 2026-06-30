@@ -1,7 +1,12 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
-import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
-import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
+import {
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
+  PASS_THRESHOLD_MAX,
+  PASS_THRESHOLD_MIN,
+  assertAssignmentMode,
+} from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -447,11 +452,18 @@ export async function editAssignment(
   const { entry: editedAssignment, needsTeamGrant } =
     await buildAssignmentEntry(client, input, targetAssignment.template)
 
+  // The form rebuilds only the fields it manages; carry forward the rest
+  // (e.g. `migrated_from`, unknown future keys) so an edit doesn't drop them.
+  const preservedEntry = preserveUnmanagedAssignmentKeys(
+    targetAssignment,
+    editedAssignment,
+  )
+
   const nextAssignments = {
     ...currentAssignments,
     assignments: [
       ...currentAssignments.assignments.filter((a) => a.slug !== slug),
-      editedAssignment,
+      preservedEntry,
     ],
   }
 
@@ -480,13 +492,13 @@ export async function editAssignment(
   // non-fatal warning, never thrown (the edit already committed). needsTeamGrant
   // implies a resolved template, so the guard just narrows the type.
   let templateGrantWarning: string | undefined
-  if (needsTeamGrant && editedAssignment.template) {
+  if (needsTeamGrant && preservedEntry.template) {
     templateGrantWarning = await tryGrantTeamTemplateRead(
       client,
       input.org,
       input.classroom,
       input.slug,
-      editedAssignment.template,
+      preservedEntry.template,
     )
   }
 
@@ -586,7 +598,7 @@ async function buildAssignmentEntry(
   const entry: Assignment = {
     slug: input.slug,
     name: input.name,
-    mode: input.mode,
+    mode: assertAssignmentMode(input.mode),
     autograder: "default",
     // Mirrors the CLI's `--feedback-pr` default of true.
     feedback_pr: input.feedback_pr ?? true,
@@ -1096,8 +1108,62 @@ export function buildReusedEntry(
   return entry
 }
 
-// Reuse an assignment into another in-org classroom: write the copied record
-// into the target's assignments.json and re-apply the private-template team
+// Ownership of every Assignment entry-level key on the edit path. Typed as a
+// total Record<keyof Assignment, ...>, so adding a field to the Assignment type
+// fails to compile here until it is classified — closing the silent-desync trap
+// where a new managed field omitted from the set lets an edit that clears it get
+// re-populated from the stale existing entry. "managed": buildAssignmentEntry
+// rebuilds it from input, so an edit clearing it must win. "unmanaged": the form
+// never touches it; preserve it verbatim on a read-modify-write (mirrors the
+// CLI's AssignmentEntry.Extra).
+const ASSIGNMENT_KEY_OWNERSHIP: Record<
+  keyof Assignment,
+  "managed" | "unmanaged"
+> = {
+  slug: "managed",
+  name: "managed",
+  description: "managed",
+  template: "managed",
+  due: "managed",
+  due_meta: "managed",
+  mode: "managed",
+  autograder: "managed",
+  max_group_size: "managed",
+  feedback_pr: "managed",
+  runtime: "managed",
+  allowed_files: "managed",
+  pass_threshold: "managed",
+  tests: "managed",
+  // Written only by the CLI's `migrate`; the form never manages it, so it must
+  // ride through a GUI edit untouched.
+  migrated_from: "unmanaged",
+}
+
+// Keys the edit form fully owns, derived from the ownership map above so it can
+// never drift from the Assignment type.
+const EDIT_MANAGED_ASSIGNMENT_KEYS = new Set<string>(
+  Object.entries(ASSIGNMENT_KEY_OWNERSHIP)
+    .filter(([, ownership]) => ownership === "managed")
+    .map(([key]) => key),
+)
+
+// Copy forward entry-level keys the edit form doesn't manage (e.g.
+// `migrated_from`, unknown future keys) onto the rebuilt edit, without
+// overwriting managed keys. Mirrors the CLI's AssignmentEntry.Extra round-trip.
+export function preserveUnmanagedAssignmentKeys(
+  existing: Assignment,
+  edited: Assignment,
+): Assignment {
+  const merged: Record<string, unknown> = { ...edited }
+  for (const [key, value] of Object.entries(
+    existing as Record<string, unknown>,
+  )) {
+    if (EDIT_MANAGED_ASSIGNMENT_KEYS.has(key)) continue
+    if (value === undefined) continue
+    merged[key] = value
+  }
+  return merged as Assignment
+}
 // grant — the same write + grant as createAssignment, minus form resolution.
 // Cross-org reuse is out of scope for v1.
 export async function copyAssignmentToClassroom(

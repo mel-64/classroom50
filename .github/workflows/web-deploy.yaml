@@ -49,6 +49,13 @@ jobs:
 
       - run: npm ci
 
+      # Run the test suite (incl. skeleton.test.ts) before building: vite build
+      # does not fail when the skeleton glob matches fewer files, so only the
+      # parity test / buildSkeletonFiles throw detects a drifted bundle. Gating
+      # the deploy on it keeps a broken skeleton from shipping even if web-ci
+      # was skipped (the deploy is path-scoped to web/**, same as web-ci).
+      - run: npm test
+
       # `npm run build` runs `tsc -b && vite build`; the type-check is
       # blocking, so a regression fails the deploy instead of silently
       # shipping. Served from the root of the custom domain (classroom50.org),

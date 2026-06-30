@@ -44,6 +44,23 @@ export const DEFAULT_ONBOARDING_CLEANUP: OnboardingCleanupMode = "delete"
 export const GROUP_SIZE_MIN = 2
 export const GROUP_SIZE_MAX = 100
 
+// The two assignment modes (classroom50/assignments/v1). `individual` = one
+// repo per student; `group` = a shared repo (requires max_group_size).
+export type AssignmentMode = "individual" | "group"
+
+const ASSIGNMENT_MODES: readonly AssignmentMode[] = ["individual", "group"]
+
+// Narrow a form/string value to AssignmentMode, throwing on a value the CLI
+// schema would reject.
+export function assertAssignmentMode(value: string): AssignmentMode {
+  if ((ASSIGNMENT_MODES as readonly string[]).includes(value)) {
+    return value as AssignmentMode
+  }
+  throw new Error(
+    `mode: must be one of ${ASSIGNMENT_MODES.join(", ")} (got "${value}").`,
+  )
+}
+
 // Mirrors one entry of classroom50/assignments/v1 — the shape gh-teacher writes
 // and parses strictly (unknown fields rejected).
 // Schema: https://github.com/foundation50/classroom50/blob/main/schemas/assignments-v1.schema.json
@@ -60,7 +77,8 @@ export type Assignment = {
   }
   due?: string
   due_meta?: DueMeta
-  mode: string
+  mode: AssignmentMode
+  // Workflow-shim name (`default` for the universal shim), not the grading logic.
   autograder: string
   max_group_size?: number
   feedback_pr?: boolean
@@ -82,6 +100,19 @@ export type Assignment = {
   // schema (`pass_threshold`, integer, omitempty) — see classroom50-cli.
   pass_threshold?: number
   tests?: AssignmentTest[]
+  // CLI migrate provenance. The GUI doesn't write it but must round-trip it.
+  migrated_from?: MigratedFrom
+}
+
+// classroom50/assignments/v1 `migrated_from`.
+export type MigratedFrom = {
+  source: string
+  classroom_id: number
+  assignment_id: number
+  original_slug?: string
+  starter_repo?: string
+  invite_link?: string
+  migrated_at: string
 }
 
 // Inclusive bounds for an assignment's pass_threshold (integer percentage).

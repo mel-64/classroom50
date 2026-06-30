@@ -23,6 +23,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    fs: {
+      // src/skeleton/skeleton.ts imports the skeleton from
+      // cli/gh-teacher/skeleton (outside web/), so the dev server must read the
+      // monorepo root. `vite build` inlines the files regardless.
+      allow: [path.resolve(__dirname, "..")],
+    },
+  },
   test: {
     environment: "node",
     include: ["src/**/*.{test,spec}.{ts,tsx}"],

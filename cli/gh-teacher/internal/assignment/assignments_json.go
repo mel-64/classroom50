@@ -96,9 +96,10 @@ type AssignmentsJSON struct {
 // FeedbackPR opts the assignment into the Feedback Pull Request: when
 // true, the autograde runner opens one long-lived PR per student repo
 // (base = a frozen branch at the baseline commit, head = the default
-// branch) so teachers leave inline review comments on the full
-// starter→submission diff. Default false; omits from the file when
-// unset. The runner re-reads it from the published manifest.
+// branch) for inline review of the full starter→submission diff. The
+// product default is on (--feedback-pr defaults to true; the GUI also
+// creates it enabled), but omitempty drops the field when false, so an
+// absent field reads as false. The runner re-reads it from the manifest.
 //
 // AllowedFiles is an ordered list of .gitignore-style patterns defining
 // which files belong to the submission (last match wins, `!` re-includes),

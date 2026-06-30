@@ -44,6 +44,14 @@ func skeletonFiles(defaultBranch string) (map[string]string, error) {
 			return err
 		}
 		if d.IsDir() {
+			// __pycache__ isn't dot-prefixed, so //go:embed walks it; don't
+			// commit bytecode into config repos.
+			if d.Name() == "__pycache__" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(p, ".pyc") {
 			return nil
 		}
 		data, readErr := skeletonFS.ReadFile(p)

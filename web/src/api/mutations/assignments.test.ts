@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-import { buildReusedEntry, nextAvailableSlug } from "./assignments"
+import {
+  buildReusedEntry,
+  editAssignment,
+  nextAvailableSlug,
+  preserveUnmanagedAssignmentKeys,
+} from "./assignments"
+import type { GitHubClient } from "@/hooks/github/client"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import type { Assignment } from "@/types/classroom"
 
 const fullSource: Assignment = {
@@ -162,6 +169,71 @@ describe("buildReusedEntry", () => {
   })
 })
 
+describe("preserveUnmanagedAssignmentKeys", () => {
+  it("carries forward migrated_from from the existing entry", () => {
+    const existing: Assignment = {
+      ...fullSource,
+      migrated_from: {
+        source: "github-classroom",
+        classroom_id: 42,
+        assignment_id: 7,
+        original_slug: "hw1-old",
+        migrated_at: "2026-01-02T03:04:05Z",
+      },
+    }
+    // A fresh form rebuild drops migrated_from.
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "Homework 1 (edited)",
+      mode: "individual",
+      autograder: "default",
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited)
+    expect(merged.migrated_from).toEqual(existing.migrated_from)
+    expect(merged.name).toBe("Homework 1 (edited)")
+  })
+
+  it("preserves unknown future keys but never overwrites managed ones", () => {
+    const existing = {
+      slug: "hw1",
+      name: "Old name",
+      mode: "individual",
+      autograder: "default",
+      // Unknown key from a newer binary.
+      experimental_flag: { enabled: true },
+      // Stale managed key the edit changes below.
+      pass_threshold: 50,
+    } as unknown as Assignment
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "New name",
+      mode: "individual",
+      autograder: "default",
+      pass_threshold: 90,
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited) as Record<
+      string,
+      unknown
+    >
+    expect(merged.experimental_flag).toEqual({ enabled: true })
+    expect(merged.pass_threshold).toBe(90)
+    expect(merged.name).toBe("New name")
+  })
+
+  it("does not re-add a managed key the edit deliberately cleared", () => {
+    const existing: Assignment = { ...fullSource, due: "2026-09-01T23:59:00Z" }
+    // Edit removed the due date (omitted from the rebuilt entry).
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "Homework 1",
+      mode: "individual",
+      autograder: "default",
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited)
+    expect(merged.due).toBeUndefined()
+  })
+})
+
 describe("nextAvailableSlug", () => {
   it("returns the base unchanged when it is free", () => {
     expect(nextAvailableSlug("hw1", ["hw2", "hw3"])).toBe("hw1")
@@ -193,5 +265,135 @@ describe("nextAvailableSlug", () => {
   it("splits only the trailing -<n> on a stem with internal hyphens", () => {
     // "hw-1-2" -> stem "hw-1", n=3 (not "hw" / "hw-1-2-2").
     expect(nextAvailableSlug("hw-1-2", ["hw-1-2"])).toBe("hw-1-3")
+  })
+})
+
+describe("editAssignment (preserved-entry integration)", () => {
+  const ORG = "acme"
+  const CLASSROOM = "cs50"
+  const SLUG = "hw1"
+
+  // The CLI-authored entry the GUI is about to edit: carries a CLI-only
+  // migrated_from block (the form never manages it) and a managed `due` the
+  // edit clears.
+  const existingEntry: Assignment = {
+    slug: SLUG,
+    name: "Homework 1",
+    mode: "individual",
+    autograder: "default",
+    feedback_pr: true,
+    due: "2026-09-01T23:59:00Z",
+    migrated_from: {
+      source: "github-classroom",
+      classroom_id: 42,
+      assignment_id: 7,
+      original_slug: "hw1-old",
+      migrated_at: "2026-01-02T03:04:05Z",
+    },
+  }
+
+  // Wire up a route-table GitHubClient covering exactly the endpoints
+  // editAssignment hits on the template-less path: ref read, commit read,
+  // assignments.json contents read, then tree/commit/ref writes. classroom.json
+  // is absent (404) so the archive guard reads the classroom as active.
+  function makeClient(): {
+    client: GitHubClient
+    committedContent: () => string
+  } {
+    const assignmentsFile = {
+      schema: "classroom50/assignments/v1",
+      assignments: [existingEntry],
+    }
+    const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64")
+
+    let committedContent = ""
+
+    const request = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method ?? "GET"
+      if (method === "GET" && url.includes("/git/ref/heads/main")) {
+        return { object: { sha: "refsha" } }
+      }
+      if (method === "GET" && url.includes("/git/commits/refsha")) {
+        return { tree: { sha: "basetree" } }
+      }
+      if (method === "GET" && url.includes("/contents/cs50/assignments.json")) {
+        return {
+          type: "file",
+          encoding: "base64",
+          content: b64(JSON.stringify(assignmentsFile)),
+        }
+      }
+      if (method === "POST" && url.endsWith("/git/trees")) {
+        const body = (init as { body?: { tree: { content: string }[] } }).body
+        committedContent = body!.tree[0].content
+        return { sha: "newtree" }
+      }
+      if (method === "POST" && url.endsWith("/git/commits")) {
+        return { sha: "newcommit" }
+      }
+      if (method === "PATCH" && url.includes("/git/refs/heads/main")) {
+        return { object: { sha: "newcommit" } }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+
+    // classroom.json read (archive guard): 404 -> treated as active.
+    const requestRaw = vi.fn(async () => {
+      throw new GitHubAPIError({
+        status: 404,
+        url: "classroom.json",
+        message: "Not Found",
+        body: null,
+        rateLimit: {
+          limit: null,
+          remaining: null,
+          used: null,
+          reset: null,
+          resource: null,
+          retryAfter: null,
+        },
+      })
+    })
+
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      committedContent: () => committedContent,
+    }
+  }
+
+  function editInput(overrides: Partial<Record<string, unknown>> = {}) {
+    // The form rebuilds only the fields it manages; this renames the
+    // assignment and clears the due date (omitted from the rebuilt entry).
+    return {
+      org: ORG,
+      classroom: CLASSROOM,
+      slug: SLUG,
+      name: "Homework 1 (edited)",
+      description: "",
+      template_repo: "",
+      due_date: "",
+      mode: "individual",
+      max_group_size: 0,
+      tests: [],
+      ...overrides,
+    } as unknown as Parameters<typeof editAssignment>[1]
+  }
+
+  it("preserves migrated_from, applies the rename, and drops the cleared due", async () => {
+    const { client, committedContent } = makeClient()
+
+    await editAssignment(client, editInput())
+
+    const written = JSON.parse(committedContent()) as {
+      assignments: Assignment[]
+    }
+    const edited = written.assignments.find((a) => a.slug === SLUG)!
+
+    // Unmanaged CLI field rides through the read-modify-write.
+    expect(edited.migrated_from).toEqual(existingEntry.migrated_from)
+    // Managed edit wins.
+    expect(edited.name).toBe("Homework 1 (edited)")
+    // Cleared managed key is not resurrected from the stale existing entry.
+    expect(edited.due).toBeUndefined()
   })
 })

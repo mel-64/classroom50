@@ -54,6 +54,14 @@ func TestSkeletonFiles_Manifest(t *testing.T) {
 		}
 	}
 
+	// __pycache__ isn't dot-prefixed, so //go:embed walks it; skeletonFiles
+	// must filter the bytecode out.
+	for path := range files {
+		if strings.Contains(path, "__pycache__") || strings.HasSuffix(path, ".pyc") {
+			t.Errorf("skeleton must not embed bytecode-cache path %q", path)
+		}
+	}
+
 	// publish-pages must actually publish the org-level scripts the
 	// autograde-runner fetches from Pages — runner.py and the Phase 2
 	// ensure_feedback_pr.py. A missing copy line would 404 the runtime

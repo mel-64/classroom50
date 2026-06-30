@@ -19,6 +19,7 @@ import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
 import { repairRulesets } from "./rulesets"
+import { buildSkeletonFiles, skeletonTargetPaths } from "@/skeleton/skeleton"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -925,13 +926,6 @@ export async function ensureClassroom50Repo(client: GitHubClient, org: string) {
   return { status: "complete" as const, created: true, repo }
 }
 
-export type SkeletonFile = {
-  path: string
-  mode: "100644"
-  type: "blob"
-  content: string
-}
-
 export type GitHubTreeResponse = {
   tree: Array<{
     path: string
@@ -940,31 +934,6 @@ export type GitHubTreeResponse = {
   }>
   truncated: boolean
 }
-
-const SKELETON_PATHS = [
-  "workflows/publish-pages.yaml",
-  "workflows/collect-scores.yaml",
-  "workflows/autograde-runner.yaml",
-  "scripts/collect_scores.py",
-  "scripts/runner.py",
-  // Translates assignments.json `tests` blocks into per-assignment tests.json
-  // bundles during publish-pages; without it, declarative autograding tests
-  // silently never grade.
-  "scripts/materialize_tests.py",
-  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml fetches it
-  // from Pages. Without it, feedback_pr assignments can't open their PR.
-  "scripts/ensure_feedback_pr.py",
-]
-
-// gh teacher init substitutes this placeholder (publish-pages.yaml's push
-// trigger) with the config repo's default branch at commit time; committing it
-// raw would leave the Pages workflow never firing.
-const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
-const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
-const ORG_BASE = ".github"
-const SKELETON_SOURCE_OWNER = "foundation50"
-const SKELETON_SOURCE_REPO = "classroom50"
-const SKELETON_SOURCE_REF = "main"
 
 export async function listTargetRepoPaths(
   client: GitHubClient,
@@ -994,85 +963,26 @@ export async function listTargetRepoPaths(
   )
 }
 
-function encodeGitHubContentPath(path: string): string {
-  return path
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/")
-}
-
-function isNotFound(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "status" in err &&
-    (err as GitHubAPIError).status === 404
-  )
-}
-
-export async function fetchSkeletonSourceFile(
-  client: GitHubClient,
-  path: string,
-): Promise<string> {
-  const encodedPath = encodeGitHubContentPath(path)
-
-  try {
-    return await client.requestRaw(
-      `/repos/${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}/contents/${encodedPath}?ref=${encodeURIComponent(
-        SKELETON_SOURCE_REF,
-      )}`,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/vnd.github.raw+json",
-        },
-      },
-    )
-  } catch (err) {
-    if (isNotFound(err)) {
-      throw new Error(
-        `Skeleton source file not found: ${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}:${path}`,
-        { cause: err },
-      )
-    }
-
-    throw err
-  }
-}
-
 export async function findMissingSkeletonFiles(
   client: GitHubClient,
   org: string,
 ) {
   const existingPaths = await listTargetRepoPaths(client, org)
-  const adjustedTargets = SKELETON_PATHS.map((path) => `${ORG_BASE}/${path}`)
-  const missingPaths = adjustedTargets.filter(
-    (path) => !existingPaths.has(path),
+
+  // Target paths are static (branch-independent), so check existence before
+  // fetching the branch and skip the repo read entirely when nothing is missing.
+  const missing = new Set(
+    skeletonTargetPaths().filter((path) => !existingPaths.has(path)),
   )
+  if (missing.size === 0) return []
 
-  if (missingPaths.length === 0) {
-    return []
-  }
-
-  // Committed against the config repo's actual default branch (org policy can
-  // rename `main`), matching gh teacher init.
+  // Use the config repo's actual default branch (org policy can rename `main`).
   const repo = await client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`)
   const defaultBranch = repo.default_branch || "main"
 
-  return Promise.all(
-    missingPaths.map(async (path): Promise<SkeletonFile> => {
-      const content = await fetchSkeletonSourceFile(
-        client,
-        path.replace(ORG_BASE, FOUNDATION_BASE),
-      )
-
-      return {
-        path,
-        mode: "100644",
-        type: "blob",
-        content: content.replaceAll(DEFAULT_BRANCH_PLACEHOLDER, defaultBranch),
-      }
-    }),
+  // From the bundled skeleton — no runtime fetch from the CLI repo.
+  return buildSkeletonFiles(defaultBranch).filter((file) =>
+    missing.has(file.path),
   )
 }
 
