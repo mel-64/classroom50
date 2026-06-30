@@ -5,8 +5,20 @@ import {
   editClassroom,
   ensurePages,
   ensureWorkflowPermissions,
+  triggerRegrade,
+  validateServiceToken,
+  REGRADE_WORKFLOW,
 } from "./mutations"
 import { GitHubAPIError } from "./errors"
+import { createGitHubClient } from "./client"
+
+// validateServiceToken builds its own client from the pasted token via
+// createGitHubClient; mock the module so the test can drive that client's
+// `request` to simulate GitHub's repo-permissions read.
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>()
+  return { ...actual, createGitHubClient: vi.fn() }
+})
 import type { GitHubClient } from "./client"
 
 // classroom.json is a strict cross-binary contract (the Go gh-teacher CLI
@@ -333,5 +345,174 @@ describe("ensureWorkflowPermissions org-policy conflict", () => {
     expect(result.status).toBe("complete")
     expect(result.managedByOrgPolicy).toBe(true)
     expect(result.message.length).toBeGreaterThan(0)
+  })
+})
+
+// triggerRegrade dispatches regrade.yaml in <org>/classroom50, snapshotting the
+// newest dispatch run id first so the caller can bind to its own run. We assert
+// the dispatch payload shape (the cross-binary input contract with the CLI's
+// regrade.yaml) and the sinceRunId snapshot behavior.
+describe("triggerRegrade", () => {
+  type Call = { path: string; init?: { method?: string; body?: unknown } }
+
+  const makeClient = (opts: { baselineRunId: number | null }) => {
+    const calls: Call[] = []
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, init?: unknown) => {
+        calls.push({ path, init: init as Call["init"] })
+        // getRepo: GET /repos/{org}/classroom50
+        if (/^\/repos\/[^/]+\/classroom50$/.test(path)) {
+          return Promise.resolve({ default_branch: "trunk" })
+        }
+        // baseline newest dispatch run
+        if (path.includes(`/workflows/${REGRADE_WORKFLOW}/runs`)) {
+          return Promise.resolve({
+            workflow_runs:
+              opts.baselineRunId === null ? [] : [{ id: opts.baselineRunId }],
+          })
+        }
+        // the dispatch POST
+        if (path.includes(`/workflows/${REGRADE_WORKFLOW}/dispatches`)) {
+          return Promise.resolve(undefined)
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+    const client = { request } as unknown as GitHubClient
+    return { client, calls }
+  }
+
+  const findDispatch = (calls: Call[]) =>
+    calls.find((c) => c.path.includes("/dispatches"))
+
+  it("dispatches with classroom + assignment and snapshots the baseline run id", async () => {
+    const { client, calls } = makeClient({ baselineRunId: 42 })
+    const result = await triggerRegrade(client, {
+      org: "acme",
+      classroom: "cs101",
+      assignment: "hello",
+    })
+
+    expect(result.sinceRunId).toBe(42)
+    const dispatch = findDispatch(calls)
+    expect(dispatch).toBeDefined()
+    expect(dispatch?.init?.method).toBe("POST")
+    expect(dispatch?.init?.body).toEqual({
+      // default_branch from getRepo is used as the dispatch ref.
+      ref: "trunk",
+      inputs: { classroom: "cs101", assignment: "hello" },
+    })
+  })
+
+  it("includes the owner input only when scoping to a single student", async () => {
+    const { client, calls } = makeClient({ baselineRunId: null })
+    const result = await triggerRegrade(client, {
+      org: "acme",
+      classroom: "cs101",
+      assignment: "hello",
+      owner: "alice",
+    })
+
+    // No prior dispatch runs -> null baseline.
+    expect(result.sinceRunId).toBeNull()
+    const dispatch = findDispatch(calls)
+    expect(dispatch?.init?.body).toEqual({
+      ref: "trunk",
+      inputs: { classroom: "cs101", assignment: "hello", owner: "alice" },
+    })
+  })
+
+  it("requires org, classroom, and assignment", async () => {
+    const { client } = makeClient({ baselineRunId: null })
+    await expect(
+      triggerRegrade(client, {
+        org: undefined,
+        classroom: "cs101",
+        assignment: "hello",
+      }),
+    ).rejects.toThrow(/org/)
+    await expect(
+      triggerRegrade(client, {
+        org: "acme",
+        classroom: undefined,
+        assignment: "hello",
+      }),
+    ).rejects.toThrow(/classroom/)
+    await expect(
+      triggerRegrade(client, {
+        org: "acme",
+        classroom: "cs101",
+        assignment: undefined,
+      }),
+    ).rejects.toThrow(/assignment/)
+  })
+})
+
+// validateServiceToken now asserts the token can WRITE the classroom50 repo
+// (permissions.push) — regrade needs write, not just the read collect needs.
+// It reads GET /repos/{org}/classroom50 as the pasted token (via a mocked
+// createGitHubClient) and rejects a read-only token with an actionable hint.
+describe("validateServiceToken", () => {
+  const mockTokenClient = (impl: (path: string) => Promise<unknown>) => {
+    const request = vi.fn().mockImplementation(impl)
+    vi.mocked(createGitHubClient).mockReturnValue({
+      request,
+    } as unknown as ReturnType<typeof createGitHubClient>)
+    return request
+  }
+
+  const rateLimit = {
+    limit: null,
+    remaining: null,
+    used: null,
+    reset: null,
+    resource: null,
+    retryAfter: null,
+  }
+  const apiError = (status: number) =>
+    new GitHubAPIError({
+      status,
+      url: "/repos/acme/classroom50",
+      message: `http ${status}`,
+      body: {},
+      rateLimit,
+    })
+
+  it("accepts a token with write access (permissions.push true)", async () => {
+    mockTokenClient((path) => {
+      expect(path).toBe("/repos/acme/classroom50")
+      return Promise.resolve({ permissions: { push: true } })
+    })
+    await expect(
+      validateServiceToken("github_pat_x", "acme"),
+    ).resolves.toBeUndefined()
+  })
+
+  it("rejects a read-only token (permissions.push false) with a write hint", async () => {
+    mockTokenClient(() => Promise.resolve({ permissions: { push: false } }))
+    await expect(validateServiceToken("github_pat_x", "acme")).rejects.toThrow(
+      /lacks write access|Read and write/,
+    )
+  })
+
+  it("maps a 403 to the actionable scope hint", async () => {
+    mockTokenClient(() => Promise.reject(apiError(403)))
+    await expect(validateServiceToken("github_pat_x", "acme")).rejects.toThrow(
+      /Read and write/,
+    )
+  })
+
+  it("maps a 401 to invalid/expired/revoked", async () => {
+    mockTokenClient(() => Promise.reject(apiError(401)))
+    await expect(validateServiceToken("github_pat_x", "acme")).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    )
+  })
+
+  it("requires an org and a non-empty token", async () => {
+    await expect(validateServiceToken("tok", undefined)).rejects.toThrow(/org/)
+    await expect(validateServiceToken("   ", "acme")).rejects.toThrow(
+      /Enter a token/,
+    )
   })
 })

@@ -22,6 +22,7 @@ import Drawer, {
 } from "@/components/drawer"
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import SubmissionsControls from "@/pages/submissions/SubmissionsControls"
+import { ConfirmModal } from "@/components/modals"
 import {
   DEFAULT_FILTERS,
   DEFAULT_SORT,
@@ -46,11 +47,16 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
+import useTriggerRegrade from "@/hooks/useTriggerRegrade"
+import { RegradeCoordinatorProvider } from "@/context/regrade/RegradeCoordinator"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import RoleResolvingFallback from "@/components/RoleResolvingFallback"
-import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
+import {
+  COLLECT_SCORES_WORKFLOW,
+  REGRADE_WORKFLOW,
+} from "@/hooks/github/mutations"
 import { formatDueDateTime } from "@/util/formatDate"
 import { formatDistanceToNow } from "date-fns"
 
@@ -183,6 +189,8 @@ const SubmissionsPageContent = () => {
   // Dashboard controls (#59) — all client-side over already-loaded data.
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<SubmissionFilters>(DEFAULT_FILTERS)
+  // Drives the "Regrade all" confirmation modal (replaces window.confirm).
+  const [regradeConfirmOpen, setRegradeConfirmOpen] = useState(false)
   const [sort, setSort] = useState<SubmissionSort>(DEFAULT_SORT)
 
   // Deterministic acceptance from the org repo list (see acceptedUsernames);
@@ -312,11 +320,46 @@ const SubmissionsPageContent = () => {
   )
 
   const collectScores = useTriggerScoreCollection(org)
+  const regradeAll = useTriggerRegrade({ org, classroom, assignment })
+  // `anyRegrading` covers the whole-assignment regrade AND every per-row
+  // regrade (shared via the page coordinator), so collect/regrade controls
+  // disable while any regrade is in flight — not just the assignment-wide one.
+  const regrading = regradeAll.anyRegrading
+  // Whether the assignment-wide "Regrade all" specifically is mid-dispatch, for
+  // its own spinner/label (distinct from the page-wide `regrading` gate).
+  const regradeAllActive =
+    regradeAll.phase === "dispatching" || regradeAll.phase === "running"
   const { data: lastRun, refetch: refetchLastRun } =
     useGetLastCollectScoresRun(org)
-  const workflowUrl = `https://github.com/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}`
+  const collectWorkflowUrl = `https://github.com/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}`
+  const regradeWorkflowUrl = `https://github.com/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}`
   const collecting =
     collectScores.phase === "dispatching" || collectScores.phase === "running"
+
+  // Which action the single "View …" link points at and which status strip
+  // (if any) shows. Running takes precedence; otherwise the most recently
+  // finished action; else null (both idle → link defaults to collect). Derived
+  // fresh every render so the link can never get "stuck" on a stale action.
+  const activeAction: "collect" | "regrade" | null = (() => {
+    if (collecting) return "collect"
+    if (regrading) return "regrade"
+    if (collectScores.phase !== "idle") return "collect"
+    if (regradeAll.phase !== "idle") return "regrade"
+    return null
+  })()
+
+  const isRegradeView = activeAction === "regrade"
+  const viewRun = isRegradeView ? regradeAll.run : collectScores.run
+  const viewWorkflowUrl = isRegradeView
+    ? regradeWorkflowUrl
+    : collectWorkflowUrl
+  const viewLabel = isRegradeView
+    ? viewRun
+      ? "View regrade run"
+      : "View regrade workflow"
+    : viewRun
+      ? "View run"
+      : "View workflow"
 
   const lastCollectedLabel =
     lastRun?.status === "completed" && lastRun.created_at
@@ -445,74 +488,161 @@ const SubmissionsPageContent = () => {
               </button>
             </div>
           </div>
-          <div className="mb-4 flex flex-col gap-4 rounded-box border border-info/20 bg-info/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Info className="mt-0.5 size-5 shrink-0 text-info" />
-              <div>
-                <p className="text-sm">
-                  Submissions are collected automatically, but it can take up to
-                  24 hours for new submissions to appear here.
+          <div className="mb-4 rounded-box border border-info/20 bg-info/5">
+            {/* Compact action bar: standing note on the left, the two actions
+                + a single contextual View link on the right. */}
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <Info className="mt-0.5 size-5 shrink-0 text-info" />
+                <p className="text-sm text-base-content/70">
+                  Submissions are collected automatically, but new ones can take
+                  up to 24 hours to appear.{" "}
+                  {!collecting &&
+                    !regrading &&
+                    activeAction === null &&
+                    lastCollectedLabel && (
+                      <span className="text-base-content/60">
+                        Last collected (org-wide) {lastCollectedLabel}.
+                      </span>
+                    )}
                 </p>
-                {!collecting && lastCollectedLabel && (
-                  <p className="mt-1 text-sm text-base-content/60">
-                    Scores last collected (org-wide) {lastCollectedLabel}.
-                  </p>
-                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  disabled={regrading || collecting}
+                  title={
+                    collecting
+                      ? "Wait for collection to finish before regrading"
+                      : regrading
+                        ? "A regrade is already in progress"
+                        : "Re-run the autograder on every submitted repo (submission times don’t change)"
+                  }
+                  onClick={() => {
+                    if (regrading || collecting) return
+                    setRegradeConfirmOpen(true)
+                  }}
+                >
+                  {regradeAllActive && (
+                    <span className="loading loading-spinner loading-xs" />
+                  )}
+                  {regradeAllActive ? "Regrading…" : "Regrade all"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={collecting || regrading}
+                  title={
+                    regrading
+                      ? "Wait for the regrade to finish before collecting"
+                      : "Collect submissions now"
+                  }
+                  onClick={() => collectScores.collect()}
+                >
+                  {collecting && (
+                    <span className="loading loading-spinner loading-xs" />
+                  )}
+                  {collecting ? "Collecting…" : "Collect now"}
+                </button>
+                <a
+                  className="btn btn-sm btn-ghost"
+                  href={viewRun?.html_url || viewWorkflowUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="size-4" />
+                  {viewLabel}
+                </a>
+              </div>
+            </div>
+
+            {/* Status strip — only when an action is active or recently
+                finished. Color + copy reflect that one action. */}
+            {activeAction === "collect" && collectScores.phase !== "idle" && (
+              <div
+                className="border-t border-info/20 px-4 py-2 text-sm"
+                role="status"
+                aria-live="polite"
+              >
                 {collectScores.phase === "dispatching" && (
-                  <p className="mt-1 text-sm text-base-content/70">
+                  <span className="text-base-content/70">
                     Starting collection…
-                  </p>
+                  </span>
                 )}
                 {collectScores.phase === "running" && (
-                  <p className="mt-1 flex items-center gap-1.5 text-sm text-base-content/70">
+                  <span className="flex items-center gap-1.5 text-base-content/70">
                     <span className="loading loading-spinner loading-xs" />
-                    Collection in progress. This page will refresh automatically
+                    Collection in progress. This page refreshes automatically
                     when it finishes.
-                  </p>
+                  </span>
                 )}
                 {collectScores.phase === "completed" && (
-                  <p className="mt-1 text-sm text-success">
+                  <span className="text-success">
                     Collection finished. Submissions below are up to date.
-                  </p>
+                  </span>
                 )}
                 {collectScores.phase === "failed" && (
-                  <p className="mt-1 text-sm text-error">
+                  <span className="text-error">
                     {collectScores.error instanceof Error
                       ? `Could not start collection: ${collectScores.error.message}`
                       : "The collection run did not complete successfully."}{" "}
                     You can check or trigger it manually on GitHub.
-                  </p>
+                  </span>
                 )}
                 {collectScores.phase === "timeout" && (
-                  <p className="mt-1 text-sm text-base-content/70">
+                  <span className="text-base-content/70">
                     Still running after a while. Check its progress on GitHub,
                     or refresh this page once it finishes.
-                  </p>
+                  </span>
                 )}
               </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                disabled={collecting}
-                onClick={() => collectScores.collect()}
+            )}
+            {activeAction === "regrade" && regradeAll.phase !== "idle" && (
+              <div
+                className={`border-t px-4 py-2 text-sm ${
+                  regradeAll.phase === "failed"
+                    ? "border-error/20 text-error"
+                    : regradeAll.phase === "completed"
+                      ? "border-success/20 text-success"
+                      : "border-warning/20 text-base-content/70"
+                }`}
+                role="status"
+                aria-live="polite"
               >
-                {collecting && (
-                  <span className="loading loading-spinner loading-xs" />
+                {regradeAll.phase === "dispatching" && (
+                  <span>Starting regrade…</span>
                 )}
-                {collecting ? "Collecting…" : "Collect now"}
-              </button>
-              <a
-                className="btn btn-sm btn-ghost"
-                href={collectScores.run?.html_url || workflowUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <ExternalLink className="size-4" />
-                {collectScores.run ? "View run" : "View workflow"}
-              </a>
-            </div>
+                {regradeAll.phase === "running" && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="loading loading-spinner loading-xs" />
+                    Regrade in progress. Re-running the autograder for each
+                    submitted repo; collection is paused until it finishes.
+                  </span>
+                )}
+                {regradeAll.phase === "completed" && (
+                  <span>
+                    Regrade started — each repo is re-grading in the background.
+                    Click <span className="font-semibold">Collect now</span> in
+                    a few minutes to pull the new scores.
+                  </span>
+                )}
+                {regradeAll.phase === "failed" && (
+                  <span>
+                    {regradeAll.error instanceof Error
+                      ? `Could not start the regrade: ${regradeAll.error.message}`
+                      : "The regrade run did not start successfully."}{" "}
+                    Check the workflow on GitHub, then try again.
+                  </span>
+                )}
+                {regradeAll.phase === "timeout" && (
+                  <span>
+                    The regrade is taking a while to register. Check its
+                    progress on GitHub.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <details className="card bg-base-100 rounded-xl border border-[#eee] mb-4 group">
             <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
@@ -697,6 +827,31 @@ const SubmissionsPageContent = () => {
             acceptedUsernames={acceptedAvailable ? acceptedSet : undefined}
             thresholdFraction={thresholdFraction}
           />
+          <ConfirmModal
+            open={regradeConfirmOpen}
+            title={`Regrade all submissions for “${assignmentInfo?.name ?? assignment}”?`}
+            description={
+              <>
+                This re-runs the autograder on every submitted repo&apos;s
+                latest commit — useful after fixing a test or updating the
+                autograder. Submission times don&apos;t change.
+                <br />
+                <br />
+                Grading runs in the background and can take several minutes; use{" "}
+                <span className="font-semibold">Collect now</span> afterward to
+                pull the new scores.
+              </>
+            }
+            confirmText="regrade"
+            confirmLabel="Regrade all"
+            cancelLabel="Cancel"
+            dangerous={false}
+            needsConfirm={false}
+            onConfirm={async () => {
+              regradeAll.regrade()
+            }}
+            onClose={() => setRegradeConfirmOpen(false)}
+          />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
       </Drawer>
@@ -726,7 +881,11 @@ const SubmissionsPage = () => {
     )
   }
 
-  return <SubmissionsPageContent />
+  return (
+    <RegradeCoordinatorProvider>
+      <SubmissionsPageContent />
+    </RegradeCoordinatorProvider>
+  )
 }
 
 export default SubmissionsPage

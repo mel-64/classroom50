@@ -19,6 +19,7 @@ import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
 import {
   COLLECT_SCORES_WORKFLOW,
+  REGRADE_WORKFLOW,
   createTeam,
   getErrorMessage,
 } from "./mutations"
@@ -99,6 +100,26 @@ export const githubKeys = {
 
   lastCollectScoresRun: (owner: string) =>
     [...githubKeys.all, "last-collect-scores-run", owner] as const,
+
+  // Scoped by classroom + assignment (+ optional repo owner) so a regrade of
+  // one assignment doesn't surface as in-progress on another assignment's
+  // page; sinceRunId binds the poll to our specific dispatch.
+  regradeRun: (
+    owner: string,
+    classroom: string,
+    assignment: string,
+    repoOwner: string | null,
+    sinceRunId: number | null,
+  ) =>
+    [
+      ...githubKeys.all,
+      "regrade-run",
+      owner,
+      classroom,
+      assignment,
+      repoOwner ?? "all",
+      sinceRunId ?? "none",
+    ] as const,
 
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
@@ -1214,7 +1235,7 @@ export async function getServiceTokenStatus(
           status: "missing",
           secretName: SERVICE_TOKEN_SECRET_NAME,
           message:
-            "Service token is not set on the classroom50 config repo. Score-collection workflows cannot read student repositories until a service token is set.",
+            "Service token is not set on the classroom50 config repo. Score-collection and regrade workflows cannot access student repositories until a service token is set.",
         }
       }
 
@@ -1253,9 +1274,11 @@ export async function getRepoPermissionForUser(params: {
   )
 }
 
-// Fetches the most recent collect-scores run matching the given filters (or
-// null if none). Shared by the "track my dispatch" and "last collected" reads.
-async function listLatestCollectScoresRun(
+// Fetches the most recent workflow run matching the given filters (or null if
+// none) from a classroom50 workflow. Shared by the collect-scores "track my
+// dispatch" / "last collected" reads and the regrade dispatch tracker, so the
+// workflow file is a parameter (defaults to collect-scores).
+async function listLatestWorkflowRun(
   client: GitHubClient,
   org: string,
   filters: {
@@ -1263,8 +1286,10 @@ async function listLatestCollectScoresRun(
     since?: string
     status?: string
     perPage?: number
+    page?: number
   },
   signal?: AbortSignal,
+  workflow: string = COLLECT_SCORES_WORKFLOW,
 ): Promise<GitHubWorkflowRun[]> {
   const params = new URLSearchParams({
     per_page: String(filters.perPage ?? 1),
@@ -1272,9 +1297,10 @@ async function listLatestCollectScoresRun(
   if (filters.event) params.set("event", filters.event)
   if (filters.since) params.set("created", `>=${filters.since}`)
   if (filters.status) params.set("status", filters.status)
+  if (filters.page) params.set("page", String(filters.page))
 
   const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
-    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?${params.toString()}`,
+    `/repos/${org}/classroom50/actions/workflows/${workflow}/runs?${params.toString()}`,
     { method: "GET", signal },
   )
 
@@ -1292,7 +1318,7 @@ export async function getCollectScoresRunAfterId(
   sinceRunId: number | null,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  const runs = await listLatestCollectScoresRun(
+  const runs = await listLatestWorkflowRun(
     client,
     org,
     { event: "workflow_dispatch", perPage: 20 },
@@ -1306,6 +1332,65 @@ export async function getCollectScoresRunAfterId(
   return newer.length > 0 ? newer[newer.length - 1] : null
 }
 
+// Finds the regrade run we dispatched, by the same monotonic-id binding as
+// getCollectScoresRunAfterId but against the regrade.yaml workflow. Returns
+// null until our run registers.
+//
+// Unlike collect (one org-wide dispatcher), regrade can fan out one dispatch
+// per student via the per-row buttons, so far more than a single page of
+// dispatch runs can pile up between our snapshot and this poll. A fixed first
+// page would let our own run scroll off and bind us to a later student's run.
+// So we page newest-first, accumulating only runs with id > sinceRunId, and
+// stop as soon as a page contains a run at/below the baseline (everything older
+// is irrelevant) or we hit the page cap. The bound run is the oldest such run.
+const REGRADE_RUNS_PER_PAGE = 30
+const REGRADE_MAX_PAGES = 10
+
+export async function getRegradeRunAfterId(
+  client: GitHubClient,
+  org: string,
+  sinceRunId: number | null,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  // No prior runs: our run is the oldest dispatch run that exists, so a single
+  // newest-first page is enough — the last entry is the earliest run.
+  if (sinceRunId === null) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    return runs.length > 0 ? runs[runs.length - 1] : null
+  }
+
+  // Page through dispatch runs (newest-first) collecting those newer than the
+  // baseline. Stop once a page reaches the baseline or yields nothing.
+  const newer: GitHubWorkflowRun[] = []
+  for (let page = 1; page <= REGRADE_MAX_PAGES; page++) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE, page },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    if (runs.length === 0) break
+
+    for (const r of runs) {
+      if (r.id > sinceRunId) newer.push(r)
+    }
+
+    // This page already includes the baseline (or older), so no later page can
+    // hold a run newer than it — we've seen every candidate.
+    if (runs.some((r) => r.id <= sinceRunId)) break
+  }
+
+  // The run we triggered is the oldest one newer than the baseline.
+  return newer.length > 0 ? newer[newer.length - 1] : null
+}
+
 // The most recent *completed* collect-scores run (cron or manual), or null if
 // the workflow has never completed. Used for the "last collected" timestamp;
 // status=completed stops an in-flight newer run from hiding the prior one.
@@ -1314,7 +1399,7 @@ export async function getLastCollectScoresRun(
   org: string,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  const runs = await listLatestCollectScoresRun(
+  const runs = await listLatestWorkflowRun(
     client,
     org,
     { status: "completed" },

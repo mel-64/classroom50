@@ -21,6 +21,11 @@ type SubmissionRecord = {
   "max-score": number
   tests: unknown[]
   late?: boolean
+  // The wall-clock instant this submission was last (re-)graded. Distinct from
+  // `datetime` (the fixed submission time = commit committer date): a teacher
+  // regrade refreshes `graded_at` but never moves `datetime`. Optional —
+  // absent on results graded before the field existed.
+  graded_at?: string
   submitted_by?: {
     username: string
     id?: number | null
@@ -58,6 +63,8 @@ export type SubmissionRow = {
   "max-score": number
   submissionCount: number
   late?: boolean
+  // Last (re-)graded instant of the latest submission (mirrors submissions[0]).
+  gradedAt?: string
   // Per-attempt history, newest first; the summary fields above mirror submissions[0].
   submissions: SubmissionAttempt[]
 }
@@ -70,6 +77,7 @@ export type SubmissionAttempt = {
   score: number
   "max-score": number
   late?: boolean
+  gradedAt?: string
   submittedBy?: string
 }
 
@@ -118,6 +126,7 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
         "max-score": latest["max-score"],
         submissionCount: entry.submissions.length,
         late: latest.late,
+        gradedAt: latest.graded_at,
         submissions: sorted.map((s) => ({
           datetime: s.datetime,
           commit: s.commit,
@@ -125,6 +134,7 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
           score: s.score,
           "max-score": s["max-score"],
           late: s.late,
+          gradedAt: s.graded_at,
           submittedBy: s.submitted_by?.username,
         })),
       }

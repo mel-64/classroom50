@@ -1598,12 +1598,21 @@ export async function encryptSecret(publicKey: string, secret: string) {
 
 /**
  * Validates a fine-grained PAT before storing it as the service token by
- * reading the classroom50 repo's contents *as the supplied token* (exercising
- * `Contents: read`), mapping failures to actionable messages.
+ * reading the classroom50 repo *as the supplied token* and asserting it can
+ * WRITE (permissions.push), mapping failures to actionable messages.
  *
- * Caveat: this proves the token can read `classroom50`, not the student repos
- * the collect workflow walks (fine-grained PATs don't expose their repo
- * selection via the API). Hence the UI requires "All repositories".
+ * The shared token now needs Contents: Read and write AND Actions: Read and
+ * write on the student repos: collect-scores reads, but regrade (re-running a
+ * student repo's autograde run, or pushing a submit/* tag) WRITES. We can't
+ * introspect a fine-grained PAT's Actions scope via the API, so we assert the
+ * Contents write capability (permissions.push) here — a read-only token is
+ * rejected — and the UI instructs the teacher to also grant Actions: Read and
+ * write. Mirrors the CLI's servicetoken.validateTokenWithClient.
+ *
+ * Caveat: GET /repos/{org}/classroom50 proves the token's access to the config
+ * repo, not the student repos the workflows touch (fine-grained PATs don't
+ * expose their repo selection via the API). Hence the UI requires "All
+ * repositories".
  */
 export async function validateServiceToken(
   token: string,
@@ -1616,10 +1625,22 @@ export async function validateServiceToken(
 
   const tokenClient = createGitHubClient({ token: trimmed })
 
+  const scopeHint =
+    `Create a fine-grained PAT with Resource owner = ${org}, Repository access = ` +
+    "All repositories, and Repository permissions → Contents: Read and write " +
+    "AND Actions: Read and write (collecting scores reads; regrading re-runs " +
+    "student autograde workflows and may push submit/* tags, which need write). " +
+    "If your org requires PAT approval and you are not an org owner, an owner " +
+    "must approve it first (owners' tokens are auto-approved)."
+
+  let repo: { permissions?: { push?: boolean } }
   try {
     // Probes api.github.com directly with the pasted token, relying on GitHub's
-    // permissive CORS on authenticated REST calls.
-    await tokenClient.request(`/repos/${org}/classroom50/contents/`)
+    // permissive CORS on authenticated REST calls. The repo object's
+    // `permissions` reflects the token's effective access (push === can write).
+    repo = await tokenClient.request<{ permissions?: { push?: boolean } }>(
+      `/repos/${org}/classroom50`,
+    )
   } catch (err) {
     if (err instanceof GitHubAPIError) {
       if (err.status === 401) {
@@ -1630,7 +1651,7 @@ export async function validateServiceToken(
       }
       if (err.status === 403) {
         throw new Error(
-          `This token can't read ${org}/classroom50 contents (403). Create a fine-grained PAT with Resource owner = ${org}, Repository access = All repositories, and Contents: Read. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved).`,
+          `This token can't access ${org}/classroom50 (403). ${scopeHint}`,
           { cause: err },
         )
       }
@@ -1656,9 +1677,24 @@ export async function validateServiceToken(
       { cause: err },
     )
   }
+
+  // The token can read the repo, but regrade needs to write (re-run runs /
+  // push submit/* tags). A read-only PAT reports permissions.push === false;
+  // reject it with the same actionable scope hint.
+  if (!repo.permissions?.push) {
+    throw new Error(
+      `This token can read ${org}/classroom50 but lacks write access — collecting scores needs read, but regrading needs write. ${scopeHint}`,
+    )
+  }
 }
 
 export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
+
+// The regrade fan-out workflow in <org>/classroom50 (classroom50-cli#208).
+// Dispatched per assignment (optionally per repo owner); it re-runs each
+// student repo's autograde workflow. Grading then happens asynchronously inside
+// the student repos, so a follow-up collect-scores run refreshes the gradebook.
+export const REGRADE_WORKFLOW = "regrade.yaml"
 
 /**
  * Dispatches the classroom50 repo's `collect-scores.yaml` workflow (the same
@@ -1703,6 +1739,72 @@ export async function triggerScoreCollection(
         ref,
         inputs: classroom ? { classroom } : {},
       },
+    },
+  )
+
+  return { sinceRunId }
+}
+
+/**
+ * Dispatches the classroom50 repo's `regrade.yaml` workflow (classroom50-cli
+ * #208) to re-run the autograder for an assignment — the whole assignment, or
+ * a single student when `owner` is supplied. Each targeted repo re-grades its
+ * current `main` HEAD; grading runs asynchronously, so the gradebook is
+ * refreshed by a subsequent collect-scores run.
+ *
+ * Returns `sinceRunId`: the newest regrade dispatch run before this POST (null
+ * if none). The dispatch API returns no run id, so the caller binds to its own
+ * run as the oldest dispatch run with a larger id (monotonic — no clock needed,
+ * unambiguous when dispatches race). Mirrors triggerScoreCollection.
+ *
+ * @param classroom required dispatch input (the regrade workflow is always
+ *   classroom-scoped, unlike collect which can sweep org-wide).
+ * @param assignment required dispatch input (the assignment slug).
+ * @param owner optional dispatch input — a single repo-owner login to regrade;
+ *   omitted regrades every rostered student for the assignment.
+ */
+export async function triggerRegrade(
+  client: GitHubClient,
+  params: {
+    org: string | undefined
+    classroom: string | undefined
+    assignment: string | undefined
+    owner?: string
+  },
+): Promise<{ sinceRunId: number | null }> {
+  const { org, classroom, assignment, owner } = params
+  if (!org) throw new Error("org must be specified to regrade")
+  if (!classroom) throw new Error("classroom must be specified to regrade")
+  if (!assignment) throw new Error("assignment must be specified to regrade")
+
+  // getRepo (for the dispatch ref) and the baseline snapshot are independent
+  // reads; run them together. The baseline must still precede the POST below —
+  // run ids are monotonic, so the run this POST creates is the oldest dispatch
+  // run whose id exceeds the snapshot.
+  const [repo, baseline] = await Promise.all([
+    getRepo(client, org, "classroom50"),
+    client.request<{ workflow_runs: { id: number }[] }>(
+      `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+    ),
+  ])
+  if (!repo) {
+    throw new Error(
+      `${org}/classroom50 not found; run setup for this org first`,
+    )
+  }
+  const ref = repo.default_branch || "main"
+  const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
+
+  // The workflow's `owner` input is optional; only send it when scoping to a
+  // single student so an empty string isn't passed as a (no-op) filter.
+  const inputs: Record<string, string> = { classroom, assignment }
+  if (owner) inputs.owner = owner
+
+  await client.request(
+    `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/dispatches`,
+    {
+      method: "POST",
+      body: { ref, inputs },
     },
   )
 

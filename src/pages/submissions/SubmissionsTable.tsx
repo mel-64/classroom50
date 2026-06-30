@@ -2,6 +2,7 @@ import {
   ChevronRight,
   GitCommitHorizontal,
   MessageCircle,
+  RefreshCw,
   ScrollText,
   UsersRound,
 } from "lucide-react"
@@ -17,11 +18,13 @@ import {
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
+import { ConfirmModal } from "@/components/modals"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
+import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import type { Student } from "@/types/classroom"
 
 const formatDateTime = (datetime: string) =>
@@ -294,6 +297,103 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   )
 }
 
+// Per-row regrade: dispatches regrade.yaml scoped to one owner and tracks the
+// run via useTriggerRegrade (icon shows progress; disabled while any regrade is
+// in flight). The button only kicks off grading — the gradebook refreshes on
+// the next collect.
+const RegradeButton = ({
+  org,
+  classroom,
+  assignment,
+  owner,
+  displayName,
+}: {
+  org: string
+  classroom: string
+  assignment: string
+  owner: string
+  // The student's display name (individual assignments) when known; falls back
+  // to the `owner` login. Omitted for group repos (owner is the founder/group).
+  displayName?: string
+}) => {
+  const { regrade, phase, anyRegrading } = useTriggerRegrade({
+    org,
+    classroom,
+    assignment,
+    owner,
+  })
+  const inFlight = phase === "dispatching" || phase === "running"
+  // Disable while ANY regrade (this row, another row, or "Regrade all") is in
+  // flight: trackers share one regrade.yaml run list and bind by monotonic id,
+  // so only one outstanding dispatch at a time keeps the binding unambiguous.
+  const blocked = anyRegrading && !inFlight
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const title = inFlight
+    ? "Regrade in progress…"
+    : blocked
+      ? "Another regrade is in progress"
+      : phase === "completed"
+        ? "Regrade started — grading runs in the background; collect to see new scores"
+        : phase === "failed"
+          ? "Regrade failed to start — try again"
+          : "Regrade this submission"
+
+  const handleClick = () => {
+    if (inFlight || blocked) return
+    setConfirmOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`${ACTION_BTN} text-base-content/70 disabled:opacity-60`}
+        disabled={inFlight || blocked}
+        onClick={handleClick}
+        aria-label={`Regrade ${owner}'s submission`}
+        title={title}
+      >
+        {inFlight ? (
+          <span className="loading loading-spinner loading-xs" />
+        ) : (
+          <RefreshCw
+            className={`size-4 ${phase === "completed" ? "text-success" : phase === "failed" ? "text-error" : ""}`}
+          />
+        )}
+      </button>
+      <ConfirmModal
+        open={confirmOpen}
+        title={`Regrade ${displayName || owner}'s submission?`}
+        description={
+          <>
+            This re-runs the autograder on{" "}
+            <span className="font-semibold text-base-content">
+              {displayName || owner}
+            </span>
+            {displayName ? ` (${owner})` : ""}&apos;s latest commit for this
+            assignment. Their submission time doesn&apos;t change.
+            <br />
+            <br />
+            Grading runs in the background and can take a few minutes; use{" "}
+            <span className="font-semibold">Collect now</span> afterward to pull
+            the new score.
+          </>
+        }
+        confirmText="regrade"
+        confirmLabel="Regrade"
+        cancelLabel="Cancel"
+        dangerous={false}
+        needsConfirm={false}
+        onConfirm={async () => {
+          regrade()
+        }}
+        onClose={() => setConfirmOpen(false)}
+      />
+    </>
+  )
+}
+
 // Expanded per-row history: every submission for a repo, newest first.
 const SubmissionHistory = ({
   submissions,
@@ -513,16 +613,26 @@ const SubmissionsTable = ({
                         </label>
                       </td>
                       <td>
-                        <div className="flex items-center gap-2">
-                          <span className="whitespace-nowrap">
-                            {formatDateTime(datetime)}
-                          </span>
-                          {late ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="whitespace-nowrap">
+                              {formatDateTime(datetime)}
+                            </span>
+                            {late ? (
+                              <span
+                                className="badge badge-sm badge-error badge-soft"
+                                title="The latest submission was pushed after the deadline."
+                              >
+                                Late
+                              </span>
+                            ) : null}
+                          </div>
+                          {rest.gradedAt && rest.gradedAt !== datetime ? (
                             <span
-                              className="badge badge-sm badge-error badge-soft"
-                              title="The latest submission was pushed after the deadline."
+                              className="whitespace-nowrap text-xs text-base-content/50"
+                              title="When the autograder last (re-)graded this submission. Regrading updates this without changing the submission time."
                             >
-                              Late
+                              Graded {formatDateTime(rest.gradedAt)}
                             </span>
                           ) : null}
                         </div>
@@ -564,6 +674,17 @@ const SubmissionsTable = ({
                             title="Details"
                             emptyLabel="No autograder details yet"
                             emptyTitle="No details yet"
+                          />
+                          <RegradeButton
+                            org={org}
+                            classroom={classroom}
+                            assignment={assignment}
+                            owner={rest.owner}
+                            displayName={
+                              isGroup
+                                ? undefined
+                                : getName(rest.owner, students) || undefined
+                            }
                           />
                         </div>
                       </td>

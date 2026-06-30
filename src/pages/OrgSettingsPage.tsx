@@ -101,12 +101,13 @@ export function ServiceTokenInfo() {
         <div className="dropdown-content z-50 mt-2 w-80 rounded-box border border-base-300 bg-base-100 p-4 text-sm shadow-xl">
           <p className="text-base-content/70">
             Classroom 50 needs a service token, a fine-grained Personal Access
-            Token (PAT) with read access to the repositories in your classroom’s
-            GitHub organization. It is stored as the{" "}
+            Token (PAT) with read and write access to the repositories in your
+            classroom’s GitHub organization. It is stored as the{" "}
             <code className="text-xs">CLASSROOM50_SERVICE_TOKEN</code> secret on
             your <span className="font-semibold">classroom50</span> config repo,
-            where the nightly score-collection workflow uses it to read student
-            submissions.
+            where the score-collection workflow uses it to read student
+            submissions and the regrade workflow uses it to re-run student
+            autograde workflows.
           </p>
         </div>
       )}
@@ -152,10 +153,11 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
     "https://github.com/settings/personal-access-tokens/new?" +
     new URLSearchParams({
       name: `Classroom 50 Actions Token`,
-      description: `Service token for Classroom 50 score collection. Contents: Read on all repositories in the ${org} organization`,
+      description: `Service token for Classroom 50 score collection and regrading. Contents: Read and write + Actions: Read and write on all repositories in the ${org} organization`,
       target_name: org ?? "",
       expires_in: String(expiryValid ? parsedExpiry : DEFAULT_EXPIRY_DAYS),
-      contents: "read",
+      contents: "write",
+      actions: "write",
     }).toString()
 
   const patMutation = useMutation({
@@ -306,8 +308,10 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           </a>
           <p className="mt-2 text-xs text-base-content/50">
             Opens GitHub’s token form with the name, resource owner, expiry, and{" "}
-            <span className="font-semibold">Contents: Read</span> permission
-            pre-filled.
+            <span className="font-semibold">
+              Contents: Read and write + Actions: Read and write
+            </span>{" "}
+            permissions pre-filled.
           </p>
 
           <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
@@ -325,15 +329,22 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               </li>
               <li>
                 Under <span className="font-semibold">Permissions</span>,
-                confirm <span className="font-semibold">Contents: Read</span>{" "}
-                (Metadata: Read is included automatically).
+                confirm{" "}
+                <span className="font-semibold">Contents: Read and write</span>{" "}
+                and{" "}
+                <span className="font-semibold">Actions: Read and write</span>{" "}
+                (Metadata: Read is included automatically).{" "}
+                <span className="text-base-content/60">
+                  Read collects scores; write lets the regrade workflow re-run
+                  student autograde workflows.
+                </span>
               </li>
             </ul>
             <p className="mt-3 text-base-content/80">
               The token expires after the period you set above. When it expires,
-              the score-collection workflow will fail until you generate a new
-              token and save it here again, so set a reminder to rotate it
-              before then.
+              the score-collection and regrade workflows will fail until you
+              generate a new token and save it here again, so set a reminder to
+              rotate it before then.
             </p>
           </div>
 
