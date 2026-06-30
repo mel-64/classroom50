@@ -14,8 +14,7 @@ const ORG_GITHUB_DIR = ".github"
 // publish-pages.yaml's push trigger fires.
 export const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
 
-// Inline every skeleton file as a raw string. skeleton.test.ts guards this
-// against drift from the CLI's embedded set.
+// skeleton.test.ts guards this against drift from the CLI's embedded set.
 const rawModules = import.meta.glob<string>(
   [
     "../../../cli/gh-teacher/skeleton/dotgithub/**/*.yaml",
@@ -105,6 +104,12 @@ export function buildSkeletonFiles(defaultBranch: string): SkeletonFile[] {
     BUNDLED_SKELETON,
     defaultBranch,
   )
+}
+
+// The target-repo paths (".github/...") the GUI deploys, independent of the
+// default branch. Lets callers check existence before fetching the branch.
+export function skeletonTargetPaths(): string[] {
+  return SKELETON_PATHS.map((rel) => `${ORG_GITHUB_DIR}/${rel}`)
 }
 
 // Org-relative paths present in the bundle; for the parity test.

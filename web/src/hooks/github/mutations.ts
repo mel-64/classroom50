@@ -19,7 +19,7 @@ import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
 import { repairRulesets } from "./rulesets"
-import { buildSkeletonFiles } from "@/skeleton/skeleton"
+import { buildSkeletonFiles, skeletonTargetPaths } from "@/skeleton/skeleton"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -969,13 +969,20 @@ export async function findMissingSkeletonFiles(
 ) {
   const existingPaths = await listTargetRepoPaths(client, org)
 
+  // Target paths are static (branch-independent), so check existence before
+  // fetching the branch and skip the repo read entirely when nothing is missing.
+  const missing = new Set(
+    skeletonTargetPaths().filter((path) => !existingPaths.has(path)),
+  )
+  if (missing.size === 0) return []
+
   // Use the config repo's actual default branch (org policy can rename `main`).
   const repo = await client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`)
   const defaultBranch = repo.default_branch || "main"
 
   // From the bundled skeleton — no runtime fetch from the CLI repo.
-  return buildSkeletonFiles(defaultBranch).filter(
-    (file) => !existingPaths.has(file.path),
+  return buildSkeletonFiles(defaultBranch).filter((file) =>
+    missing.has(file.path),
   )
 }
 

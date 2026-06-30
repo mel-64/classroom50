@@ -48,7 +48,7 @@ export const GROUP_SIZE_MAX = 100
 // repo per student; `group` = a shared repo (requires max_group_size).
 export type AssignmentMode = "individual" | "group"
 
-export const ASSIGNMENT_MODES: readonly AssignmentMode[] = [
+const ASSIGNMENT_MODES: readonly AssignmentMode[] = [
   "individual",
   "group",
 ]

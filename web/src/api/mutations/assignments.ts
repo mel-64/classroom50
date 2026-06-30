@@ -1,8 +1,12 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
-import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
-import { assertAssignmentMode } from "@/types/classroom"
-import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
+import {
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
+  PASS_THRESHOLD_MAX,
+  PASS_THRESHOLD_MIN,
+  assertAssignmentMode,
+} from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -1108,10 +1112,10 @@ export function buildReusedEntry(
 // total Record<keyof Assignment, ...>, so adding a field to the Assignment type
 // fails to compile here until it is classified — closing the silent-desync trap
 // where a new managed field omitted from the set lets an edit that clears it get
-// re-populated from the stale existing entry (the bug preserveUnmanaged fixes,
-// inverted). "managed": buildAssignmentEntry rebuilds it from input, so an edit
-// clearing it must win. "unmanaged": the form never touches it; preserve it
-// verbatim on a read-modify-write (mirrors the CLI's AssignmentEntry.Extra).
+// re-populated from the stale existing entry. "managed": buildAssignmentEntry
+// rebuilds it from input, so an edit clearing it must win. "unmanaged": the form
+// never touches it; preserve it verbatim on a read-modify-write (mirrors the
+// CLI's AssignmentEntry.Extra).
 const ASSIGNMENT_KEY_OWNERSHIP: Record<
   keyof Assignment,
   "managed" | "unmanaged"
