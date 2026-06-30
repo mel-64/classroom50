@@ -57,7 +57,7 @@ As a student, you will be mostly be concerned with organizations that are in the
 
 > Classroom 50 organizes its data and flow around an **Organization > Classroom > Assignment** model. An **organization** might represent something like a school or university, though ultimately this is at the teacher's discretion. Within the organization, a teacher can create many **classrooms**, each of which contains a student roster and a list of **assignments**.
 
-![View of student assignment page with no assignments](images/web_assignments_student_none.png)
+![View of student assignment page with no assignments](images/web_assignments_none_student.png)
 
 # Accepting Assignments
 
