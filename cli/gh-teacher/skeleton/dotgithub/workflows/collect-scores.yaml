@@ -55,7 +55,7 @@ jobs:
           if [ -n "$(git status --porcelain '*/scores.json' 2>/dev/null)" ]; then
             git add '*/scores.json'
             git -c user.name=classroom50-bot -c user.email=bot@classroom50 \
-                commit -m "collect: refresh scores.json"
+                commit -m "[Classroom 50] collect: refresh scores.json"
             git push
           else
             echo "no scores.json changes to commit"

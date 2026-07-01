@@ -18,6 +18,7 @@ import { isClassroomArchived, STAFF_ROLES } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
+import { prefixCommit } from "@/util/commit"
 import { repairRulesets } from "./rulesets"
 import { buildSkeletonFiles, type SkeletonFile } from "@/skeleton/skeleton"
 import { bytesToHex } from "@/util/hex"
@@ -221,7 +222,9 @@ export function createCommit(
     {
       method: "POST",
       body: {
-        message: message || `Create init files for new classroom: ${classroom}`,
+        message:
+          message ||
+          prefixCommit(`Create init files for new classroom: ${classroom}`),
         tree: tree_sha,
         parents,
       },
@@ -1252,7 +1255,7 @@ export async function ensureSkeletonFiles(
     const newCommit = await createCommitRepo(client, {
       org,
       repo: "classroom50",
-      message: "Bootstrap or refresh Classroom 50 skeleton",
+      message: prefixCommit("Bootstrap or refresh Classroom 50 skeleton"),
       tree: tree.sha,
       parents: [commit.sha],
     })
@@ -2606,7 +2609,7 @@ export async function editClassroom(
 
   const newCommit = await createCommit(client, {
     org,
-    message: `Update classroom ${slug}`,
+    message: prefixCommit(`Update classroom ${slug}`),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
     classroom: slug,

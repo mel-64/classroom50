@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
 	"github.com/foundation50/gh-teacher/internal/cliutil"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
@@ -233,7 +234,7 @@ func runAssignmentReuse(client githubapi.Client, out, errOut io.Writer, p reuseA
 		return map[string]string{assignmentsFilePath(p.To): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("assignment: reuse %s from %s into %s (gh teacher assignment reuse)", p.SourceSlug, p.From, p.To)
+	message := contract.PrefixCommit(fmt.Sprintf("assignment: reuse %s from %s into %s (gh teacher assignment reuse)", p.SourceSlug, p.From, p.To))
 	if _, err := configwrite.CommitTree(client, p.Org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}

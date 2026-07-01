@@ -238,7 +238,7 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 		return files, nil
 	}
 
-	message := fmt.Sprintf("Add %s classroom (gh teacher classroom add)", shortName)
+	message := contract.PrefixCommit(fmt.Sprintf("Add %s classroom (gh teacher classroom add)", shortName))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func commitClassroomMutation(client githubapi.Client, org, shortName, message st
 // classroom.json. A proposed body identical to the on-disk one
 // short-circuits to a no-op.
 func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName string, setName bool, name string, setTerm bool, term string) error {
-	message := fmt.Sprintf("Edit %s classroom (gh teacher classroom edit)", shortName)
+	message := contract.PrefixCommit(fmt.Sprintf("Edit %s classroom (gh teacher classroom edit)", shortName))
 	noop, branch, err := commitClassroomMutation(client, org, shortName, message, func(c *configrepo.ClassroomJSON) {
 		if setName {
 			c.Name = name
@@ -591,7 +591,7 @@ func setClassroomActive(client githubapi.Client, out, errOut io.Writer, org, sho
 	if active {
 		verb, verbCap = "unarchive", "Unarchive"
 	}
-	message := fmt.Sprintf("%s %s classroom (gh teacher classroom %s)", verbCap, shortName, verb)
+	message := contract.PrefixCommit(fmt.Sprintf("%s %s classroom (gh teacher classroom %s)", verbCap, shortName, verb))
 	noop, branch, err := commitClassroomMutation(client, org, shortName, message, func(c *configrepo.ClassroomJSON) {
 		if active {
 			c.Active = nil // drop the flag: absent = active
@@ -704,7 +704,7 @@ func removeClassroom(client githubapi.Client, in io.Reader, out, errOut io.Write
 		return configwrite.CommitChange{Deletes: paths}, nil
 	}
 
-	message := fmt.Sprintf("Remove %s classroom (gh teacher classroom remove)", shortName)
+	message := contract.PrefixCommit(fmt.Sprintf("Remove %s classroom (gh teacher classroom remove)", shortName))
 	sha, err := configwrite.CommitTreeChange(client, org, configrepo.ConfigRepoName, branch, message, build)
 	if err != nil {
 		return err

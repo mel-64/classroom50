@@ -652,7 +652,7 @@ func runAssignmentAdd(client githubapi.Client, out, errOut io.Writer, p addAssig
 		return map[string]string{assignmentsFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("assignment: add %s to %s (gh teacher assignment add)", slug, classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("assignment: add %s to %s (gh teacher assignment add)", slug, classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -740,7 +740,7 @@ func runAssignmentRemove(client githubapi.Client, out io.Writer, org, classroom,
 		return map[string]string{assignmentsFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("assignment: remove %s from %s (gh teacher assignment remove)", slug, classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("assignment: remove %s from %s (gh teacher assignment remove)", slug, classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}

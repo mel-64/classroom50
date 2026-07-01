@@ -24,6 +24,7 @@ import {
   type OnboardingPayload,
 } from "@/util/onboarding"
 import { stringifyOnboardingYaml } from "@/util/yaml"
+import { prefixCommit } from "@/util/commit"
 
 export type OnboardingResult = {
   status: "created" | "already-onboarded"
@@ -196,7 +197,7 @@ export async function submitOnboarding(
         repo: repoName,
         parents: [parentSha],
         tree: tree.sha,
-        message: "Classroom50 onboarding self-report",
+        message: prefixCommit("Classroom50 onboarding self-report"),
       })
 
       await updateRefForRepo({

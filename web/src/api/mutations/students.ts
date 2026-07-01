@@ -36,6 +36,7 @@ import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { isEnrolledRow, isSameGitHubUser } from "@/util/students"
 import { studentKey } from "@/util/identity"
+import { prefixCommit } from "@/util/commit"
 import {
   emailHash,
   generateInviteToken,
@@ -308,7 +309,9 @@ export async function addStudentToClassroom(
 
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Add student: ${input.classroom}/${student.username}`,
+    message: prefixCommit(
+      `Add student: ${input.classroom}/${student.username}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -414,7 +417,9 @@ export async function addEmailInviteToClassroom(
 
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Invite student by email: ${input.classroom}/${normalizedEmail}`,
+    message: prefixCommit(
+      `Invite student by email: ${input.classroom}/${normalizedEmail}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -567,7 +572,9 @@ async function enrollEmailRowWithResolvedIdentity(
       baseTreeSha: commit.tree.sha,
       parentSha: ref.object.sha,
       content: nextCsv,
-      message: `Enroll already-member student: ${classroom}/${input.username}`,
+      message: prefixCommit(
+        `Enroll already-member student: ${classroom}/${input.username}`,
+      ),
     })
   })
 }
@@ -1265,9 +1272,11 @@ export async function reconcileOnboarding(
 
     const newCommit = await createGitCommit(client, {
       org,
-      message: `Reconcile onboarding: ${classroom} (${committedThisAttempt.length} student${
-        committedThisAttempt.length === 1 ? "" : "s"
-      })`,
+      message: prefixCommit(
+        `Reconcile onboarding: ${classroom} (${committedThisAttempt.length} student${
+          committedThisAttempt.length === 1 ? "" : "s"
+        })`,
+      ),
       tree_sha: tree.sha,
       parents: [ref.object.sha],
     })
@@ -1542,7 +1551,9 @@ async function markStudentEnrolled(
 
   const newCommit = await createGitCommit(client, {
     org,
-    message: `Mark student enrolled: ${classroom}/${enrolledRow.username}`,
+    message: prefixCommit(
+      `Mark student enrolled: ${classroom}/${enrolledRow.username}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -1680,7 +1691,9 @@ async function matchStudentToAccount(
     baseTreeSha: commit.tree.sha,
     parentSha: ref.object.sha,
     content: stringifyStudentsCsv(nextStudents),
-    message: `Match student to account: ${classroom}/${normalizedUsername}`,
+    message: prefixCommit(
+      `Match student to account: ${classroom}/${normalizedUsername}`,
+    ),
   })
 
   return { alreadyEnrolled: false, student: matchedRow }
@@ -1921,9 +1934,11 @@ export async function addStudentsToClassroom(
 
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Add ${addedStudents.length} student ${
-      addedStudents.length === 1 ? "" : "s"
-    }: ${input.classroom}`,
+    message: prefixCommit(
+      `Add ${addedStudents.length} student ${
+        addedStudents.length === 1 ? "" : "s"
+      }: ${input.classroom}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -2166,7 +2181,9 @@ export async function unenrollStudent(
 
   const newCommit = await createGitCommit(client, {
     org,
-    message: `Remove student: ${classroom}/${toRemoveStudent.username || normalizedEmail}`,
+    message: prefixCommit(
+      `Remove student: ${classroom}/${toRemoveStudent.username || normalizedEmail}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -2423,7 +2440,9 @@ export async function updateStudent(
 
   const newCommit = await createGitCommit(client, {
     org,
-    message: `Edit student: ${classroom}/${updatedStudent.username || updatedStudent.email || targetKey}`,
+    message: prefixCommit(
+      `Edit student: ${classroom}/${updatedStudent.username || updatedStudent.email || targetKey}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })

@@ -902,7 +902,7 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
       },
     })
 
-    expect(messages[0]).toBe("Edit student: cs101/alice")
+    expect(messages[0]).toBe("[Classroom 50] Edit student: cs101/alice")
   })
 
   it("retries on a 409 conflict and lands the edit (updateStudentWithConflictRetry)", async () => {

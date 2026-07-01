@@ -96,7 +96,7 @@ func submitAssignment(ctx context.Context, client githubapi.Client, verbose bool
 		return err
 	}
 
-	message := fmt.Sprintf("Submit %s", config.Assignment)
+	message := contract.PrefixCommit(fmt.Sprintf("Submit %s", config.Assignment))
 
 	// Stamp the commit so a shell without git identity still submits.
 	identity, err := identitypkg.Fetch(client)

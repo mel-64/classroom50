@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/cliutil"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/configwrite"
@@ -181,7 +182,7 @@ func setClassroomDefaultAutograder(client githubapi.Client, out, errOut io.Write
 		return map[string]string{repoPath: string(content)}, nil
 	}
 
-	message := fmt.Sprintf("Set %s default autograder.py from %s (gh teacher autograder set-default)", classroom, label)
+	message := contract.PrefixCommit(fmt.Sprintf("Set %s default autograder.py from %s (gh teacher autograder set-default)", classroom, label))
 	commitSHA, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build)
 	if err != nil {
 		return err

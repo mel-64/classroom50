@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/configwrite"
 	"github.com/foundation50/gh-teacher/internal/githubapi"
@@ -394,7 +395,7 @@ func removeClassroomDefaultAutograder(client githubapi.Client, in io.Reader, out
 		return configwrite.CommitChange{Deletes: []string{repoPath}}, nil
 	}
 
-	message := fmt.Sprintf("Remove %s default autograder.py (gh teacher autograder remove)", classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("Remove %s default autograder.py (gh teacher autograder remove)", classroom))
 	sha, err := configwrite.CommitTreeChange(client, org, configrepo.ConfigRepoName, branch, message, build)
 	if err != nil {
 		return err

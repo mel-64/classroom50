@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/configwrite"
@@ -192,7 +193,7 @@ func runAssignmentTestAdd(client githubapi.Client, out io.Writer, org, classroom
 		return map[string]string{assignmentsFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("assignment: set test %q on %s/%s (gh teacher assignment test add)", spec.Name, classroom, slug)
+	message := contract.PrefixCommit(fmt.Sprintf("assignment: set test %q on %s/%s (gh teacher assignment test add)", spec.Name, classroom, slug))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -361,7 +362,7 @@ func runAssignmentTestRemove(client githubapi.Client, out io.Writer, org, classr
 		return map[string]string{assignmentsFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("assignment: remove test %q from %s/%s (gh teacher assignment test remove)", testName, classroom, slug)
+	message := contract.PrefixCommit(fmt.Sprintf("assignment: remove test %q from %s/%s (gh teacher assignment test remove)", testName, classroom, slug))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}

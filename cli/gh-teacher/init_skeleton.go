@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/classroom50-cli-shared/gittree"
 	"github.com/foundation50/gh-teacher/internal/cliutil"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
@@ -74,7 +75,7 @@ func skeletonFiles(defaultBranch string) (map[string]string, error) {
 }
 
 // skeletonCommitMessage is the single bootstrap commit's message.
-const skeletonCommitMessage = "Bootstrap classroom50 config repo (gh teacher init)"
+var skeletonCommitMessage = contract.PrefixCommit("Bootstrap classroom50 config repo (gh teacher init)")
 
 // skeletonCommitAttempts: read-parent + build-tree retries, at 200ms x
 // 2^n backoff (~3s), to ride out a fresh repo's git-data lag.
@@ -183,7 +184,7 @@ func refreshSkeleton(client githubapi.Client, in io.Reader, out, errOut io.Write
 		refreshed = len(changed)
 		return updates, nil
 	}
-	commitSHA, err := configwrite.CommitTree(client, owner, repo, branch, "Refresh classroom50 skeleton (gh teacher init)", build)
+	commitSHA, err := configwrite.CommitTree(client, owner, repo, branch, contract.PrefixCommit("Refresh classroom50 skeleton (gh teacher init)"), build)
 	if err != nil {
 		return err
 	}

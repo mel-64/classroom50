@@ -20,6 +20,7 @@ import {
   type GitTreeFileMode,
   type StaffTeamRefs,
 } from "@/hooks/github/mutations"
+import { prefixCommit } from "@/util/commit"
 
 export type CreateClassroomResult = {
   previousCommitSha: string
@@ -372,7 +373,7 @@ export async function deleteClassroom(
   }>(`/repos/${org}/classroom50/git/commits`, {
     method: "POST",
     body: {
-      message: `Delete classroom ${classroom}`,
+      message: prefixCommit(`Delete classroom ${classroom}`),
       tree: newTree.sha,
       parents: [commit.sha],
     },

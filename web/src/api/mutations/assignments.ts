@@ -16,6 +16,7 @@ import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import { classroomPagesSegment } from "@/util/secret"
+import { prefixCommit } from "@/util/commit"
 import { parseRunnerLabels } from "@/util/runners"
 import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
@@ -55,11 +56,16 @@ import {
 } from "@/util/templateAccessError"
 import { githubOrgOAuthPolicyUrl } from "@/auth/constants"
 
-// Exact subject the runner (runner.py: ACCEPT_COMMIT_SUBJECT) scans for to
-// find the trusted Feedback-PR baseline — any other message makes it skip the
-// PR. Mirrors the CLI's `gh student accept` commit; keep in lockstep.
-const ACCEPT_COMMIT_SUBJECT =
-  "Initialize .classroom50.yaml and autograde workflow (gh student accept)"
+// The accept commit's subject. Written by both this GUI and the CLI's
+// `gh student accept`; kept byte-identical (via prefixCommit) per the
+// synchronized-release rule. The subject carries NO contract — the runner
+// resolves the trusted Feedback-PR baseline by the commit that introduced
+// the `.classroom50.yaml` marker (runner.py: ACCEPT_MARKER_PATH), not by
+// matching this string — so it can be reworded freely as long as both
+// accept clients stay in lockstep.
+const ACCEPT_COMMIT_SUBJECT = prefixCommit(
+  "Initialize .classroom50.yaml and autograde workflow (gh student accept)",
+)
 
 // A student-facing accept failure. The accept page renders `error.message`
 // verbatim, so this keeps a raw GitHub "Not Found" from reaching a student.
@@ -482,7 +488,7 @@ export async function editAssignment(
 
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Edit assignment: ${input.classroom}/${slug}`,
+    message: prefixCommit(`Edit assignment: ${input.classroom}/${slug}`),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -818,7 +824,9 @@ export async function createAssignment(
   })
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Create assignment: ${input.classroom}/${assignmentBody.slug}`,
+    message: prefixCommit(
+      `Create assignment: ${input.classroom}/${assignmentBody.slug}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -1254,7 +1262,9 @@ export async function copyAssignmentToClassroom(
   })
   const newCommit = await createGitCommit(client, {
     org,
-    message: `Reuse assignment: ${source.slug} -> ${targetClassroom}/${entry.slug}`,
+    message: prefixCommit(
+      `Reuse assignment: ${source.slug} -> ${targetClassroom}/${entry.slug}`,
+    ),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -1427,7 +1437,7 @@ export async function deleteAssignment(
 
   const newCommit = await createGitCommit(client, {
     org: input.org,
-    message: `Edit assignment: ${input.classroom}/${slug}`,
+    message: prefixCommit(`Edit assignment: ${input.classroom}/${slug}`),
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -1592,8 +1602,8 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
       client,
       owner,
       repo,
-      // Use ACCEPT_COMMIT_SUBJECT verbatim — the runner matches it to find the
-      // Feedback-PR baseline (see the constant).
+      // The accept commit that lands `.classroom50.yaml` — the marker the
+      // runner uses to resolve the Feedback-PR baseline (see the constant).
       message: ACCEPT_COMMIT_SUBJECT,
       treeSha: tree.sha,
       parentSha,

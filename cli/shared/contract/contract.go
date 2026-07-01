@@ -56,4 +56,19 @@ const (
 	// SecretPatternDescription is the human-readable summary in the "invalid
 	// secret" error, kept in lockstep with SecretPattern.
 	SecretPatternDescription = "4-64 lowercase letters or digits ([a-z0-9])"
+
+	// CommitPrefix marks every tool-authored commit Classroom 50 makes so a
+	// teacher or student can tell them apart from their own commits in the
+	// repo history. Prepended (via PrefixCommit) by every CLI commit path;
+	// hand-mirrored with NO compile-time link in the web GUI
+	// (web/src/util/commit.ts COMMIT_PREFIX) and the skeleton
+	// collect-scores.yaml workflow, so keep all three byte-identical.
+	CommitPrefix = "[Classroom 50]"
 )
+
+// PrefixCommit prepends CommitPrefix to a commit message, producing the
+// canonical "[Classroom 50] <message>" form. The trailing "(gh ... )"
+// provenance hint some callers add is preserved verbatim inside message.
+func PrefixCommit(message string) string {
+	return CommitPrefix + " " + message
+}

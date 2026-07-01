@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/configwrite"
 	"github.com/foundation50/gh-teacher/internal/githubapi"
@@ -333,7 +334,7 @@ func runRosterAdd(client githubapi.Client, out, errOut io.Writer, org, classroom
 		return map[string]string{configrepo.RosterFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("roster: add %s to %s (gh teacher roster add)", login, classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("roster: add %s to %s (gh teacher roster add)", login, classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -410,7 +411,7 @@ func runRosterUpdate(client githubapi.Client, out io.Writer, org, classroom, use
 		return map[string]string{configrepo.RosterFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("roster: update %s in %s (gh teacher roster update)", username, classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("roster: update %s in %s (gh teacher roster update)", username, classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -451,7 +452,7 @@ func runRosterRemove(client githubapi.Client, out io.Writer, org, classroom, use
 		return map[string]string{configrepo.RosterFilePath(classroom): string(data)}, nil
 	}
 
-	message := fmt.Sprintf("roster: remove %s from %s (gh teacher roster remove)", username, classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("roster: remove %s from %s (gh teacher roster remove)", username, classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}
@@ -557,7 +558,7 @@ func runRosterImport(client githubapi.Client, out, errOut io.Writer, org, classr
 		return map[string]string{configrepo.RosterFilePath(classroom): string(encoded)}, nil
 	}
 
-	message := fmt.Sprintf("roster: import %d row(s) into %s (gh teacher roster import)", len(resolved), classroom)
+	message := contract.PrefixCommit(fmt.Sprintf("roster: import %d row(s) into %s (gh teacher roster import)", len(resolved), classroom))
 	if _, err := configwrite.CommitTree(client, org, configrepo.ConfigRepoName, branch, message, build); err != nil {
 		return err
 	}

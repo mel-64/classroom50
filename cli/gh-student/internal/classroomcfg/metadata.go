@@ -124,7 +124,7 @@ func DropFiles(client githubapi.Client, owner, repo, branch string, cfg Config, 
 		AutogradeWorkflowPath: workflowContent,
 	}
 	return CommitFiles(client, owner, repo, branch,
-		"Initialize .classroom50.yaml and autograde workflow (gh student accept)",
+		contract.PrefixCommit("Initialize .classroom50.yaml and autograde workflow (gh student accept)"),
 		files)
 }
 

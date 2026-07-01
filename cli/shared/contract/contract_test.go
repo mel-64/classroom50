@@ -33,10 +33,25 @@ func TestContractLiterals(t *testing.T) {
 		// and the web GUI validator. Update every copy in lockstep on change.
 		{"SecretPattern", SecretPattern, "^[a-z0-9]{4,64}$"},
 		{"SecretPatternDescription", SecretPatternDescription, "4-64 lowercase letters or digits ([a-z0-9])"},
+		// CommitPrefix is mirrored, with NO compile-time link, in the web GUI
+		// (web/src/util/commit.ts COMMIT_PREFIX) and
+		// cli/gh-teacher/skeleton/dotgithub/workflows/collect-scores.yaml.
+		// Update every copy in lockstep on change.
+		{"CommitPrefix", CommitPrefix, "[Classroom 50]"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q (cross-binary contract drift — update every language copy in lockstep)", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+// TestPrefixCommit pins the canonical "[Classroom 50] <message>" shape so the
+// separator (a single space) can't drift from the web GUI's prefixCommit.
+func TestPrefixCommit(t *testing.T) {
+	got := PrefixCommit("Add cs-principles classroom (gh teacher classroom add)")
+	want := "[Classroom 50] Add cs-principles classroom (gh teacher classroom add)"
+	if got != want {
+		t.Errorf("PrefixCommit = %q, want %q", got, want)
 	}
 }

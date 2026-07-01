@@ -6,6 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
 )
 
@@ -380,8 +381,29 @@ func TestRegexParity_GoVsInlinePython(t *testing.T) {
 	}
 }
 
+// TestCollectScoresCommitPrefix pins the third leg of the [Classroom 50]
+// commit-prefix mirror: the collect-scores workflow's `git commit -m`
+// literal. The Go const (contract.CommitPrefix, pinned by contract_test.go)
+// and the web COMMIT_PREFIX (pinned by web/src/util/commit.test.ts) are the
+// other two; this file is an embedded YAML copy with no compile-time link,
+// so a reworded prefix here would otherwise drift silently while CI stays
+// green. Asserts the committed message starts with the shared prefix.
+func TestCollectScoresCommitPrefix(t *testing.T) {
+	files, err := skeletonFiles("main")
+	if err != nil {
+		t.Fatalf("skeletonFiles: %v", err)
+	}
+	body, ok := files[".github/workflows/collect-scores.yaml"]
+	if !ok {
+		t.Fatal("collect-scores.yaml missing from skeleton")
+	}
+	want := `commit -m "` + contract.CommitPrefix + " "
+	if !strings.Contains(body, want) {
+		t.Errorf("collect-scores.yaml commit message does not start with the shared prefix %q; the [Classroom 50] mirror has drifted from contract.CommitPrefix:\n%s", contract.CommitPrefix, body)
+	}
+}
+
 // nested walks doc by key path; returns (value, true) on hit and
-// (nil, false) when any segment is missing or not a map. Lets tests
 // assert on parsed YAML structure without nesting type-assertions.
 func nested(doc any, keys ...string) (any, bool) {
 	cur := doc

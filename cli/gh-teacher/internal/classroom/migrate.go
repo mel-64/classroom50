@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
 	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/configwrite"
@@ -244,8 +245,8 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 		return classroomScaffold(plan.TargetOrg, plan.ShortName, plan.Classroom.Name, plan.Term, "", entries, migration, &team)
 	}
 
-	message := fmt.Sprintf("Migrate %s from GitHub Classroom %d (gh teacher classroom migrate)",
-		plan.ShortName, plan.Classroom.ID)
+	message := contract.PrefixCommit(fmt.Sprintf("Migrate %s from GitHub Classroom %d (gh teacher classroom migrate)",
+		plan.ShortName, plan.Classroom.ID))
 	commitSHA, err := configwrite.CommitTree(client, plan.TargetOrg, configrepo.ConfigRepoName, branch, message, build)
 	if err != nil {
 		return err
