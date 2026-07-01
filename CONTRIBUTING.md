@@ -5,6 +5,17 @@ Thanks for your interest in improving Classroom 50, the open-source
 [Fifty Foundation](https://fifty.foundation/). Contributions of all sizes are
 welcome — bug reports, docs, and code.
 
+To contribute, you're welcome to:
+
+- [Start a discussion](https://github.com/foundation50/classroom50/discussions/new/choose)
+  if you have a question, idea, or other discussion topic.
+- [Create a new issue](https://github.com/foundation50/classroom50/issues/new/choose) if you
+  have a bug report or feature request.
+- [Submit a pull request](https://github.com/foundation50/classroom50/pulls) if
+  you'd like to contribute code, documentation, or other changes.
+
+Please remove tokens, secrets, and private student data from any discussion and issue posts.
+
 ## Ground rules
 
 - **No backend.** Classroom 50 is 100% client-side. All state lives in GitHub
@@ -23,11 +34,8 @@ Classroom 50 is a monorepo of independently built but co-shipped pieces:
 | `cli/gh-student/` | Go (`gh` extension)    | Student CLI: accept, submit                                |
 | `cli/shared/`  | Go module                 | Shared contract constants and GitHub/Git/UI helpers        |
 | `web/`         | React + TypeScript + Vite | Teacher web app deployed to classroom50.org                |
-| `schemas/`     | JSON Schema               | Source-of-truth schemas for the cross-binary contracts     |
+| `schemas/`     | JSON Schema               | Source-of-truth schemas for the cross-tool contracts       |
 | `templates/`   | —                         | Example assignment templates teachers can copy             |
-
-Note: the `web/` app is not part of every checkout. If it's absent, skip the
-web steps below.
 
 ## Build and test
 
@@ -59,10 +67,10 @@ Skeleton scripts (Python):
 python3 -m pytest cli/gh-teacher/skeleton_tests -q
 ```
 
-## Cross-binary contracts
+## Cross-tool contracts
 
 Some names, paths, and schemas are shared across more than one tool (the web
-app and the CLIs), so they can only change by coordinating every side.
+app and the CLIs), so they can only change by coordinating across all tools.
 `schemas/*.schema.json` is the source of truth, and the Go, Python, and
 TypeScript sides hand-mirror it. When you touch one of these contracts:
 
@@ -77,13 +85,6 @@ TypeScript sides hand-mirror it. When you touch one of these contracts:
 Document CLI commands and flags in the
 [wiki](https://github.com/foundation50/classroom50/wiki), not in per-tool
 READMEs.
-
-## Reporting issues
-
-Open a [bug report or feature request](https://github.com/foundation50/classroom50/issues/new/choose).
-For questions and ideas, use
-[Discussions](https://github.com/foundation50/classroom50/discussions). Please
-scrub tokens, secrets, and private student data from anything you paste.
 
 ## Commits and pull requests
 
