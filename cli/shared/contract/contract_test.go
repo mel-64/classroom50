@@ -1,6 +1,9 @@
 package contract
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestContractLiterals is a change-detector: it pins each cross-binary constant
 // to its exact wire value. These literals must stay byte-identical to the
@@ -43,6 +46,33 @@ func TestContractLiterals(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q (cross-binary contract drift — update every language copy in lockstep)", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+// TestRequiredOAuthScopes pins the unified CLI scope set (issue #246): both the
+// gh-teacher and gh-student binaries request exactly these, and delete_repo
+// stays out of the default set (opt-in for teardown). The exact list is the
+// behavior oracle for the login command and the teacher preflight; a change
+// here must move in lockstep with those and the wiki scope tables.
+func TestRequiredOAuthScopes(t *testing.T) {
+	want := []string{"admin:org", "read:org", "repo", "workflow"}
+	got := RequiredOAuthScopes()
+	if len(got) != len(want) {
+		t.Fatalf("RequiredOAuthScopes() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("RequiredOAuthScopes()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	// delete_repo is intentionally opt-in (guards accidental org teardown).
+	if strings.Contains(strings.Join(got, ","), "delete_repo") {
+		t.Errorf("delete_repo must NOT be in the default scope set: %v", got)
+	}
+	// Fresh copy each call: mutating the result must not corrupt the shared set.
+	RequiredOAuthScopes()[0] = "tampered"
+	if RequiredOAuthScopes()[0] != "admin:org" {
+		t.Error("RequiredOAuthScopes() must return a defensive copy")
 	}
 }
 

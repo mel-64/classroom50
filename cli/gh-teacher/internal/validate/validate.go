@@ -88,3 +88,36 @@ func ScopeListContains(scopes, want string) bool {
 	}
 	return false
 }
+
+// scopeImpliedBy maps an OAuth scope to the broader scopes that include
+// it. GitHub normalizes a token's granted scopes, discarding any scope
+// implicitly covered by a broader one it was granted alongside — so a
+// token requested with `admin:org` and `read:org` comes back reporting
+// only `admin:org` in X-OAuth-Scopes. A whole-token match for the
+// narrower scope would then wrongly report it missing. Only the org
+// hierarchy is listed because it's the only implication in the scopes
+// gh-teacher requests; extend this if a new required scope has implied
+// parents. Mirrors GitHub's documented scope hierarchy
+// (admin:org -> write:org -> read:org).
+var scopeImpliedBy = map[string][]string{
+	"read:org":  {"admin:org", "write:org"},
+	"write:org": {"admin:org"},
+}
+
+// ScopeListSatisfies reports whether the X-OAuth-Scopes list satisfies
+// want, treating a broader granted scope as covering the narrower one it
+// implies (per GitHub's scope normalization). Use this — not
+// ScopeListContains — when checking whether a token can perform an
+// operation, so a normalized header that dropped an implied scope isn't
+// mistaken for a missing grant.
+func ScopeListSatisfies(scopes, want string) bool {
+	if ScopeListContains(scopes, want) {
+		return true
+	}
+	for _, broader := range scopeImpliedBy[want] {
+		if ScopeListContains(scopes, broader) {
+			return true
+		}
+	}
+	return false
+}

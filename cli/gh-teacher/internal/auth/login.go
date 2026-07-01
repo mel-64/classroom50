@@ -15,11 +15,16 @@ func NewLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in to GitHub with the scopes gh-teacher needs",
-		Long: "Wrapper around `gh auth login` that always requests the admin:org\n" +
-			"scope on top of the gh defaults. The admin:org scope is required\n" +
-			"by GitHub's organization-membership endpoints (used by\n" +
-			"`gh teacher invite <org> <user>`) and is not part of the default\n" +
-			"scope set `gh auth login` grants on its own.\n\n" +
+		Long: "Wrapper around `gh auth login` that requests the unified\n" +
+			"Classroom 50 scope set on top of the gh defaults:\n" +
+			"admin:org, read:org, repo, and workflow. gh-teacher and\n" +
+			"gh-student request the same set so a single sign-in covers\n" +
+			"both CLIs. admin:org is required by GitHub's org-membership\n" +
+			"endpoints (`gh teacher invite`), and workflow lets `gh teacher\n" +
+			"init` commit the config repo's `.github/workflows/` files\n" +
+			"(GitHub 404s that Git Data API write without it).\n\n" +
+			"delete_repo is NOT requested by default — opt in with\n" +
+			"`gh teacher login -s delete_repo` for `gh teacher teardown`.\n\n" +
 			"Additional scopes can be added with -s; they are appended to the\n" +
 			"login request the same way `gh auth login -s` accepts them.",
 		Example: "  gh teacher login\n" +

@@ -3,18 +3,17 @@ package githubapi
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/classroom50-cli-shared/ghauth"
 )
 
-// requiredScopes: extras on top of gh's defaults; one source of truth
-// for the login command and RequireAuthClient's auto-login.
-//   - read:org: the org-membership lookup in `gh student accept`.
-//   - repo: assignment-repo creation, contents writes, collaborator
-//     management.
-//   - workflow: `gh student accept` commits .github/workflows/autograde.yaml
-//     into the new repo; the Git Data API 404s that write without it. gh
-//     adds it only incidentally (HTTPS git auth), so request it explicitly.
-var requiredScopes = []string{"read:org", "repo", "workflow"}
+// requiredScopes is the unified OAuth scope set shared with gh-teacher
+// (contract.RequiredOAuthScopes, issue #246) so authenticating for one CLI
+// covers the other. gh-student itself only needs read:org + repo + workflow,
+// but the two binaries deliberately request an identical set (it also gains
+// admin:org, which supersedes read:org). Single source of truth for the login
+// command and RequireAuthClient's auto-login.
+var requiredScopes = contract.RequiredOAuthScopes()
 
 // RequiredScopes returns the OAuth scopes gh-student requests beyond gh's
 // defaults. Exposed for the login command, which requests the same set

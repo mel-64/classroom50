@@ -66,6 +66,33 @@ const (
 	CommitPrefix = "[Classroom 50]"
 )
 
+// requiredOAuthScopes is the unified OAuth scope set both the gh-teacher and
+// gh-student CLIs request on top of gh's defaults. The two binaries request an
+// identical set (issue #246) so a user who authenticates for one never has to
+// re-auth for the other, and any classroom command lands the same grant.
+//   - admin:org: org-membership/invite endpoints (`gh teacher invite`,
+//     `gh teacher member list`, pending-invitation reads). Implies read:org.
+//   - read:org:  the org-membership lookup in `gh student accept`. Kept
+//     explicit for clarity and web-GUI parity even though admin:org implies it.
+//   - repo:      assignment-repo creation, contents writes, collaborator
+//     management.
+//   - workflow:  committing .github/workflows/* via the Git Data API (both
+//     `gh teacher init` and `gh student accept`); GitHub 404s that write
+//     without it and gh adds it only incidentally.
+//
+// delete_repo is deliberately NOT here: it stays an opt-in scope for
+// `gh teacher teardown` (`gh teacher login -s delete_repo`) so nobody wipes an
+// org by accident. The web GUI requests a superset (adds read:user and
+// delete_repo); that is intentional and separate from this CLI-parity set.
+var requiredOAuthScopes = []string{"admin:org", "read:org", "repo", "workflow"}
+
+// RequiredOAuthScopes returns the unified OAuth scope set (a fresh copy so
+// callers can't mutate the shared backing array). Both CLIs' RequiredScopes()
+// and their auto-login path resolve to this.
+func RequiredOAuthScopes() []string {
+	return append([]string(nil), requiredOAuthScopes...)
+}
+
 // PrefixCommit prepends CommitPrefix to a commit message, producing the
 // canonical "[Classroom 50] <message>" form. The trailing "(gh ... )"
 // provenance hint some callers add is preserved verbatim inside message.

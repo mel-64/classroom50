@@ -75,8 +75,13 @@ func statusOf(checks []preflightCheck, name string) preflightStatus {
 }
 
 func TestRunPreflight_AllOK(t *testing.T) {
+	// Realistic normalized header: `gh teacher login` requests admin:org,
+	// read:org, repo, workflow, but GitHub discards read:org from the
+	// granted set because admin:org implies it. The preflight must still
+	// pass — a regression here (a plain whole-token read:org check) would
+	// hard-fail init right after a correct login.
 	server := newPreflightServer(t, preflightTestServer{
-		scopes: "admin:org, workflow, repo",
+		scopes: "admin:org, repo, workflow",
 		plan:   "team",
 	})
 	client := githubtest.NewTestClient(t, server)
@@ -93,11 +98,20 @@ func TestRunPreflight_AllOK(t *testing.T) {
 			t.Errorf("check %q = %q, want ok", name, got)
 		}
 	}
+	// The OK detail lists the satisfied scopes; guard the dynamic Join so
+	// an empty-list or malformed-string regression is caught.
+	for _, c := range res.Checks {
+		if c.Name == "auth scopes" {
+			if !strings.Contains(c.Detail, "present") || !strings.Contains(c.Detail, "admin:org") {
+				t.Errorf("auth-scopes OK detail should list satisfied scopes: %q", c.Detail)
+			}
+		}
+	}
 }
 
 func TestRunPreflight_MissingScopeFails(t *testing.T) {
 	server := newPreflightServer(t, preflightTestServer{
-		scopes: "repo", // no admin:org, no workflow
+		scopes: "repo", // missing admin:org, read:org, workflow
 		plan:   "enterprise",
 	})
 	client := githubtest.NewTestClient(t, server)
@@ -109,16 +123,36 @@ func TestRunPreflight_MissingScopeFails(t *testing.T) {
 	if got := statusOf(res.Checks, "auth scopes"); got != preflightFail {
 		t.Errorf("auth scopes = %q, want fail", got)
 	}
-	// The detail should name the missing scopes and point at login.
+	// The detail should name every missing scope (the code joins all of
+	// them) and point at login. read:org is genuinely missing here — no
+	// admin:org/write:org is present to imply it — so it must be listed.
 	for _, c := range res.Checks {
 		if c.Name == "auth scopes" {
-			if !strings.Contains(c.Detail, "admin:org") || !strings.Contains(c.Detail, "workflow") {
-				t.Errorf("missing-scope detail should name both scopes: %q", c.Detail)
+			for _, want := range []string{"admin:org", "read:org", "workflow"} {
+				if !strings.Contains(c.Detail, want) {
+					t.Errorf("missing-scope detail should name %q: %q", want, c.Detail)
+				}
 			}
 			if !strings.Contains(c.Detail, "gh teacher login") {
 				t.Errorf("missing-scope detail should suggest login: %q", c.Detail)
 			}
 		}
+	}
+}
+
+func TestRunPreflight_ImpliedScopeSatisfiesWithoutLiteralReadOrg(t *testing.T) {
+	// Regression guard for the normalization trap: a header carrying
+	// admin:org but NOT a literal read:org must still pass the scope
+	// check, because admin:org implies read:org.
+	server := newPreflightServer(t, preflightTestServer{
+		scopes: "admin:org, repo, workflow", // no literal read:org
+		plan:   "team",
+	})
+	client := githubtest.NewTestClient(t, server)
+
+	res := runPreflight(client, "cs50", tokenSource{envSet: true})
+	if got := statusOf(res.Checks, "auth scopes"); got != preflightOK {
+		t.Errorf("auth scopes = %q, want ok (admin:org implies read:org)", got)
 	}
 }
 
@@ -139,7 +173,7 @@ func TestRunPreflight_NoScopeHeaderWarns(t *testing.T) {
 
 func TestRunPreflight_OrgNotFoundFails(t *testing.T) {
 	server := newPreflightServer(t, preflightTestServer{
-		scopes:    "admin:org, workflow",
+		scopes:    "admin:org, repo, workflow",
 		orgStatus: http.StatusNotFound,
 	})
 	client := githubtest.NewTestClient(t, server)
@@ -155,7 +189,7 @@ func TestRunPreflight_OrgNotFoundFails(t *testing.T) {
 
 func TestRunPreflight_NonOwnerFails(t *testing.T) {
 	server := newPreflightServer(t, preflightTestServer{
-		scopes:         "admin:org, workflow",
+		scopes:         "admin:org, repo, workflow",
 		plan:           "team",
 		membershipRole: "member",
 	})
@@ -172,7 +206,7 @@ func TestRunPreflight_NonOwnerFails(t *testing.T) {
 
 func TestRunPreflight_PlanWarnsButContinues(t *testing.T) {
 	server := newPreflightServer(t, preflightTestServer{
-		scopes: "admin:org, workflow",
+		scopes: "admin:org, repo, workflow",
 		plan:   "free",
 	})
 	client := githubtest.NewTestClient(t, server)

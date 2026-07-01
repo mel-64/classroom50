@@ -9,7 +9,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | Command | Description |
 | --- | --- |
 | `gh teacher whoami` | Print the authenticated GitHub user. |
-| `gh teacher login` | Log in to GitHub via `gh auth login`, requesting `admin:org` (org invites) and `workflow` (committing the config repo's workflows during `init`). Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
+| `gh teacher login` | Log in to GitHub via `gh auth login`, requesting the unified Classroom 50 scope set — `admin:org`, `read:org`, `repo`, `workflow` — the same set `gh student login` requests, so one sign-in covers both CLIs. Pass `-s` to add other scopes (e.g. `delete_repo` for teardown). Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
 | `gh teacher logout` | Log out of GitHub via `gh auth logout`. |
 | `gh teacher invite <org> <user>` | Invite user to an org (use `--admin` for org admin). |
 | `gh teacher invite <org>/<repo> <user>` | Invite user to a specific repo. Default permission `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running updates the collaborator in place. |
@@ -752,7 +752,7 @@ Delete every repository in `<org>` after confirming the org is a Classroom 50 se
 ## `gh teacher whoami` / `login` / `logout`
 
 - `gh teacher whoami` — prints the authenticated GitHub user (a thin wrapper around `gh api user`).
-- `gh teacher login` — runs `gh auth login -s admin:org -s workflow`, optionally with additional scopes via `-s/--scopes`.
+- `gh teacher login` — runs `gh auth login -s admin:org -s read:org -s repo -s workflow` (the unified scope set shared with `gh student login`), optionally with additional scopes via `-s/--scopes`.
 - `gh teacher logout` — runs `gh auth logout`.
 
 ## Contributing

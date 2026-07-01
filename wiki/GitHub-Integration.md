@@ -29,13 +29,15 @@ Run once per machine or after a token rotation:
 gh teacher login
 ```
 
-This shells out to `gh auth login -s admin:org -s workflow` and opens a browser to complete GitHub's OAuth device flow (a one-time code you enter at <https://github.com/login/device>). Neither scope is granted by a plain `gh auth login`: `admin:org` is required for org-level invitations, and `workflow` lets `gh teacher init` commit the config repo's `.github/workflows/` files via the Git Data API (GitHub returns a misleading `404` on that write without it). If you skip this step and have no token at all, the CLI detects the missing token and runs the login flow automatically. If a token exists but lacks `admin:org` or `workflow`, the affected command fails with an error telling you to run `gh teacher login` to grant the missing scope.
+This shells out to `gh auth login -s admin:org -s read:org -s repo -s workflow` and opens a browser to complete GitHub's OAuth device flow (a one-time code you enter at <https://github.com/login/device>). This is the **unified Classroom 50 scope set** — `gh teacher login` and `gh student login` request the same scopes, so authenticating for one CLI covers the other. None of these are granted by a plain `gh auth login`: `admin:org` is required for org-level invitations (and implies `read:org`), `repo` for repo creation/contents/collaborator management, and `workflow` lets `gh teacher init` commit the config repo's `.github/workflows/` files via the Git Data API (GitHub returns a misleading `404` on that write without it). If you skip this step and have no token at all, the CLI detects the missing token and runs the login flow automatically. If a token exists but lacks one of these scopes, the affected command fails with an error telling you to run `gh teacher login` to grant the missing scope. (`delete_repo` is **not** in this set — opt in with `gh teacher login -s delete_repo` for `gh teacher teardown`.)
 
-OAuth scopes requested by the teacher CLI:
+OAuth scopes requested by the teacher CLI (identical to the student CLI):
 
 | Scope | Required for |
 |-------|--------------|
-| `admin:org` | Sending org invitations, reading and removing org memberships |
+| `admin:org` | Sending org invitations, reading and removing org memberships (implies `read:org`) |
+| `read:org` | Checking org membership (requested explicitly for parity with the student CLI and web GUI) |
+| `repo` | Assignment-repo creation, contents writes, disabling repo features, adding collaborators |
 | `workflow` | Committing the config repo's `.github/workflows/` files during `gh teacher init` (GitHub 404s the Git Data API write without it) |
 
 ### 3. Student authentication (`gh student login`)
@@ -46,7 +48,7 @@ Run once per student machine:
 gh student login
 ```
 
-Same device flow as above, but with student-appropriate scopes:
+Same device flow as above, and — as of the scope unification — the **same scope set** (`admin:org`, `read:org`, `repo`, `workflow`), so a student who has already authenticated a teacher CLI (or vice versa) needs no re-auth. The scopes a student actually exercises:
 
 | Scope | Required for |
 |-------|--------------|

@@ -15,12 +15,14 @@ func NewLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in to GitHub with the scopes gh-student needs",
-		Long: "Wrapper around `gh auth login` that always requests the read:org,\n" +
-			"repo, and workflow scopes on top of the gh defaults (read:org for\n" +
-			"the org-membership lookup in `gh student accept`, repo for\n" +
-			"assignment-repo creation and collaborator management, and workflow\n" +
-			"because accept commits .github/workflows/autograde.yaml into the\n" +
-			"new repo).\n\n" +
+		Long: "Wrapper around `gh auth login` that requests the unified\n" +
+			"Classroom 50 scope set on top of the gh defaults:\n" +
+			"admin:org, read:org, repo, and workflow. gh-student and\n" +
+			"gh-teacher request the same set so a single sign-in covers\n" +
+			"both CLIs. read:org backs the org-membership lookup in\n" +
+			"`gh student accept`, repo covers assignment-repo creation and\n" +
+			"collaborator management, and workflow lets accept commit\n" +
+			".github/workflows/autograde.yaml into the new repo.\n\n" +
 			"Additional scopes can be added with -s; they are appended to the\n" +
 			"login request the same way `gh auth login -s` accepts them.",
 		Example: "  gh student login\n" +

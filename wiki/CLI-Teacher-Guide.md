@@ -23,9 +23,9 @@ gh teacher login
 
 ![Demo: gh teacher login](images/gh_teacher_auth.gif)
 
-This shells out to `gh auth login -s admin:org -s workflow` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants both scopes in one shot; if you have, it re-authenticates with them appended.
+This shells out to `gh auth login -s admin:org -s read:org -s repo -s workflow` and opens a browser to authorize. This is the unified Classroom 50 scope set — `gh student login` requests the same scopes, so one sign-in covers both CLIs. If you haven't logged in to `gh` before, it performs the initial login and grants the scopes in one shot; if you have, it re-authenticates with them appended.
 
-If you skip this step and have no token at all, the CLI detects the missing token and runs `gh teacher login` automatically. If a token exists but lacks `admin:org` or `workflow`, the affected command (`gh teacher invite` or `gh teacher init`, respectively) fails with an error instructing you to run `gh teacher login` to grant the missing scope.
+If you skip this step and have no token at all, the CLI detects the missing token and runs `gh teacher login` automatically. If a token exists but lacks one of the required scopes (e.g. `admin:org` for `gh teacher invite` or `workflow` for `gh teacher init`), the affected command fails with an error instructing you to run `gh teacher login` to grant the missing scope.
 
 ## 3. Bootstrap the classroom50 config repo
 

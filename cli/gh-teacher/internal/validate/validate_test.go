@@ -29,6 +29,36 @@ func TestScopeListContains(t *testing.T) {
 	}
 }
 
+func TestScopeListSatisfies(t *testing.T) {
+	// A broader granted scope satisfies the narrower one it implies —
+	// GitHub normalizes the header, so requesting `admin:org` + `read:org`
+	// returns only `admin:org`, and a plain read:org check would wrongly
+	// see it as missing.
+	cases := []struct {
+		name    string
+		scopes  string
+		want    string
+		satisfy bool
+	}{
+		{"exact match", "admin:org, repo, workflow", "repo", true},
+		{"read:org satisfied by admin:org (the normalization case)", "admin:org, repo, workflow", "read:org", true},
+		{"read:org satisfied by write:org", "write:org, repo", "read:org", true},
+		{"write:org satisfied by admin:org", "admin:org", "write:org", true},
+		{"read:org present literally", "read:org, repo", "read:org", true},
+		{"read:org genuinely missing", "repo, workflow", "read:org", false},
+		{"non-implied scope still requires exact match", "admin:org", "workflow", false},
+		{"admin:org not implied by read:org (no upward implication)", "read:org", "admin:org", false},
+		{"empty list", "", "read:org", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ScopeListSatisfies(tc.scopes, tc.want); got != tc.satisfy {
+				t.Fatalf("ScopeListSatisfies(%q, %q) = %v, want %v", tc.scopes, tc.want, got, tc.satisfy)
+			}
+		})
+	}
+}
+
 func TestShortName_LabelFlowsIntoError(t *testing.T) {
 	// The label is part of the error surface — callers pass
 	// "slug", "short-name", or "classroom" and the teacher should

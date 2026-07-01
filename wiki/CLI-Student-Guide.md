@@ -20,7 +20,7 @@ gh student login
 
 ![Demo: gh student login](images/gh_student_auth.gif)
 
-This runs `gh auth login` with the `read:org`, `repo`, and `workflow` scopes that the classroom commands need. If you skip this step, the next command you run will trigger the login flow automatically.
+This runs `gh auth login` with the unified Classroom 50 scope set — `admin:org`, `read:org`, `repo`, and `workflow` — the same scopes `gh teacher login` requests, so a single sign-in works across both CLIs. (A student only exercises `read:org`, `repo`, and `workflow`; `admin:org` is included for parity and is harmless on a student account.) If you skip this step, the next command you run will trigger the login flow automatically.
 
 `gh student logout` mirrors `gh auth logout`.
 

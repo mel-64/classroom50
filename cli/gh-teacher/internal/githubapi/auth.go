@@ -3,16 +3,17 @@ package githubapi
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/classroom50-cli-shared/ghauth"
 )
 
-// requiredScopes: extras on top of gh's defaults; one source of truth
-// for the login command and RequireAuthClient's auto-login.
-//   - admin:org: org-membership endpoints (`gh teacher invite`).
-//   - workflow: GitHub 404s the Git Data API write of the skeleton's
-//     .github/workflows files without it. gh adds it only incidentally
-//     (HTTPS git auth), so request it explicitly.
-var requiredScopes = []string{"admin:org", "workflow"}
+// requiredScopes is the unified OAuth scope set shared with gh-student
+// (contract.RequiredOAuthScopes, issue #246) so authenticating for one CLI
+// covers the other. gh-teacher itself only needs admin:org + workflow, but the
+// two binaries deliberately request an identical set. delete_repo stays opt-in
+// for `gh teacher teardown`. Single source of truth for the login command and
+// RequireAuthClient's auto-login.
+var requiredScopes = contract.RequiredOAuthScopes()
 
 // RequiredScopes returns the OAuth scopes gh-teacher requests beyond
 // gh's defaults. Exposed for the login command, which requests the same

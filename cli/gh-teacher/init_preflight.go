@@ -100,20 +100,24 @@ func runPreflight(client githubapi.Client, org string, tok tokenSource) prefligh
 	return res
 }
 
-// checkScopes confirms the token carries admin:org and workflow. It reads
-// the X-OAuth-Scopes header from GET /user (always present on a
-// classic-token request). A fine-grained PAT or an unknown auth type
-// returns no scope header; we can't prove scopes there, so we warn
-// rather than fail (the real operations still fail loudly later with
-// actionable messages). Returns the check plus the raw scope string and
-// the authenticated login (decoded from the same response so the
-// ownership check doesn't have to re-fetch /user).
+// checkScopes confirms the token carries the scopes gh-teacher needs
+// (githubapi.RequiredScopes()). It reads the X-OAuth-Scopes header from
+// GET /user (always present on a classic-token request) and checks each
+// required scope with validate.ScopeListSatisfies, which honors GitHub's
+// scope hierarchy — a token granted admin:org reports only admin:org in
+// the header (read:org is normalized away), and must still count as
+// having read:org. A fine-grained PAT or an unknown auth type returns no
+// scope header; we can't prove scopes there, so we warn rather than fail
+// (the real operations still fail loudly later with actionable
+// messages). Returns the check plus the raw scope string and the
+// authenticated login (decoded from the same response so the ownership
+// check doesn't have to re-fetch /user).
 func checkScopes(client githubapi.Client) (check preflightCheck, scopes, login string) {
 	c := preflightCheck{Name: "auth scopes"}
 	resp, err := client.Request(http.MethodGet, "user", nil)
 	if err != nil {
 		c.Status = preflightWarn
-		c.Detail = fmt.Sprintf("couldn't verify OAuth scopes (%v); proceeding — operations needing admin:org/workflow will fail with guidance if a scope is missing", err)
+		c.Detail = fmt.Sprintf("couldn't verify OAuth scopes (%v); proceeding — operations needing the classroom scopes will fail with guidance if a scope is missing", err)
 		return c, "", ""
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -124,12 +128,12 @@ func checkScopes(client githubapi.Client) (check preflightCheck, scopes, login s
 	scopes = resp.Header.Get("X-OAuth-Scopes")
 	if scopes == "" {
 		c.Status = preflightWarn
-		c.Detail = "no X-OAuth-Scopes header (fine-grained PAT or app token); can't verify admin:org/workflow up front"
+		c.Detail = "no X-OAuth-Scopes header (fine-grained PAT or app token); can't verify the classroom scopes up front"
 		return c, "", user.Login
 	}
 	var missing []string
 	for _, want := range githubapi.RequiredScopes() {
-		if !validate.ScopeListContains(scopes, want) {
+		if !validate.ScopeListSatisfies(scopes, want) {
 			missing = append(missing, want)
 		}
 	}
@@ -139,7 +143,7 @@ func checkScopes(client githubapi.Client) (check preflightCheck, scopes, login s
 		return c, scopes, user.Login
 	}
 	c.Status = preflightOK
-	c.Detail = "admin:org and workflow present"
+	c.Detail = fmt.Sprintf("%s present", strings.Join(githubapi.RequiredScopes(), ", "))
 	return c, scopes, user.Login
 }
 
