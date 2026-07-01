@@ -1,0 +1,91 @@
+# Live end-to-end suite for the Classroom 50 CLIs.
+#
+# Builds the real gh-teacher / gh-student binaries from this branch and
+# drives the teacher↔student happy path against a dedicated THROWAWAY
+# org (vars.E2E_ORG), asserting via the GitHub REST API. This is slow and
+# spends real Actions minutes IN THE TEST ORG, so it runs only on demand
+# and nightly — never on push/PR.
+#
+# Requires (repo secrets/vars on this repo; see test/e2e/README.md):
+#   vars.E2E_ORG            throwaway org the teacher PAT OWNS
+#   secrets.E2E_TEACHER_PAT classic PAT: admin:org, workflow, repo, delete_repo
+#   secrets.E2E_STUDENT_PAT classic PAT: read:org, repo, workflow (a separate bot)
+#   secrets.E2E_COLLECT_TOKEN fine-grained PAT: Contents=read, all org repos
+#   secrets.E2E_STUDENT2_PAT  (optional) enables the group flow (§7)
+#   vars.E2E_TEMPLATE         (optional) public is_template repo, owner/name
+
+name: e2e
+
+# DISABLED: the automatic (nightly) trigger is intentionally turned off until
+# the E2E action secrets/vars (E2E_ORG, E2E_TEACHER_PAT, E2E_STUDENT_PAT,
+# E2E_COLLECT_TOKEN, ...) are provisioned on this repo. Re-enable by
+# uncommenting the `schedule:` block below. `workflow_dispatch` is kept so the
+# suite can still be run manually once the secrets exist.
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "Override the test org (defaults to vars.E2E_ORG)"
+        required: false
+        type: string
+  # schedule:
+  #   - cron: "0 7 * * *" # nightly, 07:00 UTC
+
+# Serialize runs against a given org — the suite teardown-first wipes ALL
+# repos, so two concurrent runs would clobber each other. Do NOT cancel a
+# run in flight (that would leave the org dirty); queue instead.
+concurrency:
+  group: e2e-${{ github.event.inputs.org || vars.E2E_ORG }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cli-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65 # happy path ~15m; +group flow (E2E_STUDENT2_PAT) ~doubles it
+    env:
+      E2E_ORG: ${{ github.event.inputs.org || vars.E2E_ORG }}
+      E2E_TEMPLATE: ${{ vars.E2E_TEMPLATE }}
+      E2E_TEACHER_PAT: ${{ secrets.E2E_TEACHER_PAT }}
+      E2E_STUDENT_PAT: ${{ secrets.E2E_STUDENT_PAT }}
+      E2E_STUDENT2_PAT: ${{ secrets.E2E_STUDENT2_PAT }}
+      E2E_COLLECT_TOKEN: ${{ secrets.E2E_COLLECT_TOKEN }}
+      GOWORK: "off" # the e2e module is standalone; the CLIs build via their replace directives
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+
+      - name: Run the e2e suite
+        working-directory: test/e2e
+        run: go test -tags e2e -timeout 60m -v ./...
+
+      # Safety net: if the test process was hard-killed (e.g. timeout) the
+      # in-test teardown can't run, so best-effort wipe the throwaway org's
+      # repos here. (Guarded by the classroom50 marker so it never touches
+      # a non-Classroom org. The next run's teardown-first also self-heals.)
+      - name: Teardown safety net
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.E2E_TEACHER_PAT }}
+        run: |
+          set -u
+          org="${E2E_ORG}"
+          if [ -z "$org" ]; then echo "no org; skipping"; exit 0; fi
+          if ! gh api "repos/$org/classroom50" >/dev/null 2>&1; then
+            echo "no classroom50 marker in $org; nothing to tear down"; exit 0
+          fi
+          # Delete classroom50 last so an interrupted wipe stays re-runnable.
+          # --paginate so a dirty org with >100 repos is fully wiped (a single
+          # page would leave leftovers and make the next run flaky).
+          # Keep deleting past individual failures but emit a ::warning:: for each
+          # so a persistently-undeletable repo (ruleset/protection) is surfaced in
+          # the run summary rather than masked behind a bare `|| true`.
+          gh api --paginate "orgs/$org/repos?per_page=100" --jq '.[].name' \
+            | grep -v '^classroom50$' \
+            | while read -r r; do echo "deleting $org/$r"; gh repo delete "$org/$r" --yes || echo "::warning::failed to delete $org/$r (left behind)"; done
+          gh repo delete "$org/classroom50" --yes || echo "::warning::failed to delete $org/classroom50 (left behind)"
