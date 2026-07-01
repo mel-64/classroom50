@@ -17,9 +17,18 @@ export type GitHubRequestOptions = {
   headers?: Record<string, string>
 }
 
+// A per-response signal about the token's live state, reported to the provider
+// for the session/scope banner. Fires on every response (success and error)
+// before any throw.
+export type GitHubResponseSignal = {
+  status: number
+  scopes: string | null
+}
+
 export function createGitHubClient(args: {
   token: string
   apiBaseUrl?: string
+  onResponse?: (signal: GitHubResponseSignal) => void
 }): GitHubClient {
   const apiBaseUrl = args.apiBaseUrl ?? "https://api.github.com"
 
@@ -49,6 +58,16 @@ export function createGitHubClient(args: {
         options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
       cache: options.method === "GET" ? "no-store" : undefined,
+    })
+
+    // Report the token's live state to the provider before any throw, so the
+    // 401/403 revocation path still surfaces. `scopes` is the X-OAuth-Scopes
+    // header (`null` when absent, e.g. a fine-grained PAT — distinct from an
+    // empty grant); `status` lets the provider distinguish a dead token (401)
+    // from a healthy one.
+    args.onResponse?.({
+      status: res.status,
+      scopes: res.headers.get("x-oauth-scopes"),
     })
 
     const rateLimit = readGitHubRateLimitHeaders(res)

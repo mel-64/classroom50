@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router"
+import { ScopeWarningBanner } from "@/auth/ScopeWarningBanner"
 
 export const Route = createFileRoute("/_authed")({
   beforeLoad: ({ context, location }) => {
@@ -17,5 +18,10 @@ export const Route = createFileRoute("/_authed")({
 })
 
 function AuthedLayout() {
-  return <Outlet />
+  return (
+    <>
+      <ScopeWarningBanner />
+      <Outlet />
+    </>
+  )
 }
