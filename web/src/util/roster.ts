@@ -5,17 +5,12 @@ import type {
 } from "@/types/classroom"
 import type { InviteStatus } from "@/util/inviteStatus"
 import { normalizeStudentRow, splitName } from "@/api/mutations/students"
+import { studentKey } from "@/util/identity"
 
-// Re-exported so UI callers keep importing splitName from the roster util while
-// the single canonical implementation lives alongside the CSV write path.
-export { splitName }
-
-// Stable, position-independent per-row identity. Prefer github_id (survives a
-// rename), then username, then email. Rows always carry at least one
-// (parseStudentsCsv drops fully-empty rows), so no index fallback is needed.
-export function studentKey(student: Student): string {
-  return student.github_id || student.username || student.email
-}
+// Re-exported so UI callers keep importing splitName/studentKey from the roster
+// util while the single canonical implementations live elsewhere (splitName
+// alongside the CSV write path; studentKey in @/util/identity).
+export { splitName, studentKey }
 
 const ENROLLMENT_STATUSES: readonly EnrollmentStatus[] = [
   "invited",
@@ -50,18 +45,18 @@ export function removeFromRoster(current: Student[], key: string): Student[] {
   return current.filter((student) => studentKey(student) !== key)
 }
 
-// Flip reconciled rows to "enrolled" for the optimistic update. Username-bearing
-// rows match by username; email-only rows match by email. Already-enrolled rows
-// untouched.
+// Flip reconciled rows to "enrolled" for the optimistic update — a deliberate
+// STRICT SUBSET of the server's binding (the server already decided; a refetch
+// corrects anything we can't re-identify). Username rows match by username,
+// email-only rows by email under the same one-to-one guard. Enrolled rows untouched.
 export function applyReconciledToRoster(
   current: Student[],
   reconciled: { username: string; email: string }[],
 ): Student[] {
   if (reconciled.length === 0) return current
   // An email-only cached row may only claim a reconciled entry whose username
-  // does NOT already match another cached row. That guard reproduces the
-  // server's one-self-report-to-one-row binding and avoids flipping an unrelated
-  // email-only row that merely shares an address with a username-reconciled row.
+  // matches no other cached row — mirrors the server's one-to-one binding so we
+  // don't flip an unrelated row that merely shares an address.
   const cachedUsernames = new Set(
     current.map((s) => s.username.trim().toLowerCase()).filter(Boolean),
   )

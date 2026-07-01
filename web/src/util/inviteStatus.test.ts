@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { buildInviteStatusLookup } from "./inviteStatus"
+import {
+  buildInviteStatusLookup,
+  type OnboardingSelfReport,
+} from "./inviteStatus"
+import { emailHash } from "@/util/onboarding"
 import type { Student } from "@/types/classroom"
 import type { GitHubOrgInvitation, GitHubUser } from "@/hooks/github/types"
 
@@ -31,6 +35,20 @@ const invitation = (
   failed_at: null,
   failed_reason: null,
   ...overrides,
+})
+
+// Build a self-report with a precomputed email_hash (the reader computes this).
+const report = async (
+  overrides: Partial<OnboardingSelfReport> & {
+    email: string
+    github_id: string
+  },
+): Promise<OnboardingSelfReport> => ({
+  github_username: "octocat",
+  first_name: "Mona",
+  last_name: "Lisa",
+  ...overrides,
+  email_hash: overrides.email_hash ?? (await emailHash(overrides.email)),
 })
 
 describe("buildInviteStatusLookup", () => {
@@ -118,78 +136,121 @@ describe("buildInviteStatusLookup", () => {
     expect(lookup(emailRow).status).toBe("onboarding")
   })
 
-  it("classifies an invited row as 'ready' when an onboarding report matches by github_id", () => {
+  it("classifies an invited row as 'ready' when an onboarding report matches by github_id", async () => {
+    const row = student({ enrollment_status: "invited" })
     const lookup = buildInviteStatusLookup(
       [],
       [],
       [],
-      [
-        {
-          github_id: "583231",
-          email: "octocat@example.com",
-          github_username: "octocat",
-        },
-      ],
+      [await report({ github_id: "583231", email: "octocat@example.com" })],
+      [row],
     )
-    expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
-      "ready",
-    )
+    expect(lookup(row).status).toBe("ready")
   })
 
-  it("surfaces the matched onboarding self-report on a 'ready' row", () => {
-    const report = {
+  it("surfaces the matched onboarding self-report on a 'ready' row", async () => {
+    const rpt = await report({
       github_id: "583231",
       email: "octocat@example.com",
-      first_name: "Mona",
-      last_name: "Lisa",
-      github_username: "octocat",
-    }
-    const lookup = buildInviteStatusLookup([], [], [], [report])
-    const result = lookup(student({ enrollment_status: "invited" }))
+    })
+    const row = student({ enrollment_status: "invited" })
+    const lookup = buildInviteStatusLookup([], [], [], [rpt], [row])
+    const result = lookup(row)
     expect(result.status).toBe("ready")
-    expect(result.selfReport).toEqual(report)
+    expect(result.selfReport).toEqual(rpt)
   })
 
-  it("classifies an email-invited row (no github_id) as 'ready' when a report matches by email", () => {
+  it("classifies an email-invited row (no github_id) as 'ready' when a report matches by email", async () => {
+    const row = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+      email: "octocat@example.com",
+      email_hash: await emailHash("octocat@example.com"),
+    })
+    const lookup = buildInviteStatusLookup(
+      [],
+      [],
+      [],
+      // Report email differs only in case; email_hash normalizes to match.
+      [await report({ github_id: "999", email: "Octocat@Example.com" })],
+      [row],
+    )
+    expect(lookup(row).status).toBe("ready")
+  })
+
+  it("becomes 'ready' by invite_token even when github_id and email differ", async () => {
+    // The token is reconcile's strongest key; the badge must honor it too.
+    const token = "a".repeat(32)
+    const row = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+      email: "roster@example.com",
+      email_hash: await emailHash("roster@example.com"),
+      invite_token: token,
+    })
     const lookup = buildInviteStatusLookup(
       [],
       [],
       [],
       [
-        {
+        await report({
           github_id: "999",
-          email: "Octocat@Example.com",
-          github_username: "octocat",
-        },
+          email: "typo@example.com",
+          invite_token: token,
+        }),
       ],
+      [row],
     )
-    const emailRow = student({
+    expect(lookup(row).status).toBe("ready")
+  })
+
+  it("does NOT mark ambiguous email rows 'ready' (two rows share an email)", async () => {
+    // Two email-first rows with the same email: the shared matcher refuses to
+    // guess, so neither is 'ready' (matches reconcile's ambiguity handling).
+    const hash = await emailHash("shared@example.com")
+    const rowA = student({
       username: "",
       github_id: "",
       enrollment_status: "invited",
+      email: "shared@example.com",
+      email_hash: hash,
     })
-    expect(lookup(emailRow).status).toBe("ready")
-  })
-
-  it("stays 'onboarding' when no onboarding report matches the row", () => {
+    const rowB = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+      email: "shared@example.com",
+      email_hash: hash,
+    })
     const lookup = buildInviteStatusLookup(
       [],
       [],
       [],
-      [
-        {
-          github_id: "111",
-          email: "someone-else@example.com",
-          github_username: "someone-else",
-        },
-      ],
+      [await report({ github_id: "999", email: "shared@example.com" })],
+      [rowA, rowB],
     )
-    const emailRow = student({
+    expect(lookup(rowA).status).toBe("onboarding")
+    expect(lookup(rowB).status).toBe("onboarding")
+  })
+
+  it("stays 'onboarding' when no onboarding report matches the row", async () => {
+    const row = student({
       username: "",
       github_id: "",
       enrollment_status: "invited",
+      email: "octocat@example.com",
+      email_hash: await emailHash("octocat@example.com"),
     })
-    expect(lookup(emailRow).status).toBe("onboarding")
+    const lookup = buildInviteStatusLookup(
+      [],
+      [],
+      [],
+      [await report({ github_id: "111", email: "someone-else@example.com" })],
+      [row],
+    )
+    expect(lookup(row).status).toBe("onboarding")
   })
 
   it("shows a username-invited org member as onboarding until reconciled", () => {

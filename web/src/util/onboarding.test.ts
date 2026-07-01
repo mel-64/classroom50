@@ -3,14 +3,12 @@ import {
   ONBOARDING_REPO_PREFIX,
   emailHash,
   generateInviteToken,
-  generateOnboardingSuffix,
   isReconcilableRow,
   isValidEmail,
   isValidInviteToken,
   normalizeEmail,
   onboardingRepoName,
-  onboardingRepoPrefixForGithubId,
-  payloadEmailMatchesRow,
+  rowMatchesEmailHash,
 } from "./onboarding"
 
 describe("normalizeEmail", () => {
@@ -43,56 +41,22 @@ describe("emailHash", () => {
   })
 })
 
-describe("generateOnboardingSuffix", () => {
-  it("returns 32 lowercase hex chars (128 bits)", () => {
-    expect(generateOnboardingSuffix()).toMatch(/^[0-9a-f]{32}$/)
-  })
-
-  it("generates distinct suffixes", () => {
-    expect(generateOnboardingSuffix()).not.toBe(generateOnboardingSuffix())
-  })
-})
-
 describe("onboardingRepoName", () => {
-  it("composes prefix + github-id + random suffix", () => {
-    const suffix = generateOnboardingSuffix()
-    expect(onboardingRepoName("583231", suffix)).toBe(
-      `${ONBOARDING_REPO_PREFIX}583231-${suffix}`,
-    )
+  it("composes prefix + github-id", () => {
+    expect(onboardingRepoName("583231")).toBe(`${ONBOARDING_REPO_PREFIX}583231`)
   })
 
   it("accepts a numeric github id", () => {
-    const suffix = "a".repeat(32)
-    expect(onboardingRepoName(42, suffix)).toBe(
-      `${ONBOARDING_REPO_PREFIX}42-${suffix}`,
-    )
+    expect(onboardingRepoName(42)).toBe(`${ONBOARDING_REPO_PREFIX}42`)
   })
 
-  it("is unguessable + unique: two calls for one id differ by suffix", () => {
-    const a = onboardingRepoName("42", generateOnboardingSuffix())
-    const b = onboardingRepoName("42", generateOnboardingSuffix())
-    expect(a).not.toBe(b)
-    expect(a.startsWith(onboardingRepoPrefixForGithubId("42"))).toBe(true)
-    expect(b.startsWith(onboardingRepoPrefixForGithubId("42"))).toBe(true)
-  })
-})
-
-describe("onboardingRepoPrefixForGithubId", () => {
-  it("is the prefix every repo for that github-id starts with", () => {
-    const prefix = onboardingRepoPrefixForGithubId("583231")
-    expect(prefix).toBe(`${ONBOARDING_REPO_PREFIX}583231-`)
-    expect(
-      onboardingRepoName("583231", generateOnboardingSuffix()).startsWith(
-        prefix,
-      ),
-    ).toBe(true)
+  it("is deterministic: one id always yields the same name", () => {
+    expect(onboardingRepoName("42")).toBe(onboardingRepoName("42"))
+    expect(onboardingRepoName("42")).toBe(`${ONBOARDING_REPO_PREFIX}42`)
   })
 
-  it("does not match a different github-id's repo", () => {
-    const prefix = onboardingRepoPrefixForGithubId("583231")
-    expect(
-      onboardingRepoName("999", generateOnboardingSuffix()).startsWith(prefix),
-    ).toBe(false)
+  it("distinguishes ids that share a digit prefix", () => {
+    expect(onboardingRepoName("42")).not.toBe(onboardingRepoName("420"))
   })
 })
 
@@ -146,31 +110,43 @@ describe("isReconcilableRow", () => {
   })
 })
 
-describe("payloadEmailMatchesRow (hijack guard / email fallback)", () => {
+describe("rowMatchesEmailHash (hijack guard / email fallback)", () => {
   it("accepts a payload email that hashes to the row's email_hash", async () => {
     const email = "victim@uni.edu"
     const hash = await emailHash(email)
-    expect(await payloadEmailMatchesRow(email, { email_hash: hash })).toBe(true)
+    expect(rowMatchesEmailHash({ email_hash: hash }, email, hash)).toBe(true)
   })
 
   it("rejects a self-report for a DIFFERENT email than the invited row", async () => {
     const invitedHash = await emailHash("victim@uni.edu")
+    const attackerHash = await emailHash("attacker@evil.com")
     expect(
-      await payloadEmailMatchesRow("attacker@evil.com", {
-        email_hash: invitedHash,
-      }),
+      rowMatchesEmailHash(
+        { email_hash: invitedHash },
+        "attacker@evil.com",
+        attackerHash,
+      ),
     ).toBe(false)
   })
 
   it("matches case-insensitively against a row that only has email", async () => {
+    const payload = "Victim@Uni.edu"
     expect(
-      await payloadEmailMatchesRow("Victim@Uni.edu", {
-        email: "victim@uni.edu",
-      }),
+      rowMatchesEmailHash(
+        { email: "victim@uni.edu" },
+        payload,
+        await emailHash(payload),
+      ),
     ).toBe(true)
   })
 
   it("falls through (true) for a github_id row with no email on file", async () => {
-    expect(await payloadEmailMatchesRow("anything@uni.edu", {})).toBe(true)
+    expect(
+      rowMatchesEmailHash(
+        {},
+        "anything@uni.edu",
+        await emailHash("anything@uni.edu"),
+      ),
+    ).toBe(true)
   })
 })

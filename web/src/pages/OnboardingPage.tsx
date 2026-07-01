@@ -6,18 +6,15 @@ import {
   UserPlus,
 } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
-import { Link, useParams, useSearch } from "@tanstack/react-router"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { Link, useParams, useSearch, useRouter } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useRef, useState } from "react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
-import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { submitOnboarding } from "@/api/mutations/onboarding"
-import {
-  hasActiveOnboardingForClassroom,
-  isTeamMember,
-} from "@/hooks/github/queries"
+import { useOnboardingState } from "@/hooks/onboarding/useOnboardingState"
+import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { isValidEmail, isValidInviteToken } from "@/util/onboarding"
 
 const OnboardNavbar = () => (
@@ -91,11 +88,13 @@ const OnboardingStatus = ({
   title,
   message,
   tone = "success",
+  action,
 }: {
   classroom?: string
   title: string
   message: string
   tone?: "success" | "info"
+  action?: React.ReactNode
 }) => {
   const toneClasses =
     tone === "success"
@@ -122,6 +121,7 @@ const OnboardingStatus = ({
               <p className="text-sm text-base-content/70">{message}</p>
             </div>
           </div>
+          {action}
         </div>
       </OnboardCard>
     </div>
@@ -131,8 +131,17 @@ const OnboardingStatus = ({
 const OnboardingPage = () => {
   const { org, classroom } = useParams({ strict: false })
   // Untrusted: only seeds the claimed-email field; the session authorizes.
-  const search = useSearch({ strict: false }) as { email?: string; t?: string }
+  const search = useSearch({ strict: false }) as {
+    email?: string
+    t?: string
+    returnTo?: string
+  }
   const prefilledEmail = typeof search.email === "string" ? search.email : ""
+  // Where to send the student once they've onboarded AND become an active org
+  // member (set when the accept page bounced them here). The route already
+  // validated it's a same-origin relative path.
+  const returnTo =
+    typeof search.returnTo === "string" ? search.returnTo : undefined
   // Secure-link token: reconcile's strongest match key. Absent/garbage degrades
   // to the classroom-wide flow (reconcile then matches by github_id, else email).
   const inviteToken =
@@ -143,37 +152,9 @@ const OnboardingPage = () => {
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
   const client = useGitHubClient()
+  const queryClient = useQueryClient()
 
   const { user } = useGithubAuth()
-  const { data: orgMembership, isLoading: loadingMembership } =
-    useGetOwnOrgMembership(org)
-
-  // Repo-based "submitted" detection that survives reload: an onboarding repo
-  // for this classroom exists (awaiting the teacher's reconcile).
-  const { data: hasOnboarded, isLoading: loadingOnboarded } = useQuery({
-    queryKey: ["github", "onboarding-progress", org, classroom, user?.id],
-    queryFn: () =>
-      hasActiveOnboardingForClassroom(
-        client,
-        org ?? "",
-        user?.id ?? "",
-        classroom ?? "",
-      ),
-    enabled: Boolean(org && classroom && user?.id && orgMembership),
-  })
-
-  // "Has access" signal: active classroom-team membership (means "can work
-  // here", NOT fully enrolled). Used to swap the form for a "you're all set" page.
-  //
-  // Slug caveat: derived as `classroom50-<classroom>` since the authoritative
-  // slug lives in a config repo students can't read. On a name collision it
-  // degrades safely to the form (re-submit is idempotent), never false access.
-  const teamSlug = `classroom50-${classroom}`
-  const { data: onClassroomTeam, isLoading: loadingTeam } = useQuery({
-    queryKey: ["github", "team-membership", org, teamSlug, user?.login],
-    queryFn: () => isTeamMember(client, org ?? "", teamSlug, user?.login ?? ""),
-    enabled: Boolean(org && user?.login && orgMembership),
-  })
 
   const emailValid = isValidEmail(email)
   const nameValid = firstName.trim().length > 0 && lastName.trim().length > 0
@@ -189,13 +170,76 @@ const OnboardingPage = () => {
         last_name: lastName.trim(),
         invite_token: inviteToken,
       }),
+    onSuccess: () => {
+      // submitOnboarding accepted the pending invite, so the cached membership
+      // (shared with the accept page) is stale. Invalidate so both this page's
+      // redirect gate and the accept page re-read "active" — else they disagree
+      // and the accept page bounces the student back here (loop).
+      void queryClient.invalidateQueries({
+        queryKey: ["github", "memberships", "orgs", org],
+      })
+    },
   })
   const runOnboard = useSafeSubmit()
 
-  if (
-    loadingMembership ||
-    (orgMembership && (loadingOnboarded || loadingTeam))
-  ) {
+  const state = useOnboardingState({
+    org,
+    classroom,
+    justSubmitted: onboardMutation.isSuccess,
+  })
+
+  const router = useRouter()
+
+  // Round-trip: once the student is an active org member, send them back to the
+  // accept link. Reads the SAME membership query the accept page uses (freshened
+  // above) so the two can't diverge into a loop; wait for "active" before going.
+  const { data: orgMembership } = useGetOwnOrgMembership(org)
+  const becameActiveMember = orgMembership?.state === "active"
+
+  // Armed once the student has submitted with a returnTo.
+  const returningToAssignment = Boolean(returnTo) && onboardMutation.isSuccess
+
+  // Poll membership to flip active: submitOnboarding accepts the invite but
+  // GitHub can lag (or the PATCH failed transiently), and the shared query
+  // wouldn't otherwise re-read. Bounded, then the pending render shows a manual
+  // link so a lag can't strand the student on an endless spinner.
+  const MAX_MEMBERSHIP_POLLS = 6
+  const [membershipPolls, setMembershipPolls] = useState(0)
+  useQuery({
+    queryKey: ["github", "onboarding-membership-poll", org, user?.id],
+    queryFn: async () => {
+      setMembershipPolls((n) => n + 1)
+      // Re-read the shared membership query so the gate below (and the accept
+      // page) see the fresh value.
+      await queryClient.invalidateQueries({
+        queryKey: ["github", "memberships", "orgs", org],
+      })
+      return membershipPolls
+    },
+    enabled:
+      returningToAssignment &&
+      !becameActiveMember &&
+      membershipPolls < MAX_MEMBERSHIP_POLLS,
+    refetchInterval: 1500,
+  })
+  const pollExhausted =
+    returningToAssignment &&
+    !becameActiveMember &&
+    membershipPolls >= MAX_MEMBERSHIP_POLLS
+
+  // One-shot latch: history.push stacks entries, so fire once when the gate
+  // first opens rather than on every re-render.
+  const navigatedRef = useRef(false)
+  useEffect(() => {
+    if (returningToAssignment && becameActiveMember && !navigatedRef.current) {
+      navigatedRef.current = true
+      // Raw internal path: preserves the accept link's ?k= verbatim; the router
+      // applies the basepath.
+      router.history.push(returnTo!)
+    }
+  }, [returningToAssignment, becameActiveMember, returnTo, router])
+
+  if (state === "loading") {
     return (
       <div className="min-h-screen bg-base-100">
         <OnboardNavbar />
@@ -206,28 +250,46 @@ const OnboardingPage = () => {
     )
   }
 
-  // Gate on having a membership record at all. A "pending" invite still lets
-  // through: submitOnboarding self-heals by accepting the invite before creating
-  // the repo. Only a missing membership (query 404s) means never invited.
-  if (!orgMembership) {
+  // No membership record at all: never invited. (A pending invite is not
+  // "notInvited" — submitOnboarding self-heals by accepting it first.)
+  if (state === "notInvited") {
     return <NotOrgMember org={org} classroom={classroom} />
   }
 
-  // Just-submitted (this session) or an existing onboarding repo: awaiting
-  // reconcile. Show it before the form.
-  if (onboardMutation.isSuccess || hasOnboarded) {
+  // Just-submitted or an existing onboarding repo: awaiting reconcile. When
+  // arriving with a returnTo, show a "taking you back" message (the effect above
+  // bounces them once membership goes active).
+  if (state === "pendingConfirmation") {
+    const returning = returningToAssignment
     return (
       <OnboardingStatus
         classroom={classroom}
         tone="info"
-        title="Pending confirmation"
-        message="Your details are in — your instructor just needs to confirm your enrollment. There's nothing more for you to do here."
+        title={returning ? "You're enrolled" : "Pending confirmation"}
+        message={
+          returning
+            ? pollExhausted
+              ? "You're enrolled. If you're not redirected automatically, continue to your assignment below."
+              : "Taking you back to your assignment…"
+            : "Your details are in — your instructor just needs to confirm your enrollment. There's nothing more for you to do here."
+        }
+        action={
+          returning && pollExhausted && returnTo ? (
+            <button
+              type="button"
+              className="btn btn-primary w-full bg-[#4e80ee]"
+              onClick={() => router.history.push(returnTo)}
+            >
+              Continue to your assignment
+            </button>
+          ) : undefined
+        }
       />
     )
   }
 
   // Already has classroom access: show "you're all set" instead of the form.
-  if (onClassroomTeam) {
+  if (state === "allSet") {
     return (
       <OnboardingStatus
         classroom={classroom}
@@ -248,7 +310,11 @@ const OnboardingPage = () => {
               <Mail className="size-4" />
               Onboarding
             </span>
-            <h1 className="mt-6 text-2xl font-bold">Confirm your enrollment</h1>
+            <h1 className="mt-6 text-2xl font-bold">
+              {returnTo
+                ? "Confirm your enrollment before accepting the assignment"
+                : "Confirm your enrollment"}
+            </h1>
             <p className="mt-2 text-base text-base-content/70">
               This links your GitHub account to your instructor&apos;s class
               roster for{" "}

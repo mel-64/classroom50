@@ -12,7 +12,7 @@ import {
 import GitHub from "@/assets/github.svg?react"
 import GitHubWhite from "@/assets/github_white.svg?react"
 import type { GitHubUser } from "@/hooks/github/types"
-import { Link, useParams, useSearch } from "@tanstack/react-router"
+import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
@@ -501,6 +501,24 @@ const AcceptAssignmentPage = () => {
 
   if (!orgInvite) {
     return <NotOrgMember classroom={classroom} user={user} org={org} />
+  }
+
+  // Pending invitee opened the accept link before onboarding — accepting would
+  // fail (a pending invitee can't create their repo). Send them to onboarding
+  // first (submitOnboarding accepts the pending invite), passing the current
+  // accept URL as returnTo so they're bounced straight back once active.
+  if (orgInvite.state === "pending" && org && classroom && assignment) {
+    const acceptPath =
+      `/${org}/${classroom}/assignments/${assignment}/accept` +
+      (secret ? `?k=${encodeURIComponent(secret)}` : "")
+    return (
+      <Navigate
+        to="/$org/$classroom/onboard"
+        params={{ org, classroom }}
+        search={{ returnTo: acceptPath }}
+        replace
+      />
+    )
   }
 
   if (!assignmentData) {

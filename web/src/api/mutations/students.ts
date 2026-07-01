@@ -10,6 +10,7 @@ import {
   ensureOrgMembership,
   getErrorMessage,
   getOrgMembershipState,
+  isActiveMember,
   removeOrgMembership,
   removeUserFromTeam,
   updateRef,
@@ -25,6 +26,7 @@ import {
   getRawFile,
   getRepoFile,
   getUser,
+  getUserById,
   listClassroomDirs,
   listOnboardingRepos,
   ONBOARDING_READ_CONCURRENCY,
@@ -33,16 +35,17 @@ import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { isEnrolledRow, isSameGitHubUser } from "@/util/students"
+import { studentKey } from "@/util/identity"
 import {
   emailHash,
   generateInviteToken,
   isReconcilableRow,
-  isValidInviteToken,
   normalizeEmail,
-  onboardingRepoPrefixForGithubId,
+  onboardingRepoName,
   ONBOARDING_YAML_PATH,
   rowMatchesEmailHash,
 } from "@/util/onboarding"
+import { matchReportToRow } from "@/util/reconcileMatch"
 import { parseOnboardingYaml } from "@/util/yaml"
 import { mapWithConcurrency } from "@/util/concurrency"
 import {
@@ -86,6 +89,29 @@ export type AddStudentToClassroomResult = CreateClassroomResult & {
   student: StudentCsvRow
   // Set when the row committed but the follow-up team add failed (non-fatal).
   teamWarning?: string
+}
+
+// Best-effort single-user team add (enroll/mark/match paths). Returns the error
+// detail on failure so each caller phrases its own warning; team membership is
+// only read access to private templates and is retryable, so it never fails the
+// enclosing mutation. `context` is a server-log label.
+async function tryAddUserToTeam(
+  client: GitHubClient,
+  input: { org: string; teamSlug: string; username: string },
+  context: string,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  try {
+    await addUserToTeam(client, {
+      org: input.org,
+      teamSlug: input.teamSlug,
+      username: input.username,
+      role: "member",
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error(`team add failed (${context}):`, err)
+    return { ok: false, detail: getErrorMessage(err) }
+  }
 }
 
 export const STUDENT_CSV_FIELDS = [
@@ -412,21 +438,27 @@ export async function addEmailInviteToClassroomWithConflictRetry(
   return withGitConflictRetry(() => addEmailInviteToClassroom(client, input))
 }
 
-// Resolve a bare email to a GitHub identity by scanning the org's OTHER
-// classroom rosters (GitHub has no email->user lookup). Returns the first
-// enrolled row with a matching email, or null. `ref` pins all reads to one commit.
+// Resolve a bare email to a GitHub github_id by scanning the org's OTHER
+// classroom rosters (GitHub has no email->user lookup). Returns the immutable id
+// (callers derive the current login — stored usernames go stale). 2+ DISTINCT
+// ids for one email -> "ambiguous" (never guess); no match -> null. `ref` pins
+// all reads to one commit.
 async function resolveStudentIdentityByEmail(
   client: GitHubClient,
   org: string,
   email: string,
   excludeClassroom: string,
   ref: string,
-): Promise<{
-  username: string
-  github_id: string
-  first_name: string
-  last_name: string
-} | null> {
+): Promise<
+  | {
+      status: "resolved"
+      github_id: string
+      first_name: string
+      last_name: string
+    }
+  | { status: "ambiguous" }
+  | null
+> {
   const targetHash = await emailHash(email)
 
   let dirs
@@ -451,30 +483,38 @@ async function resolveStudentIdentityByEmail(
           ref,
         })
       } catch {
-        return null // no roster / unreadable — skip
+        return [] // no roster / unreadable — skip
       }
       const rows = parseStudentsCsv(csv)
-      const hit = rows.find(
-        (row) =>
-          // A resolved identity matched by email_hash (the && guards against
-          // rowMatchesEmailHash's keyless-true fallthrough).
-          Boolean(row.username) &&
-          (Boolean(row.email_hash) || Boolean(row.email.trim())) &&
-          rowMatchesEmailHash(row, email, targetHash),
-      )
-      // Carry the matched row's name (not section — that's classroom-specific).
-      return hit
-        ? {
-            username: hit.username,
-            github_id: hit.github_id,
-            first_name: hit.first_name,
-            last_name: hit.last_name,
-          }
-        : null
+      // Match by email on rows with a real id. The email_hash/email guard blocks
+      // rowMatchesEmailHash's keyless-true fallthrough; requiring github_id keys
+      // the result on the immutable id.
+      return rows
+        .filter(
+          (row) =>
+            Boolean(row.github_id.trim()) &&
+            (Boolean(row.email_hash) || Boolean(row.email.trim())) &&
+            rowMatchesEmailHash(row, email, targetHash),
+        )
+        .map((row) => ({
+          github_id: row.github_id.trim(),
+          first_name: row.first_name,
+          last_name: row.last_name,
+        }))
     },
   )
 
-  return matches.find((m) => m !== null) ?? null
+  const hits = matches.flat()
+  const distinctIds = new Set(hits.map((h) => h.github_id))
+  if (distinctIds.size === 0) return null
+  if (distinctIds.size > 1) return { status: "ambiguous" }
+  const first = hits[0]
+  return {
+    status: "resolved",
+    github_id: first.github_id,
+    first_name: first.first_name,
+    last_name: first.last_name,
+  }
 }
 
 // Enroll an email-only row (matched by email, since it has no username yet),
@@ -603,21 +643,26 @@ export async function inviteStudentByEmail(
         result.previousCommitSha,
       ).catch(() => null)
 
+      // Derive the current login from the id (stored usernames go stale), then
+      // re-check active membership before binding. Ambiguous (2+ ids) is treated
+      // like unidentifiable — keep the stub for the teacher's manual match.
+      const resolvedLogin =
+        resolved?.status === "resolved"
+          ? await getUserById(client, resolved.github_id)
+              .then((u) => u.login)
+              .catch(() => "")
+          : ""
       const stillActive =
-        Boolean(resolved?.username) &&
-        (await getOrgMembershipState(
-          client,
-          input.org,
-          resolved!.username,
-        ).catch(() => null)) === "active"
+        Boolean(resolvedLogin) &&
+        (await isActiveMember(client, input.org, resolvedLogin))
 
-      if (resolved && stillActive) {
+      if (resolved?.status === "resolved" && resolvedLogin && stillActive) {
         try {
           await enrollEmailRowWithResolvedIdentity(client, {
             org: input.org,
             classroom: input.classroom,
             email: result.student.email,
-            username: resolved.username,
+            username: resolvedLogin,
             github_id: resolved.github_id,
             first_name: resolved.first_name,
             last_name: resolved.last_name,
@@ -626,7 +671,7 @@ export async function inviteStudentByEmail(
             ...result,
             student: {
               ...result.student,
-              username: resolved.username,
+              username: resolvedLogin,
               github_id: resolved.github_id,
               first_name:
                 result.student.first_name?.trim() || resolved.first_name || "",
@@ -642,8 +687,9 @@ export async function inviteStudentByEmail(
           )
           // Fall through to the generic warning below (row stays as a stub).
         }
-      } else if (!resolved) {
-        // Member but unidentifiable from any roster. Keep the invited email row
+      } else if (!resolved || resolved.status === "ambiguous") {
+        // Member but unidentifiable from any roster (no match, or an ambiguous
+        // email mapping to multiple students). Keep the invited email row
         // (don't drop it): the student is in the org without onboarding, and the
         // email->login link is unrecoverable post-accept, so the teacher must
         // complete the match by hand (the "Match account" affordance) or delete
@@ -701,10 +747,11 @@ export type ReconcileOnboardingResult = {
 
 // Teacher-side reconciliation: read each onboarding repo's self-report YAML,
 // verify the writer's GitHub-attested identity, and fold it into the matching
-// roster row. Repo names carry an unrecomputable random suffix, so matching is
-// driven entirely by payload contents (invite_token, then github_id, then
-// email) — never the repo name. All updates land in ONE students.csv commit
-// (withGitConflictRetry) so a batch reconcile is a single race window, not N.
+// roster row. The repo name is derivable (onboarding-<github-id>) and attests
+// nothing, so matching is driven entirely by payload contents (invite_token,
+// then github_id, then email) — never the repo name. All updates land in ONE
+// students.csv commit (withGitConflictRetry) so a batch reconcile is a single
+// race window, not N.
 export async function reconcileOnboarding(
   client: GitHubClient,
   input: { org: string; classroom: string },
@@ -826,19 +873,20 @@ export async function reconcileOnboarding(
       continue
     }
 
-    // Only this classroom's reports are reconciled; the YAML carries the
-    // classroom (the org-level repo name does not), so a student in multiple
-    // classrooms has a distinct repo per onboarding.
+    // Only this classroom's reports (the YAML carries the classroom; the repo is
+    // one per-student-per-org). A student joining a SECOND classroom is already a
+    // member, so that path short-circuits to a direct roster add + the
+    // membership pass below — no fresh self-report needed.
     if (payload.classroom !== classroom) {
       continue
     }
 
-    // Trust the payload identity only if the account that wrote the report IS
-    // the account it claims. The commit author/committer id is GitHub-attested;
-    // this is what makes the unguessable repo name safe — a squatter can't forge
-    // another student's identity. Distinguish a transient read failure
-    // (retryable) from a genuine identity mismatch (a security signal): on a
-    // transient failure we skip without asserting forgery.
+    // Trust the payload only if the commit author/committer id matches the
+    // claimed github_id — this keeps a guessable repo name safe for the honest
+    // flow (a student's own commit binds only their id). Accepted residual risk:
+    // author.id is forgeable, but the create->commit->demote window is small and
+    // students aren't expected to pre-create repos. Skip a transient read
+    // failure (retryable) without asserting a mismatch.
     let authorIds: number[]
     try {
       authorIds = await getFileCommitAuthorIds(
@@ -871,70 +919,54 @@ export async function reconcileOnboarding(
       continue
     }
 
-    // Match the verified report back to a row, strongest key first:
-    //   1. invite_token  — unguessable, issued per row; present only if the
-    //      student used their secure link.
-    //   2. github_id     — immutable; binds a username-invited row.
-    //   3. email         — last resort (rowMatchesEmailHash); the email-first
-    //      path when the student onboards via the classroom-wide link.
-    // A row is matched at most once (claimedRows), so a report can't steal a row
-    // another took; merely HAVING a token/github_id column doesn't exclude a row
-    // from the email path (every row now carries a token).
-    const token =
-      payload.invite_token && isValidInviteToken(payload.invite_token)
-        ? payload.invite_token.trim()
-        : undefined
+    // Match the verified report back to a row via the shared matcher (the same
+    // one the UI "ready" badge uses), strongest key first: invite_token, then
+    // github_id, then email. A row is matched at most once (claimedRows), so a
+    // report can't steal a row another took. The email pass is the last resort
+    // for a genuinely email-first row (no token, no github_id) onboarded via the
+    // classroom-wide link.
+    // SECURITY: the claimed email is attacker-supplied (only github_id is
+    // GitHub-attested), so the email path is accepted residual risk for students
+    // who skip their secure link; token/github_id matches are unaffected.
+    // Hash the payload email once so matching N rows doesn't re-hash it N times.
+    const payloadEmailHash = await emailHash(payload.email)
+    const matchResult = matchReportToRow(
+      {
+        invite_token: payload.invite_token,
+        github_id: payloadId,
+        email: payload.email,
+        emailHash: payloadEmailHash,
+      },
+      targets,
+      {
+        isClaimed: (row) => claimedRows.has(row),
+        // Stable email key for the commit phase: the row's email_hash, or a
+        // placeholder derived below (the row always carries one here, since the
+        // email pass requires an email key).
+        emailKeyOf: (row) => row.email_hash || "",
+      },
+    )
 
     let matched:
       | { row: StudentCsvRow; by: Resolved["matchBy"]; value: string }
       | undefined
 
-    if (token) {
-      const row = targets.find(
-        (r) => !claimedRows.has(r) && r.invite_token === token,
-      )
-      if (row) matched = { row, by: "token", value: token }
+    if (matchResult && "ambiguous" in matchResult) {
+      result.unmatched.push({
+        repo,
+        reason: `self-report email (${payload.email}) matches ${matchResult.count} roster rows; resolve the duplicate emails or send the student their secure link`,
+      })
+      continue
     }
-    if (!matched) {
-      const row = targets.find(
-        (r) => !claimedRows.has(r) && r.github_id === payloadId,
-      )
-      if (row) matched = { row, by: "github_id", value: payloadId }
-    }
-    if (!matched) {
-      // Email is the last-resort key, for a genuinely email-first row (no token
-      // and no github_id) onboarded via the classroom-wide link. Constraints:
-      //  - Row must carry an email key (email_hash or email); else
-      //    rowMatchesEmailHash returns true by fallthrough and an unrelated
-      //    report binds to a keyless row.
-      //  - 2+ unclaimed rows matching the same email is ambiguous -> needsAttention.
-      // SECURITY: the claimed email is attacker-supplied (only github_id is
-      // GitHub-attested), so this is accepted residual risk for students who
-      // skip their secure link; token/github_id matches are unaffected.
-      // Hash the payload email once so matching N rows doesn't re-hash it N times.
-      const payloadEmailHash = await emailHash(payload.email)
-      const emailCandidates: StudentCsvRow[] = []
-      for (const row of targets) {
-        if (claimedRows.has(row)) continue
-        if (row.invite_token || row.github_id) continue
-        if (!row.email_hash && !row.email.trim()) continue
-        if (rowMatchesEmailHash(row, payload.email, payloadEmailHash)) {
-          emailCandidates.push(row)
-        }
-      }
-      if (emailCandidates.length === 1) {
-        const row = emailCandidates[0]
-        // Stable email key for the commit phase: the row's email_hash, or one
-        // derived from its email so re-matching after the CSV re-read agrees.
-        const emailKey = row.email_hash || (await emailHash(row.email))
-        matched = { row, by: "email", value: emailKey }
-      } else if (emailCandidates.length > 1) {
-        result.unmatched.push({
-          repo,
-          reason: `self-report email (${payload.email}) matches ${emailCandidates.length} roster rows; resolve the duplicate emails or send the student their secure link`,
-        })
-        continue
-      }
+    if (matchResult) {
+      // For an email match, the stable key must survive the post-commit CSV
+      // re-read: use the row's email_hash, or derive one from its email so the
+      // re-match agrees.
+      const value =
+        matchResult.by === "email" && !matchResult.value
+          ? await emailHash(matchResult.row.email)
+          : matchResult.value
+      matched = { row: matchResult.row, by: matchResult.by, value }
     }
 
     if (!matched) {
@@ -979,19 +1011,12 @@ export async function reconcileOnboarding(
   const membershipChecks = await mapWithConcurrency(
     membershipCandidates,
     ONBOARDING_READ_CONCURRENCY,
-    async (row) => {
-      try {
-        const state = await getOrgMembershipState(
-          client,
-          org,
-          row.username.trim(),
-        )
-        return { row, active: state === "active" }
-      } catch {
-        // Transient failure: leave the row pending; a later reconcile retries.
-        return { row, active: false }
-      }
-    },
+    async (row) => ({
+      row,
+      // Transient failure resolves to false, leaving the row pending; a later
+      // reconcile retries.
+      active: await isActiveMember(client, org, row.username.trim()),
+    }),
   )
   for (const { row, active } of membershipChecks) {
     if (!active || claimedRows.has(row)) continue
@@ -1066,8 +1091,9 @@ export async function reconcileOnboarding(
         continue
       }
 
-      // Accepted (or expired): try to recover the identity from the teacher's
-      // other rosters, then confirm it's an active member before binding.
+      // Accepted (or expired): recover the identity from other rosters by id,
+      // derive the current login (stored usernames go stale), re-check active
+      // membership before binding. Ambiguous (2+ ids) -> needsMatch (never guess).
       const resolvedIdentity = await resolveStudentIdentityByEmail(
         client,
         org,
@@ -1075,22 +1101,26 @@ export async function reconcileOnboarding(
         classroom,
         headRef.object.sha,
       ).catch(() => null)
-      let active = false
-      if (resolvedIdentity?.username) {
-        try {
-          active =
-            (await getOrgMembershipState(
-              client,
-              org,
-              resolvedIdentity.username,
-            )) === "active"
-        } catch {
-          active = false
-        }
+
+      if (resolvedIdentity?.status === "ambiguous") {
+        result.needsMatch.push({ email: row.email })
+        continue
       }
 
-      if (resolvedIdentity && active) {
-        const githubId = resolvedIdentity.github_id.trim()
+      // Derive the current login from the authoritative id; the roster's stored
+      // username may be outdated after a GitHub rename.
+      let resolvedLogin = ""
+      if (resolvedIdentity?.status === "resolved") {
+        resolvedLogin = await getUserById(client, resolvedIdentity.github_id)
+          .then((u) => u.login)
+          .catch(() => "")
+      }
+      const active = resolvedLogin
+        ? await isActiveMember(client, org, resolvedLogin)
+        : false
+
+      if (resolvedIdentity?.status === "resolved" && resolvedLogin && active) {
+        const githubId = resolvedIdentity.github_id
         if (githubId && claimedGithubIds.has(githubId)) {
           // Another row already bound this account; surface for the teacher.
           result.needsMatch.push({ email: row.email })
@@ -1100,7 +1130,7 @@ export async function reconcileOnboarding(
         claimedRows.add(row)
         resolved.push({
           repo: "",
-          username: resolvedIdentity.username,
+          username: resolvedLogin,
           github_id: githubId,
           email: row.email,
           first_name: row.first_name || resolvedIdentity.first_name,
@@ -1112,7 +1142,7 @@ export async function reconcileOnboarding(
         })
         result.reconciled.push({
           email: row.email,
-          username: resolvedIdentity.username,
+          username: resolvedLogin,
         })
         continue
       }
@@ -1264,17 +1294,15 @@ export async function reconcileOnboarding(
 
   if (teamSlug) {
     for (const { username } of committed) {
-      try {
-        await addUserToTeam(client, {
-          org,
-          teamSlug,
-          username,
-          role: "member",
-        })
-      } catch (err) {
+      const added = await tryAddUserToTeam(
+        client,
+        { org, teamSlug, username },
+        "reconcile team add",
+      )
+      if (!added.ok) {
         result.unmatched.push({
           repo: `(team:${username})`,
-          reason: `reconciled, but adding to the classroom team failed (${getErrorMessage(err)})`,
+          reason: `reconciled, but adding to the classroom team failed (${added.detail})`,
         })
       }
     }
@@ -1363,17 +1391,8 @@ export async function enrollStudentInClassroom(
   // Already an active member -> write the row enrolled directly (no invite is
   // sent, so reconcile would never confirm them). Best-effort: a failed read
   // falls back to the normal "invited" path (#65).
-  let alreadyMember = false
   const normalizedUsername = input.username.trim()
-  if (normalizedUsername) {
-    try {
-      alreadyMember =
-        (await getOrgMembershipState(client, org, normalizedUsername)) ===
-        "active"
-    } catch {
-      alreadyMember = false
-    }
-  }
+  const alreadyMember = await isActiveMember(client, org, normalizedUsername)
 
   const result = await addStudentToClassroomWithConflictRetry(client, {
     ...input,
@@ -1411,20 +1430,24 @@ export async function enrollStudentInClassroom(
 
   // Fallback team-add: covers an already-org-member student (where the invite
   // above was a no-op carrying no team_ids). Idempotent.
+  let enrollTeamFailed: string | undefined
   try {
     const teamSlug = (await teamPromise).slug
-    await addUserToTeam(client, {
-      org,
-      teamSlug,
-      username: result.student.username,
-      role: "member",
-    })
+    const added = await tryAddUserToTeam(
+      client,
+      { org, teamSlug, username: result.student.username },
+      "student enrolled",
+    )
+    if (!added.ok) enrollTeamFailed = added.detail
   } catch (err) {
-    console.error("team add failed (student enrolled):", err)
-    const detail = getErrorMessage(err)
+    // Slug resolution failed (not the add itself).
+    console.error("team resolve failed (student enrolled):", err)
+    enrollTeamFailed = getErrorMessage(err)
+  }
+  if (enrollTeamFailed) {
     warnings.push(
       `${result.student.username} was added to the roster, but adding them to ` +
-        `the classroom team failed (${detail}); they won't have read on private ` +
+        `the classroom team failed (${enrollTeamFailed}); they won't have read on private ` +
         `templates until it's retried.`,
     )
   }
@@ -1543,15 +1566,24 @@ export async function markStudentEnrolledWithConflictRetry(
   try {
     const team = await resolveClassroomTeam(client, input.org, input.classroom)
     if (team.slug) {
-      await addUserToTeam(client, {
-        org: input.org,
-        teamSlug: team.slug,
-        username: result.student.username,
-        role: "member",
-      })
+      const added = await tryAddUserToTeam(
+        client,
+        {
+          org: input.org,
+          teamSlug: team.slug,
+          username: result.student.username,
+        },
+        "mark enrolled",
+      )
+      if (!added.ok) {
+        teamWarning =
+          `${result.student.username} was marked enrolled, but adding them to the ` +
+          `classroom team failed; they won't have read on private templates until ` +
+          `it's retried.`
+      }
     }
   } catch (err) {
-    console.error("team add failed (mark enrolled):", err)
+    console.error("team resolve failed (mark enrolled):", err)
     teamWarning =
       `${result.student.username} was marked enrolled, but adding them to the ` +
       `classroom team failed; they won't have read on private templates until ` +
@@ -1667,15 +1699,24 @@ export async function matchStudentToAccountWithConflictRetry(
   try {
     const team = await resolveClassroomTeam(client, input.org, input.classroom)
     if (team.slug) {
-      await addUserToTeam(client, {
-        org: input.org,
-        teamSlug: team.slug,
-        username: result.student.username,
-        role: "member",
-      })
+      const added = await tryAddUserToTeam(
+        client,
+        {
+          org: input.org,
+          teamSlug: team.slug,
+          username: result.student.username,
+        },
+        "match account",
+      )
+      if (!added.ok) {
+        teamWarning =
+          `${result.student.username} was matched, but adding them to the ` +
+          `classroom team failed; they won't have read on private templates until ` +
+          `it's retried.`
+      }
     }
   } catch (err) {
-    console.error("team add failed (match account):", err)
+    console.error("team resolve failed (match account):", err)
     teamWarning =
       `${result.student.username} was matched, but adding them to the ` +
       `classroom team failed; they won't have read on private templates until ` +
@@ -2000,28 +2041,20 @@ export async function bulkEnrollStudentsInClassroom(
       continue
     }
 
-    try {
-      await addUserToTeam(client, {
-        org: bulkInput.org,
-        teamSlug,
-        username: student.username,
-        role: "member",
-      })
-
-      teamResults.push({
-        username: student.username,
-        status: "added",
-      })
-    } catch (err) {
-      teamResults.push({
-        username: student.username,
-        status: "failed",
-        message:
-          err instanceof Error
-            ? err.message
-            : "Could not add user to classroom team",
-      })
-    }
+    const added = await tryAddUserToTeam(
+      client,
+      { org: bulkInput.org, teamSlug, username: student.username },
+      "bulk enroll",
+    )
+    teamResults.push(
+      added.ok
+        ? { username: student.username, status: "added" }
+        : {
+            username: student.username,
+            status: "failed",
+            message: added.detail || "Could not add user to classroom team",
+          },
+    )
 
     onProgress?.({
       processed: i + 1,
@@ -2144,22 +2177,21 @@ export async function unenrollStudent(
   const warnings: string[] = []
 
   // Reset onboarding for a not-yet-reconciled student: delete their onboarding
-  // repo(s) so a re-invite starts clean. Repo name is
-  // `classroom50-onboarding-<github-id>-<random-hash>`, so we list the org's
-  // onboarding repos and delete those under the github-id prefix (the random
-  // suffix isn't derivable). An email-only row has no targetable name; its repo
+  // repo so a re-invite starts clean. Repo name is `onboarding-<github-id>`,
+  // fully derivable, so we list the org's onboarding repos and delete the one
+  // matching that exact name. An email-only row has no targetable name; its repo
   // is cleaned at the next reconcile. Best-effort, idempotent (404 = gone); a
   // failed delete falls back to archive.
   if (
     toRemoveStudent.enrollment_status !== "enrolled" &&
     toRemoveStudent.github_id
   ) {
-    const prefix = onboardingRepoPrefixForGithubId(toRemoveStudent.github_id)
+    const name = onboardingRepoName(toRemoveStudent.github_id)
     let onboardingRepos: string[] = []
     try {
       onboardingRepos = (await listOnboardingRepos(client, org))
         .map((repo) => repo.name)
-        .filter((name) => name.startsWith(prefix))
+        .filter((repoName) => repoName === name)
     } catch {
       // Best-effort reset: if listing fails, skip repo cleanup.
     }
@@ -2300,14 +2332,10 @@ export async function updateStudent(
 
   const currentStudents = parseStudentsCsv(currentCsv)
 
-  // Stable per-row identity, same precedence the UI uses (github_id -> username
-  // -> email). Kept inline rather than importing the UI util so the mutation
-  // layer stays self-contained.
-  const rowKey = (row: StudentCsvRow) =>
-    row.github_id || row.username || row.email
-
+  // Stable per-row identity via the shared studentKey (github_id -> username ->
+  // email), the same precedence the UI and reconcile use.
   const targetIndex = currentStudents.findIndex(
-    (row) => rowKey(row) === targetKey,
+    (row) => studentKey(row) === targetKey,
   )
 
   if (targetIndex === -1) {

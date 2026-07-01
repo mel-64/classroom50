@@ -1,18 +1,19 @@
-// Onboarding repo name: `classroom50-onboarding-<github-id>-<random-hash>`. The
-// random suffix makes the name unguessable (squat-proof) and unique per
-// onboarding. It's NOT a lookup key (suffix isn't teacher-derivable): reconcile
-// lists by prefix and matches each self-report to a row purely on the YAML
-// payload (invite_token, then github_id, then email).
+// Onboarding repo name: `onboarding-<github-id>`. One per student per org,
+// derivable from the public github-id. Reconcile never trusts the name — it
+// matches on the YAML payload (invite_token, github_id, email) and the commit
+// author. The name is guessable, so a squat is possible; the author check limits
+// the damage and submitOnboarding surfaces an unwritable squat as a clear error.
+// (An earlier design used a random suffix; dropped for a simpler lifecycle.)
 
 import { bytesToHex } from "./hex"
 
-export const ONBOARDING_REPO_PREFIX = "classroom50-onboarding-"
+export const ONBOARDING_REPO_PREFIX = "onboarding-"
 
 // Path of the self-report payload committed into the onboarding repo.
 export const ONBOARDING_YAML_PATH = ".classroom50-onboarding.yaml"
 
 // 128 bits of CSPRNG randomness as 32-char lowercase hex (unguessable,
-// collision-proof). Backs both the invite token and the onboarding suffix.
+// collision-proof). Backs the invite token.
 function random128BitHex(): string {
   const bytes = new Uint8Array(16)
   crypto.getRandomValues(bytes)
@@ -34,28 +35,21 @@ export function isValidInviteToken(token: string): boolean {
   return INVITE_TOKEN_PATTERN.test(token.trim())
 }
 
-// Random suffix for an onboarding repo name: unguessable + collision-proof so
-// the name can't be pre-squatted by another org member. Fresh per attempt.
-export function generateOnboardingSuffix(): string {
-  return random128BitHex()
+// Onboarding repo name: prefix + github-id. One repo per student per org;
+// directly derivable, so reconcile/lookup can both list by prefix and
+// reconstruct the exact name. Trust still comes from the commit-author check,
+// never the name.
+export function onboardingRepoName(githubId: number | string): string {
+  return `${ONBOARDING_REPO_PREFIX}${githubId}`
 }
 
-// Onboarding repo name: prefix + github-id + random suffix. Later lookups must
-// list by `onboardingRepoPrefixForGithubId` (the name isn't recomputable
-// without the suffix).
-export function onboardingRepoName(
-  githubId: number | string,
-  randomSuffix: string,
-): string {
-  return `${ONBOARDING_REPO_PREFIX}${githubId}-${randomSuffix}`
-}
-
-// Prefix matching every onboarding repo a github-id could have created. Used to
-// find a student's own repo(s) when the random suffix isn't known.
-export function onboardingRepoPrefixForGithubId(
-  githubId: number | string,
-): string {
-  return `${ONBOARDING_REPO_PREFIX}${githubId}-`
+// The classroom team slug a STUDENT must guess (the authoritative slug is in the
+// private classroom.json they can't read). Safe-degrade: on a slug collision the
+// derived slug 404s -> "you're all set" reads false -> falls back to the form,
+// and re-onboarding is idempotent, so a miss never grants false access. The
+// teacher side ignores this and reads the real slug via resolveClassroomTeam.
+export function classroomTeamSlugHeuristic(classroom: string): string {
+  return `classroom50-${classroom}`
 }
 
 // Canonical form for hashing/comparison. Lowercase + trim only: deliberately do
@@ -97,10 +91,9 @@ export function isReconcilableRow(row: {
 }
 
 // Whether a self-report's claimed email matches the invited row's email_hash
-// (or email), given the payload email's precomputed hash. The repo name is
-// unguessable, but a student could self-report a DIFFERENT person's email in
-// the YAML; this binding stops a wrong-person self-report being folded into
-// someone else's row. Last-resort key (after invite_token and github_id);
+// (or email), given the payload email's precomputed hash. A student could
+// self-report a DIFFERENT person's email in the YAML; this binding stops a
+// wrong-person self-report being folded into someone else's row. Last-resort key (after invite_token and github_id);
 // falls through to true for a github_id-keyed row with no email, where the
 // caller relies on the commit-author identity check. Synchronous so a caller
 // matching one payload against many rows hashes the payload email only once.
@@ -116,19 +109,6 @@ export function rowMatchesEmailHash(
     return normalizeEmail(payloadEmail) === normalizeEmail(row.email)
   }
   return true
-}
-
-// Async convenience wrapper that hashes the payload email itself. Prefer
-// rowMatchesEmailHash with a precomputed hash when matching against many rows.
-export async function payloadEmailMatchesRow(
-  payloadEmail: string,
-  row: { email?: string; email_hash?: string },
-): Promise<boolean> {
-  return rowMatchesEmailHash(
-    row,
-    payloadEmail,
-    await emailHash(normalizeEmail(payloadEmail)),
-  )
 }
 
 // Self-report payload committed to ONBOARDING_YAML_PATH. github_username/

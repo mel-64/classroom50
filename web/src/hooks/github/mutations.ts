@@ -843,6 +843,22 @@ export async function getOrgMembershipState(
   }
 }
 
+// Error-safe "is this login an active org member?" — the boolean form of the
+// membership re-check used across the enroll/reconcile paths. A missing username
+// or any read failure resolves to false (never throws), so callers that just
+// need a yes/no gate don't each re-inline the getOrgMembershipState === "active"
+// + try/catch dance. Callers that must surface a tailored error on a non-member
+// (markStudentEnrolled, matchStudentToAccount) still call getOrgMembershipState
+// directly so they can throw their own message.
+export async function isActiveMember(
+  client: GitHubClient,
+  org: string,
+  username: string,
+): Promise<boolean> {
+  if (!username.trim()) return false
+  return (await getOrgMembershipState(client, org, username)) === "active"
+}
+
 type EnsureOrgMembershipResult = {
   // "active"/"pending" = no new invite sent; "invited" = a fresh one created.
   state: OrgMembershipState | "invited"

@@ -26,9 +26,10 @@ import {
 import { decodeBase64Utf8 } from "@/util/github"
 import { classroomPagesSegment } from "@/util/secret"
 import {
+  emailHash,
   ONBOARDING_REPO_PREFIX,
   ONBOARDING_YAML_PATH,
-  onboardingRepoPrefixForGithubId,
+  onboardingRepoName,
 } from "@/util/onboarding"
 import { parseOnboardingYaml, type OnboardingYaml } from "@/util/yaml"
 import { mapWithConcurrency } from "@/util/concurrency"
@@ -596,10 +597,11 @@ export async function getRepoFile(
   return decodeBase64Utf8(file.content)
 }
 
-// GitHub user ids on the latest commit touching `path`. Onboarding reconcile
-// uses this to verify the self-report's author: the repo name is a guessable
-// function of the email (a member could pre-create it with a forged payload),
-// but the commit author/committer is GitHub-attested and can't be spoofed.
+// GitHub user ids on the latest commit touching `path`; reconcile checks these
+// against the claimed github_id. FOOTGUN: `author.id` is resolved from the
+// unverified commit author email, so it's forgeable — this is NOT a hard
+// anti-forgery guarantee. Accepted residual risk (small write-then-demote
+// window; students aren't expected to pre-create repos).
 export async function getFileCommitAuthorIds(
   client: GitHubClient,
   org: string,
@@ -680,8 +682,9 @@ export async function paginateAll<T>(
 }
 
 // All onboarding repos in the org (names starting with the shared prefix).
-// Discovered by prefix because the name carries a browser-random suffix the
-// teacher can't recompute, so the repo can't be fetched by a derived name.
+// Listed by prefix — not fetched by a derived name — because reconcile
+// enumerates every student's report in one org listing and matches by payload
+// content, never by the name (the name attests nothing).
 export async function listOnboardingRepos(
   client: GitHubClient,
   org: string,
@@ -993,9 +996,12 @@ async function listOwnOnboardingRepos(
   org: string,
   githubId: number | string,
 ): Promise<OwnOnboardingRepo[]> {
-  const prefix = onboardingRepoPrefixForGithubId(githubId)
+  // The name is now fully derivable (`onboarding-<id>`), so match it exactly —
+  // a prefix match would also catch a different id whose digits start the same
+  // (e.g. `onboarding-42` is a prefix of `onboarding-420`).
+  const name = onboardingRepoName(githubId)
   const repos = (await listOnboardingRepos(client, org)).filter(
-    (repo) => repo.name.startsWith(prefix) && !repo.archived,
+    (repo) => repo.name === name && !repo.archived,
   )
   const out: OwnOnboardingRepo[] = await mapWithConcurrency(
     repos,
@@ -1103,9 +1109,11 @@ export async function listOnboardingSelfReports(
       reports.push({
         github_id: String(payload.github_id),
         email: payload.email,
+        email_hash: await emailHash(payload.email),
         first_name: payload.first_name,
         last_name: payload.last_name,
         github_username: payload.github_username,
+        invite_token: payload.invite_token,
       })
     }
   }

@@ -1,6 +1,8 @@
 import type { Student } from "@/types/classroom"
 import type { GitHubOrgInvitation, GitHubUser } from "@/hooks/github/types"
-import { normalizeEmail } from "@/util/onboarding"
+import { isReconcilableRow } from "@/util/onboarding"
+import { bindReportsToRows } from "@/util/reconcileMatch"
+import { memberIdSet } from "@/util/identity"
 
 export type InviteStatus =
   | "member"
@@ -13,17 +15,21 @@ export type InviteStatus =
 
 // A student's onboarding self-report, parsed from the onboarding repo's YAML.
 // github_id/github_username are GitHub-attested; email and the names are claimed
-// by the student. The match keys (github_id/email) classify "ready"; the names
-// let the teacher roster backfill a CSV row missing first/last name before
-// enrollment is confirmed. first_name/last_name are optional for back-compat
-// with pre-name payloads; github_username is always present (YAML schema
-// requires it).
+// by the student. The match keys (invite_token/github_id/email) classify
+// "ready"; the names let the teacher roster backfill a CSV row missing first/
+// last name before enrollment is confirmed. first_name/last_name are optional
+// for back-compat with pre-name payloads; github_username is always present
+// (YAML schema requires it). invite_token is present only for a secure-link
+// onboarding (reconcile's strongest key). email_hash is precomputed by the
+// reader so the synchronous classifier can match on it without re-hashing.
 export type OnboardingSelfReport = {
   github_id: string
   email: string
   github_username: string
   first_name?: string
   last_name?: string
+  invite_token?: string
+  email_hash: string
 }
 
 export type StudentInviteStatus = {
@@ -39,36 +45,44 @@ export type StudentInviteStatus = {
 
 const lower = (value: string | null | undefined) => (value ?? "").toLowerCase()
 
-// String github_ids of the org's live members, the key both member-status
-// classification and the "Mark enrolled" gate match a roster row's github_id on.
-export function memberIdSet(members: GitHubUser[]) {
-  return new Set(members.map((member) => String(member.id)))
-}
+// Re-exported so existing callers (orgMembers, EnrolledStudents) keep their
+// import path; the canonical implementation lives in @/util/identity.
+export { memberIdSet }
 
-// Builds lookups once, then classifies each student. Members match on numeric
-// id (login fallback); invitations match on login / email. onboardedReports are
-// the parsed self-reports that currently exist; a not-yet-enrolled student who
-// matches one is "ready". Pass undefined while reports are still loading/errored
-// so a not-yet-known empty set isn't mistaken for "nobody onboarded".
+// Builds lookups once, then classifies each student. Members match on numeric id
+// (login fallback); invitations on login/email. Pass `onboardedReports` undefined
+// while still loading so an empty set isn't read as "nobody onboarded". `roster`
+// feeds the SHARED matcher (reconcileMatch) so the "ready" badge honors exactly
+// what reconcile does (token -> github_id -> email_hash, ambiguous left unbound).
 export function buildInviteStatusLookup(
   members: GitHubUser[],
   pendingInvitations: GitHubOrgInvitation[],
   failedInvitations: GitHubOrgInvitation[],
   onboardedReports: OnboardingSelfReport[] = [],
+  roster: Student[] = [],
 ) {
   const memberIds = memberIdSet(members)
   const memberLogins = new Set(members.map((member) => lower(member.login)))
 
-  // Self-reports indexed by both keys a row can match on: github_id (username-
-  // invited rows) and normalized email (email-invited rows, no github_id yet).
-  // Keep the full report on each index so a matched row can read its names.
-  const reportById = new Map<string, OnboardingSelfReport>()
-  const reportByEmail = new Map<string, OnboardingSelfReport>()
-  for (const report of onboardedReports) {
-    const id = report.github_id.trim()
-    const email = normalizeEmail(report.email)
-    if (id && !reportById.has(id)) reportById.set(id, report)
-    if (email && !reportByEmail.has(email)) reportByEmail.set(email, report)
+  // Bind reports to rows exactly as reconcile will (only reconcilable rows are
+  // candidates; enrolled rows are classified member/removed below). readyReportByRow
+  // maps each bound Student to its report for the "ready" status + name display.
+  const reconcilable = roster.filter(isReconcilableRow)
+  const matchableReports = onboardedReports.map((report) => ({
+    invite_token: report.invite_token,
+    github_id: report.github_id.trim(),
+    email: report.email,
+    emailHash: report.email_hash,
+    report,
+  }))
+  const bound = bindReportsToRows(
+    matchableReports,
+    reconcilable,
+    (row) => row.email_hash ?? "",
+  )
+  const readyReportByRow = new Map<Student, OnboardingSelfReport>()
+  for (const [row, match] of bound) {
+    readyReportByRow.set(row, match.report.report)
   }
 
   const pendingByLogin = new Map<string, GitHubOrgInvitation>()
@@ -111,9 +125,7 @@ export function buildInviteStatusLookup(
     // Otherwise surface a still-pending/expired GitHub invite for resend, else
     // "onboarding" (invited, nothing to confirm yet).
     if (enrollment === "invited") {
-      const matchedReport =
-        (githubId ? reportById.get(githubId) : undefined) ??
-        (email ? reportByEmail.get(email) : undefined)
+      const matchedReport = readyReportByRow.get(student)
       if (matchedReport) {
         return { status: "ready", selfReport: matchedReport }
       }

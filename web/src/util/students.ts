@@ -1,4 +1,7 @@
 import type { Student } from "@/types/classroom"
+import { isSameGitHubUser, parseGitHubId } from "@/util/identity"
+
+export { isSameGitHubUser, parseGitHubId }
 
 export const capitalize = (s: string) =>
   s ? s.charAt(0).toUpperCase() + s.slice(1) : ""
@@ -37,24 +40,7 @@ export const resolveStudent = (key: string, students: Student[]): Student =>
 
 // Whether a GitHub account is the same person as a roster student: numeric id
 // first, then case-insensitive login (the CSV may predate id capture).
-export const isSameGitHubUser = (
-  account: { id: number; login: string } | null | undefined,
-  student: { github_id?: string; username: string },
-): boolean => {
-  if (!account) return false
-  return (
-    String(account.id) === String(student.github_id) ||
-    account.login.toLowerCase() === student.username.trim().toLowerCase()
-  )
-}
-
-// Parse a roster row's github_id into a positive numeric GitHub id, or null
-// when it's absent/non-numeric. GitHub ids are positive integers; the CSV stores
-// them as strings.
-export const parseGitHubId = (githubId: string): number | null => {
-  const id = Number(githubId)
-  return Number.isFinite(id) && id > 0 ? id : null
-}
+// (Canonical implementation in @/util/identity; re-exported above.)
 
 export const getName = (key: string, students: Student[]) => {
   const student = findByUsername(key, students)

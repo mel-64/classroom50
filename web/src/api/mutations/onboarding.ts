@@ -19,7 +19,6 @@ import { getAuthenticatedUser } from "@/api/queries/users"
 import { acceptPendingOrgInvite } from "@/api/mutations/users"
 import {
   ONBOARDING_YAML_PATH,
-  generateOnboardingSuffix,
   onboardingRepoName,
   isValidInviteToken,
   type OnboardingPayload,
@@ -86,8 +85,7 @@ export async function submitOnboarding(
   }
 
   const reusingExisting = existingRepoName !== undefined
-  const repoName =
-    existingRepoName ?? onboardingRepoName(user.id, generateOnboardingSuffix())
+  const repoName = existingRepoName ?? onboardingRepoName(user.id)
 
   let repo: GitHubRepo
   let status: OnboardingResult["status"] = reusingExisting
@@ -109,8 +107,10 @@ export async function submitOnboarding(
     })
     createdThisCall = true
   } catch (err) {
-    // 422 = repo already exists; re-fetch and re-commit so a half-finished
-    // attempt self-heals.
+    // 422 = the name already exists — normally our own half-finished attempt,
+    // but the name is guessable so it could be a squatted repo. Re-fetch; the
+    // write-access guard below turns a squat into a clear error, not a 403
+    // mid-commit.
     if (err instanceof GitHubAPIError && err.status === 422) {
       repo = await client.request<GitHubRepo>(`/repos/${org}/${repoName}`)
       status = "already-onboarded"
@@ -127,6 +127,18 @@ export async function submitOnboarding(
     } else {
       throw err
     }
+  }
+
+  // A reused/re-fetched repo could be a squat we can't push to. Fail loudly with
+  // an actionable message rather than 403-ing mid-commit. FOOTGUN: `permissions`
+  // is absent on some responses — treat absent as "ours" so a missing field
+  // can't block a legitimate onboarding (the commit surfaces any real failure).
+  if (repo.permissions && !repo.permissions.push) {
+    throw new Error(
+      `The onboarding repository name (${repoName}) in ${org} is already taken ` +
+        `by a repository you can't write to. Ask your instructor to remove ` +
+        `the "${repoName}" repository from the ${org} organization, then try again.`,
+    )
   }
 
   const branch = repo.default_branch || "main"

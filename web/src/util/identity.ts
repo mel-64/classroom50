@@ -1,0 +1,62 @@
+import type { Student } from "@/types/classroom"
+import type { GitHubUser } from "@/hooks/github/types"
+
+// Canonical identity helpers for relating GitHub accounts, org members, and
+// roster rows — one home so the id/login/"claimed" logic can't drift across the
+// callers that used to each re-implement it.
+
+// Stable, position-independent per-row identity. Prefer github_id (survives a
+// rename), then username, then email. Rows always carry at least one
+// (parseStudentsCsv drops fully-empty rows), so no index fallback is needed.
+export function studentKey(student: {
+  github_id?: string
+  username?: string
+  email?: string
+}): string {
+  return student.github_id || student.username || student.email || ""
+}
+
+// Whether a GitHub account is the same person as a roster student: numeric id
+// first, then case-insensitive login (the CSV may predate id capture).
+export function isSameGitHubUser(
+  account: { id: number; login: string } | null | undefined,
+  student: { github_id?: string; username: string },
+): boolean {
+  if (!account) return false
+  return (
+    String(account.id) === String(student.github_id) ||
+    account.login.toLowerCase() === student.username.trim().toLowerCase()
+  )
+}
+
+// Parse a roster row's github_id into a positive numeric GitHub id, or null
+// when it's absent/non-numeric. GitHub ids are positive integers; the CSV stores
+// them as strings.
+export function parseGitHubId(githubId: string): number | null {
+  const id = Number(githubId)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+// String github_ids of the org's live members — the key member-status
+// classification and the "Mark enrolled" gate match a roster row's github_id on.
+export function memberIdSet(members: GitHubUser[]): Set<string> {
+  return new Set(members.map((member) => String(member.id)))
+}
+
+// The set of GitHub ids and lowercased logins already claimed by a roster. A
+// member is "claimed" when their numeric id or login appears on any row. Shared
+// so the org-members aggregation and the manual-match picker apply one predicate.
+export function rosterClaimSet(students: Student[]): {
+  ids: Set<string>
+  logins: Set<string>
+} {
+  const ids = new Set<string>()
+  const logins = new Set<string>()
+  for (const student of students) {
+    const id = student.github_id?.trim()
+    const login = student.username?.trim().toLowerCase()
+    if (id) ids.add(id)
+    if (login) logins.add(login)
+  }
+  return { ids, logins }
+}

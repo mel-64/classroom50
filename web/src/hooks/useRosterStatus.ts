@@ -77,8 +77,16 @@ const useRosterStatus = (
         failedInvitations,
         // Only authoritative once loaded; undefined keeps "ready" unresolved.
         reportsLoaded ? (onboardedReports ?? []) : undefined,
+        students,
       ),
-    [members, invitations, failedInvitations, reportsLoaded, onboardedReports],
+    [
+      members,
+      invitations,
+      failedInvitations,
+      reportsLoaded,
+      onboardedReports,
+      students,
+    ],
   )
 
   const statusByKey = useMemo(() => {

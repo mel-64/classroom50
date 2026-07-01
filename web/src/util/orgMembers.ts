@@ -1,7 +1,6 @@
 import type { Student } from "@/types/classroom"
 import type { GitHubUser } from "@/hooks/github/types"
-import { memberIdSet } from "@/util/inviteStatus"
-import { studentKey } from "@/util/roster"
+import { memberIdSet, rosterClaimSet, studentKey } from "@/util/identity"
 
 // One classroom a student appears on, with that classroom's per-row status.
 export type ClassroomAccess = {
@@ -191,14 +190,7 @@ export function unmatchedTeamMembers(
   members: GitHubUser[],
   students: Student[],
 ): MatchCandidate[] {
-  const claimedIds = new Set<string>()
-  const claimedLogins = new Set<string>()
-  for (const student of students) {
-    const id = student.github_id?.trim()
-    const login = student.username?.trim().toLowerCase()
-    if (id) claimedIds.add(id)
-    if (login) claimedLogins.add(login)
-  }
+  const { ids: claimedIds, logins: claimedLogins } = rosterClaimSet(students)
 
   return members
     .filter(

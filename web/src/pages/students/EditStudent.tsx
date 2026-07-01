@@ -36,10 +36,10 @@ type EditStudentFormValues = {
 }
 
 // CSV is authoritative, but a not-yet-enrolled student's onboarding self-report
-// can fill a blank first/last name so the teacher sees the student's claimed
-// name. Trim-blank CSV values fall back to the report; the report never
-// overrides a present CSV value.
-const resolveName = (csvValue?: string, reportValue?: string): string => {
+// can fill a blank field (first/last name, or the claimed email) so the teacher
+// sees what the student reported. A trim-blank CSV value falls back to the
+// report; the report never overrides a present CSV value.
+const resolveField = (csvValue?: string, reportValue?: string): string => {
   const csv = csvValue?.trim()
   if (csv) return csv
   return reportValue?.trim() ?? ""
@@ -73,10 +73,18 @@ const EditStudent = ({
   // Both cases lock the email field (the mutation also enforces this).
   const emailLocked = !isEnrolled || (!student.username && !student.github_id)
 
+  // CSV email blank but the student reported one — drives the read-only display
+  // + helper text.
+  const emailFromSelfReport =
+    !student.email?.trim() && Boolean(selfReport?.email?.trim())
+
   const defaults = useCallback(
     (): EditStudentFormValues => ({
-      first_name: resolveName(student.first_name, selfReport?.first_name),
-      last_name: resolveName(student.last_name, selfReport?.last_name),
+      first_name: resolveField(student.first_name, selfReport?.first_name),
+      last_name: resolveField(student.last_name, selfReport?.last_name),
+      // Keep the AUTHORITATIVE CSV email in the form (blank for a username row)
+      // so a save never writes the self-report email or trips the pre-enrollment
+      // email-change guard; the reported email is shown read-only below.
       email: student.email ?? "",
       section: student.section ?? "",
     }),
@@ -228,7 +236,9 @@ const EditStudent = ({
                     (student.email ?? "").trim().toLowerCase()
                 const emailHelp =
                   emailLocked && !isEnrolled
-                    ? "This student isn't enrolled yet. Their email is part of the identity that onboarding confirms, so it can't be changed until enrollment is confirmed."
+                    ? emailFromSelfReport
+                      ? "This is the email the student reported when onboarding. It's part of the identity that enrollment confirms, so it can't be changed until you confirm enrollment."
+                      : "This student isn't enrolled yet. Their email is part of the identity that onboarding confirms, so it can't be changed until enrollment is confirmed."
                     : emailLocked
                       ? "This student has no GitHub identity yet, so their email is their only identifier and can't be changed here. Unenroll and re-add them to change it."
                       : emailChangedWhileEnrolled
@@ -244,7 +254,13 @@ const EditStudent = ({
                         type="email"
                         placeholder="student@university.edu"
                         className="input w-full"
-                        value={field.state.value}
+                        // Show the self-reported email read-only when the CSV
+                        // email is blank; the submitted value stays the CSV email.
+                        value={
+                          emailLocked && emailFromSelfReport
+                            ? (selfReport?.email ?? "")
+                            : field.state.value
+                        }
                         disabled={emailLocked}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
