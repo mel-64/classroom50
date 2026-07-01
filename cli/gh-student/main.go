@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,8 +14,13 @@ import (
 	"github.com/foundation50/gh-student/internal/submitcmd"
 )
 
+// Build metadata, injected by the release workflow via
+// -ldflags "-X main.version=… -X main.commit=… -X main.date=…". Defaults
+// identify a local (non-release) build.
 var (
 	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 
 	// verbose enables per-step operational output across subcommands.
 	verbose bool
@@ -24,7 +30,7 @@ func main() {
 	root := &cobra.Command{
 		Use:     "gh-student",
 		Short:   "Student-facing GitHub CLI extension",
-		Version: version,
+		Version: versionString(),
 	}
 	root.SetErrPrefix("gh-student:")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show operational details (per-step API/git output)")
@@ -45,4 +51,13 @@ func main() {
 	if err := root.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+// versionString renders cobra's --version line. A release build shows the
+// injected tag, short commit, and build date; a local build stays terse ("dev").
+func versionString() string {
+	if commit == "none" && date == "unknown" {
+		return version
+	}
+	return fmt.Sprintf("%s (commit %s, built %s)", version, commit, date)
 }

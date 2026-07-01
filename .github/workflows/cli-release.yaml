@@ -116,13 +116,23 @@ jobs:
           GOOS: ${{ matrix.target.os }}
           GOARCH: ${{ matrix.target.arch }}
           VERSION: ${{ needs.resolve.outputs.version }}
+          # Short commit and UTC build date, baked into --version for support
+          # and bug reports (see cli/gh-*/main.go versionString).
+          COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-          out="${GITHUB_WORKSPACE}/dist/${{ matrix.extension }}_${VERSION}_${GOOS}-${GOARCH}${ext}"
+          # Canonical gh precompiled-extension asset name: gh-<name>_<os>-<arch>.
+          # The version lives in the release tag, not the filename, so `gh
+          # extension install`/`upgrade` resolve the per-platform binary.
+          out="${GITHUB_WORKSPACE}/dist/${{ matrix.extension }}_${GOOS}-${GOARCH}${ext}"
           mkdir -p "$(dirname "$out")"
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$out" .
+          short_commit="${COMMIT:0:12}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${short_commit} -X main.date=${build_date}" \
+            -o "$out" .
           ls -l "$out"
 
       - name: Upload binary artifact

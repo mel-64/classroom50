@@ -93,6 +93,43 @@ scrub tokens, secrets, and private student data from anything you paste.
 - Keep PRs focused; link the issue they address.
 - The pull request template includes a checklist — please fill it out.
 
+## Releasing the CLIs (maintainers)
+
+The two `gh` extensions (`gh-teacher`, `gh-student`) are released together from
+this monorepo by the [`cli-release`](.github/workflows/cli-release.yaml)
+workflow. It cross-compiles both extensions and publishes per-platform binaries
+as GitHub Releases on the standalone mirror repos
+[`foundation50/gh-teacher`](https://github.com/foundation50/gh-teacher) and
+[`foundation50/gh-student`](https://github.com/foundation50/gh-student), where
+`gh extension install` looks for them.
+
+To cut a release, push a `cli-v*` tag on this repo:
+
+```sh
+git tag cli-v1.2.0        # a tag with a pre-release suffix (cli-v1.2.0-rc.1)
+git push origin cli-v1.2.0 # publishes as a GitHub pre-release
+```
+
+`VERSION` is the tag with the `cli-` prefix stripped (`cli-v1.2.0` -> `v1.2.0`),
+and it must be a `vMAJOR.MINOR.PATCH[-prerelease]` string. The workflow:
+
+- injects the version, short commit, and build date into each binary via
+  `-ldflags "-X main.version=… -X main.commit=… -X main.date=…"`, so
+  `gh teacher --version` / `gh student --version` report the release (a local
+  `go build` still reports `dev`);
+- names assets canonically as `gh-<name>_<os>-<arch>[.exe]` (the version lives
+  in the release tag, not the filename);
+- publishes to both mirror repos as the same `VERSION` tag, marking any version
+  with a `-` suffix as a pre-release.
+
+Requirements (repo Settings, one-time): the `CLI_RELEASE_PAT` secret
+(`contents: write` on both mirror repos) and the `cli-release` environment with
+required reviewers. The workflow header documents these in full.
+
+You can also trigger a run manually from the Actions tab
+(`workflow_dispatch`) — useful for re-running a failed publish or forcing
+provenance attestation on a private repo.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the

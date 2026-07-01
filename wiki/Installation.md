@@ -34,6 +34,14 @@ gh extension upgrade gh-teacher
 gh extension upgrade gh-student
 ```
 
+Or update every installed extension in one go:
+
+```sh
+gh extension upgrade --all
+```
+
+`gh` also checks for new releases in the background and prints a hint when either extension is out of date, so you'll usually be told when an upgrade is available.
+
 To pin a specific version, pass `--pin` (the version is the release tag, e.g. `v1.0.0`):
 
 ```sh
