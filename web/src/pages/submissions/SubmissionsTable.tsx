@@ -26,6 +26,7 @@ import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import type { Student } from "@/types/classroom"
+import { EnterDiv } from "@/lib/motionComponents"
 
 const formatDateTime = (datetime: string) =>
   new Date(datetime).toLocaleString(undefined, {
@@ -521,7 +522,7 @@ const SubmissionsTable = ({
 
   return (
     <>
-      <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
+      <EnterDiv className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
         <table className="table">
           <thead>
             <tr>
@@ -736,7 +737,7 @@ const SubmissionsTable = ({
             ))}
           </tbody>
         </table>
-      </div>
+      </EnterDiv>
 
       {isGroup && manageOwner && (
         <GroupCollaboratorsModal

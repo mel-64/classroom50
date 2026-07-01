@@ -9,6 +9,7 @@ import {
 } from "@/api/mutations/assignments"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { LoadingSwap } from "@/lib/LoadingSwap"
 
 const EditAssignmentForm = ({
   org,
@@ -44,47 +45,50 @@ const EditAssignmentForm = ({
     onError,
   })
 
-  if (!defaultData) {
-    return (
-      <div className="flex">
-        <div className="m-auto loading loading-spinner" />
-      </div>
-    )
-  }
-
   return (
-    <CreateAssignmentForm
-      edit
-      readOnly={readOnly}
-      loading={editAssignmentMutation.isPending}
-      org={org}
-      classroom={classroom}
-      onCancel={onCancel}
-      defaultValues={assignmentToFormValues(defaultData)}
-      onSubmit={(values) => {
-        editAssignmentMutation.mutate({
-          name: values.name,
-          mode: values.mode,
-          org,
-          template_repo: values.template_repo,
-          description: values.description,
-          due_date: values.due_date,
-          max_group_size: values.max_group_size,
-          feedback_pr: values.feedback_pr,
-          runs_on: values.runs_on,
-          container_image: values.container_image,
-          container_user: values.container_user,
-          setup_command: values.setup_command,
-          allowed_files: values.allowed_files,
-          pass_threshold: values.pass_threshold_enabled
-            ? values.pass_threshold
-            : undefined,
-          classroom,
-          tests: values.tests,
-          slug: assignment,
-        })
-      }}
-    />
+    <LoadingSwap
+      loading={!defaultData}
+      fallback={
+        <div className="flex">
+          <div className="m-auto loading loading-spinner" />
+        </div>
+      }
+    >
+      {defaultData ? (
+        <CreateAssignmentForm
+          edit
+          readOnly={readOnly}
+          loading={editAssignmentMutation.isPending}
+          org={org}
+          classroom={classroom}
+          onCancel={onCancel}
+          defaultValues={assignmentToFormValues(defaultData)}
+          onSubmit={(values) => {
+            editAssignmentMutation.mutate({
+              name: values.name,
+              mode: values.mode,
+              org,
+              template_repo: values.template_repo,
+              description: values.description,
+              due_date: values.due_date,
+              max_group_size: values.max_group_size,
+              feedback_pr: values.feedback_pr,
+              runs_on: values.runs_on,
+              container_image: values.container_image,
+              container_user: values.container_user,
+              setup_command: values.setup_command,
+              allowed_files: values.allowed_files,
+              pass_threshold: values.pass_threshold_enabled
+                ? values.pass_threshold
+                : undefined,
+              classroom,
+              tests: values.tests,
+              slug: assignment,
+            })
+          }}
+        />
+      ) : null}
+    </LoadingSwap>
   )
 }
 

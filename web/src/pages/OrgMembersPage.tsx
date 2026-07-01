@@ -29,6 +29,9 @@ import useOrgMembersOverview from "@/hooks/useOrgMembersOverview"
 import type { OrgMemberRow } from "@/util/orgMembers"
 import { isSameGitHubUser } from "@/util/students"
 import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
+import { motion } from "motion/react"
+import { enterExit } from "@/lib/motion"
+import { ClickableRow } from "@/lib/motionComponents"
 import { inviteMemberToOrg } from "@/pages/orgMembers/inviteMemberToOrg"
 import type { GitHubClient } from "@/hooks/github/client"
 
@@ -231,7 +234,7 @@ const MemberDetail = ({
                     to="/$org/$classroom"
                     params={{ org, classroom: access.classroom }}
                     onClick={onClose}
-                    className="clickable-row group/cls flex items-center justify-between px-3 py-2 text-sm first:rounded-t-box last:rounded-b-box"
+                    className="group/cls flex items-center justify-between px-3 py-2 text-sm first:rounded-t-box last:rounded-b-box cursor-pointer transition-[background-color,transform,box-shadow] duration-150 ease-out hover:bg-base-200 hover:-translate-y-px hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:hover:shadow-none"
                   >
                     <span className="font-medium">
                       {access.classroom}
@@ -504,11 +507,16 @@ const OrgMembersPage = () => {
                   No members match your search.
                 </div>
               ) : (
-                <ul className="divide-y divide-base-300">
+                <motion.ul
+                  className="divide-y divide-base-300"
+                  variants={enterExit}
+                  initial="initial"
+                  animate="animate"
+                >
                   {filtered.map((row) => (
-                    <li
+                    <ClickableRow
                       key={row.key}
-                      className="clickable-row group/row flex items-center justify-between gap-4 px-6 py-4"
+                      className="group/row flex cursor-pointer items-center justify-between gap-4 px-6 py-4 hover:bg-base-200"
                       role="button"
                       tabIndex={0}
                       onClick={() => setSelectedKey(row.key)}
@@ -556,9 +564,9 @@ const OrgMembersPage = () => {
                         <ClassificationBadge row={row} />
                         <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/60" />
                       </div>
-                    </li>
+                    </ClickableRow>
                   ))}
-                </ul>
+                </motion.ul>
               )}
             </div>
           </RequireTeacher>

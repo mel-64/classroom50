@@ -18,6 +18,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { OrgSettingsPane } from "./OrgSettingsPage"
+import { EnterDiv } from "@/lib/motionComponents"
 import {
   SkeletonOverwriteModal,
   useSkeletonOverwriteConfirm,
@@ -94,13 +95,13 @@ const OrgSteps = ({
         {stage === 1 ? (
           <div className="grid gap-4">
             {nextStep && (
-              <div className="alert alert-success">
+              <EnterDiv className="alert alert-success">
                 <CheckCircle2 className="size-5 shrink-0" />
                 <div>
                   Organization setup is complete. Review the steps below, then
                   continue to set the service token.
                 </div>
-              </div>
+              </EnterDiv>
             )}
             <InitStepBoard steps={steps} org={org} />
           </div>
@@ -109,7 +110,7 @@ const OrgSteps = ({
             <OrgSettingsPane onSubmit={() => setStage(3)} />
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4 py-8 text-center">
+          <EnterDiv className="flex flex-col items-center gap-4 py-8 text-center">
             <div className="flex size-16 items-center justify-center rounded-full bg-success/10 text-success">
               <CheckCircle2 className="size-9" />
             </div>
@@ -126,7 +127,7 @@ const OrgSteps = ({
               </span>
               <ArrowRight className="size-4 shrink-0" />
             </Link>
-          </div>
+          </EnterDiv>
         )}
       </div>
     </div>

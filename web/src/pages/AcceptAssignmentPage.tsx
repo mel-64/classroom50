@@ -30,6 +30,7 @@ import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
+import { EnterDiv } from "@/lib/motionComponents"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -529,7 +530,7 @@ const AcceptAssignmentPage = () => {
     <div className="min-h-screen bg-base-100">
       <AcceptNavbar />
       <AcceptCard>
-        <div className="card-body gap-4">
+        <EnterDiv className="card-body gap-4">
           <div className="flex justify-between">
             <span className="badge badge-primary badge-soft">
               <UserRound className="size-4" />
@@ -686,7 +687,7 @@ const AcceptAssignmentPage = () => {
                 />
               )}
           </div>
-        </div>
+        </EnterDiv>
       </AcceptCard>
 
       {assignmentData?.mode === "group" &&

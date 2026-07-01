@@ -111,7 +111,7 @@ const TeacherAssignmentsView = ({
       <div className="flex justify-between">
         <div>
           {classroomLoading ? (
-            <div className="skeleton mt-8 mb-2 h-6 w-48" />
+            <div className="skeleton skeleton-shimmer mt-8 mb-2 h-6 w-48" />
           ) : (
             <h1 className="text-lg pt-8 pb-2 font-bold flex items-center gap-2">
               {classroomData?.name || classroomData?.short_name || classroom}
@@ -203,9 +203,9 @@ const AssignmentsPage = () => {
           <Breadcrumb endpoint="Assignments" />
           {roleLoading && (
             <div className="mt-8 space-y-4">
-              <div className="skeleton h-6 w-48" />
-              <div className="skeleton h-4 w-32" />
-              <div className="skeleton h-64 w-full rounded-box" />
+              <div className="skeleton skeleton-shimmer h-6 w-48" />
+              <div className="skeleton skeleton-shimmer h-4 w-32" />
+              <div className="skeleton skeleton-shimmer h-64 w-full rounded-box" />
             </div>
           )}
           {!roleLoading && isTeacher && org && classroom && (

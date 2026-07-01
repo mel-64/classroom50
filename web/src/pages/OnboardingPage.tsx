@@ -16,6 +16,7 @@ import { submitOnboarding } from "@/api/mutations/onboarding"
 import { useOnboardingState } from "@/hooks/onboarding/useOnboardingState"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { isValidEmail, isValidInviteToken } from "@/util/onboarding"
+import { EnterDiv } from "@/lib/motionComponents"
 
 const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
@@ -43,7 +44,7 @@ const NotOrgMember = ({
   <div className="min-h-screen bg-base-100">
     <OnboardNavbar />
     <OnboardCard>
-      <div className="card-body gap-6">
+      <EnterDiv className="card-body gap-6">
         <div>
           <span className="badge badge-ghost badge-soft gap-2">
             <Mail className="size-4" />
@@ -78,7 +79,7 @@ const NotOrgMember = ({
             </div>
           </div>
         </div>
-      </div>
+      </EnterDiv>
     </OnboardCard>
   </div>
 )
@@ -104,7 +105,7 @@ const OnboardingStatus = ({
     <div className="min-h-screen bg-base-100">
       <OnboardNavbar />
       <OnboardCard>
-        <div className="card-body gap-6">
+        <EnterDiv className="card-body gap-6">
           <div>
             <span className="badge badge-primary badge-soft gap-2">
               <Mail className="size-4" />
@@ -122,7 +123,7 @@ const OnboardingStatus = ({
             </div>
           </div>
           {action}
-        </div>
+        </EnterDiv>
       </OnboardCard>
     </div>
   )
@@ -304,7 +305,7 @@ const OnboardingPage = () => {
     <div className="min-h-screen bg-base-100">
       <OnboardNavbar />
       <OnboardCard>
-        <div className="card-body gap-6">
+        <EnterDiv className="card-body gap-6">
           <div>
             <span className="badge badge-primary badge-soft gap-2">
               <Mail className="size-4" />
@@ -424,7 +425,7 @@ const OnboardingPage = () => {
               "Confirm enrollment"
             )}
           </button>
-        </div>
+        </EnterDiv>
       </OnboardCard>
     </div>
   )

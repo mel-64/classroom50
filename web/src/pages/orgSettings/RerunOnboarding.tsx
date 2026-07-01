@@ -18,6 +18,7 @@ import {
   initialInitSteps,
 } from "./initStepBoard"
 import SettingsSection from "./SettingsSection"
+import { CalloutDiv } from "@/lib/motionComponents"
 import {
   SkeletonOverwriteModal,
   useSkeletonOverwriteConfirm,
@@ -40,11 +41,11 @@ const SummaryBanner = ({
   className?: string
   children: ReactNode
 }) => (
-  <div
+  <CalloutDiv
     className={`rounded-lg border p-3 text-sm ${BANNER_TONE[tone]} ${className ?? ""}`}
   >
     {children}
-  </div>
+  </CalloutDiv>
 )
 
 // Re-run onboarding from Org Settings: re-invokes the idempotent

@@ -4,6 +4,7 @@ import { XCircle } from "lucide-react"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
 import useGetOrgAudit from "@/hooks/useGetOrgAudit"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
+import { CalloutDiv } from "@/lib/motionComponents"
 
 // Teacher preflight banner shown when an org is opened. The service-token and
 // policy checks live here (one org at a time) rather than on the org list,
@@ -40,7 +41,7 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
   const categories = failing.join(", ")
 
   return (
-    <div role="alert" className="alert alert-error alert-soft mb-6">
+    <CalloutDiv role="alert" className="alert alert-error alert-soft mb-6">
       <XCircle className="size-5" />
       <div className="text-sm">
         <p className="font-semibold">Organization preflight check failed</p>
@@ -55,7 +56,7 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
           .
         </p>
       </div>
-    </div>
+    </CalloutDiv>
   )
 }
 

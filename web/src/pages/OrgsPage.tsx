@@ -8,6 +8,8 @@ import useGetOrgs from "@/hooks/useGetOrgs"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ExternalLink, Info, Lock, RefreshCw } from "lucide-react"
+import { motion } from "motion/react"
+import { enterExit, staggerTransition } from "@/lib/motion"
 
 function MissingOrgNotice({
   refreshing,
@@ -72,9 +74,11 @@ function MissingOrgNotice({
 function OrgCard({
   summary,
   noRole = false,
+  index = 0,
 }: {
   summary: Classroom50OrgSummary
   noRole: boolean
+  index?: number
 }) {
   const { org, membership, classroom50 } = summary
 
@@ -93,7 +97,13 @@ function OrgCard({
   const canOpen = isAdmin ? isReady : isActiveMember
 
   return (
-    <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
+    <motion.div
+      className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]"
+      variants={enterExit}
+      initial="initial"
+      animate="animate"
+      transition={staggerTransition(index)}
+    >
       <div className="card-body justify-between">
         <div className="flex gap-4">
           <img
@@ -154,7 +164,7 @@ function OrgCard({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -211,11 +221,12 @@ const OrgsPage = () => {
                     onRefresh={handleRefresh}
                   />
                   <div className="grid grid-cols-12 gap-4 mt-6">
-                    {cl50Orgs?.map((summary) => (
+                    {cl50Orgs?.map((summary, i) => (
                       <OrgCard
                         key={summary.org.id}
                         summary={summary}
                         noRole={false}
+                        index={i}
                       />
                     ))}
                   </div>
@@ -241,11 +252,12 @@ const OrgsPage = () => {
                       </h1>
                     </div>
                     <div className="grid grid-cols-12 gap-4 mt-6">
-                      {nonCl50Orgs?.map((summary) => (
+                      {nonCl50Orgs?.map((summary, i) => (
                         <OrgCard
                           key={summary.org.id}
                           summary={summary}
                           noRole
+                          index={i}
                         />
                       ))}
                     </div>

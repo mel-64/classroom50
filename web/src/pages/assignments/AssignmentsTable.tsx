@@ -15,6 +15,7 @@ import {
 } from "@/api/mutations/assignments"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import type { Assignment, Student } from "@/types/classroom"
+import { EnterDiv } from "@/lib/motionComponents"
 
 const DeleteAssignmentButton = ({
   org,
@@ -124,19 +125,19 @@ const SkeletonRows = ({ rows = 4 }: { rows?: number }) => (
     {Array.from({ length: rows }).map((_, i) => (
       <tr key={i}>
         <td>
-          <div className="skeleton h-4 w-40" />
+          <div className="skeleton skeleton-shimmer h-4 w-40" />
         </td>
         <td>
-          <div className="skeleton h-4 w-24" />
+          <div className="skeleton skeleton-shimmer h-4 w-24" />
         </td>
         <td>
-          <div className="skeleton h-6 w-28" />
+          <div className="skeleton skeleton-shimmer h-6 w-28" />
         </td>
         <td>
-          <div className="skeleton h-4 w-56" />
+          <div className="skeleton skeleton-shimmer h-4 w-56" />
         </td>
         <td>
-          <div className="skeleton ml-auto h-8 w-16" />
+          <div className="skeleton skeleton-shimmer ml-auto h-8 w-16" />
         </td>
       </tr>
     ))}
@@ -165,7 +166,10 @@ const AssignmentsTable = ({
   const navigate = useNavigate()
 
   return (
-    <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
+    <EnterDiv
+      key={loading ? "loading" : "loaded"}
+      className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100"
+    >
       <table className="table">
         <thead>
           <tr>
@@ -328,7 +332,7 @@ const AssignmentsTable = ({
             ))}
         </tbody>
       </table>
-    </div>
+    </EnterDiv>
   )
 }
 

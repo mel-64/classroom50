@@ -22,6 +22,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import RequireTeacher from "@/components/RequireTeacher"
+import { LoadingSwap } from "@/lib/LoadingSwap"
 
 const EditClassroomContent = ({
   org,
@@ -82,58 +83,59 @@ const EditClassroomContent = ({
     },
   })
 
-  if (loadingClassroom) {
-    return (
-      <div className="flex">
-        <div className="m-auto loading loading-spinner" />
-      </div>
-    )
-  }
-
-  if (!cl) {
-    return (
-      <div className="alert alert-error">Could not load classroom data.</div>
-    )
-  }
-
   return (
-    <>
-      <div className="flex justify-between">
-        <div>
-          <h1 className="text-xl pt-8 pb-2 font-bold">Classroom Settings</h1>
-          <p className="pb-10 text-sm text-base-content/60">
-            Configuration for the{" "}
-            <span className="font-semibold">
-              {cl.name || cl.short_name || classroom}
-            </span>{" "}
-            classroom.
-          </p>
+    <LoadingSwap
+      loading={loadingClassroom}
+      fallback={
+        <div className="flex">
+          <div className="m-auto loading loading-spinner" />
         </div>
-      </div>
-      <div className="flex flex-col">
-        <div className="mb-8">
-          <EditClassroomForm
-            cl={cl}
-            onSubmit={(values) =>
-              runSave(() =>
-                editClassroomMutation.mutateAsync({
-                  name: values.name,
-                  slug: classroom,
-                  org,
-                  term: values.term,
-                  onboarding_cleanup: values.onboarding_cleanup,
-                }),
-              )
-            }
-          />
-          <ClassroomStaffSection
-            org={org}
-            classroom={classroom}
-            disabled={isClassroomArchived(cl)}
-          />
-        </div>
-      </div>
-    </>
+      }
+    >
+      {!cl ? (
+        <div className="alert alert-error">Could not load classroom data.</div>
+      ) : (
+        <>
+          <div className="flex justify-between">
+            <div>
+              <h1 className="text-xl pt-8 pb-2 font-bold">
+                Classroom Settings
+              </h1>
+              <p className="pb-10 text-sm text-base-content/60">
+                Configuration for the{" "}
+                <span className="font-semibold">
+                  {cl.name || cl.short_name || classroom}
+                </span>{" "}
+                classroom.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col">
+            <div className="mb-8">
+              <EditClassroomForm
+                cl={cl}
+                onSubmit={(values) =>
+                  runSave(() =>
+                    editClassroomMutation.mutateAsync({
+                      name: values.name,
+                      slug: classroom,
+                      org,
+                      term: values.term,
+                      onboarding_cleanup: values.onboarding_cleanup,
+                    }),
+                  )
+                }
+              />
+              <ClassroomStaffSection
+                org={org}
+                classroom={classroom}
+                disabled={isClassroomArchived(cl)}
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </LoadingSwap>
   )
 }
 

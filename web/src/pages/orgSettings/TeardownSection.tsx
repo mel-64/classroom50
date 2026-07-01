@@ -16,6 +16,7 @@ import {
   type TeardownPlan,
 } from "@/api/mutations/teardown"
 import SettingsSection from "./SettingsSection"
+import { CalloutDiv, CalloutText } from "@/lib/motionComponents"
 
 // Teardown / org reset: deletes ALL repos in the org (mirroring the CLI's
 // `gh teacher teardown`), marker-gated and behind a typed-org-name
@@ -101,11 +102,13 @@ const TeardownSection = ({ org }: { org: string }) => {
       }
     >
       {error && (
-        <div className="rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+        <CalloutDiv className="rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
           {error}
-        </div>
+        </CalloutDiv>
       )}
-      {done && <p className="text-sm text-success">{done}</p>}
+      {done && (
+        <CalloutText className="text-sm text-success">{done}</CalloutText>
+      )}
 
       <button
         type="button"

@@ -51,6 +51,9 @@ import { unmatchedTeamMembers, type MatchCandidate } from "@/util/orgMembers"
 import EditStudent from "@/pages/students/EditStudent"
 import type { StudentCsvRow } from "@/api/mutations/students"
 import { Link2 } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
+import { collapseVariants, enterExit } from "@/lib/motion"
+import { EnterDiv } from "@/lib/motionComponents"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 // #218: group students by roster `section`, sorted by name with the unlabeled
@@ -1036,8 +1039,13 @@ const EnrolledStudents = ({
       "?"
 
     return (
-      <li
+      <motion.li
         key={rowKey}
+        layout
+        variants={enterExit}
+        initial="initial"
+        animate="animate"
+        exit="exit"
         className="flex items-center justify-between gap-4 px-6 py-4"
       >
         <div className="min-w-0 flex-1">
@@ -1193,7 +1201,7 @@ const EnrolledStudents = ({
             }}
           />
         </div>
-      </li>
+      </motion.li>
     )
   }
 
@@ -1201,10 +1209,19 @@ const EnrolledStudents = ({
     <div className="flex w-full flex-col gap-6">
       {/* Action results surface here at the top: the triggering section often
           unmounts afterward (e.g. confirming empties the Ready section). */}
-      {reconcileSummary || Object.keys(teamWarnings).length > 0 ? (
-        <div className="flex w-full flex-col gap-2">
+      <div className="flex w-full flex-col gap-2">
+        <AnimatePresence initial={false}>
           {reconcileSummary ? (
-            <div role="alert" className="alert alert-info alert-soft">
+            <motion.div
+              key="reconcile-summary"
+              layout
+              variants={collapseVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              role="alert"
+              className="alert alert-info alert-soft overflow-hidden"
+            >
               <span className="text-sm">Enrollment: {reconcileSummary}</span>
               <button
                 type="button"
@@ -1213,14 +1230,19 @@ const EnrolledStudents = ({
               >
                 Dismiss
               </button>
-            </div>
+            </motion.div>
           ) : null}
 
           {Object.entries(teamWarnings).map(([username, warning]) => (
-            <div
+            <motion.div
               key={username}
+              layout
+              variants={collapseVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
               role="alert"
-              className="alert alert-warning alert-soft"
+              className="alert alert-warning alert-soft overflow-hidden"
             >
               <span className="text-sm">{warning}</span>
               <button
@@ -1230,10 +1252,10 @@ const EnrolledStudents = ({
               >
                 Dismiss
               </button>
-            </div>
+            </motion.div>
           ))}
-        </div>
-      ) : null}
+        </AnimatePresence>
+      </div>
 
       {/* Wait on all partition queries to avoid an onboarded student flashing in
           "Awaiting enrollment" before jumping to "Ready". The Invite card still
@@ -1248,38 +1270,50 @@ const EnrolledStudents = ({
       ) : null}
 
       {/* Ready for enrollment confirmation (state 2). */}
-      {rosterReady && readyToConfirm.length > 0 ? (
-        <div className="card card-border w-full overflow-hidden border-info/30 bg-info/5 shadow-sm">
-          <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-info/20">
-            <div className="flex flex-col">
-              <h2 className="text-lg font-semibold text-info">
-                Ready for enrollment confirmation
-              </h2>
-              <span className="mt-0.5 text-sm text-base-content/60">
-                {readyToConfirm.length} student
-                {readyToConfirm.length === 1 ? " has" : "s have"} onboarded.
-                Confirm to add them to your roster.
-              </span>
+      <AnimatePresence initial={false}>
+        {rosterReady && readyToConfirm.length > 0 ? (
+          <motion.div
+            key="ready-to-confirm"
+            layout
+            variants={enterExit}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="card card-border w-full overflow-hidden border-info/30 bg-info/5 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-info/20">
+              <div className="flex flex-col">
+                <h2 className="text-lg font-semibold text-info">
+                  Ready for enrollment confirmation
+                </h2>
+                <span className="mt-0.5 text-sm text-base-content/60">
+                  {readyToConfirm.length} student
+                  {readyToConfirm.length === 1 ? " has" : "s have"} onboarded.
+                  Confirm to add them to your roster.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary shrink-0"
+                onClick={() =>
+                  void runReconcile(() => reconcileMutation.mutateAsync())
+                }
+                disabled={reconcileMutation.isPending}
+              >
+                <RefreshCw
+                  className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
+                />
+                Confirm enrollment ({readyToConfirm.length})
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary shrink-0"
-              onClick={() =>
-                void runReconcile(() => reconcileMutation.mutateAsync())
-              }
-              disabled={reconcileMutation.isPending}
-            >
-              <RefreshCw
-                className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
-              />
-              Confirm enrollment ({readyToConfirm.length})
-            </button>
-          </div>
-          <ul className="divide-y divide-base-300 bg-base-100">
-            {readyToConfirm.map((student) => renderStudentRow(student))}
-          </ul>
-        </div>
-      ) : null}
+            <ul className="divide-y divide-base-300 bg-base-100">
+              <AnimatePresence initial={false}>
+                {readyToConfirm.map((student) => renderStudentRow(student))}
+              </AnimatePresence>
+            </ul>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* Invite students: share links. */}
       <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
@@ -1318,40 +1352,52 @@ const EnrolledStudents = ({
       </div>
 
       {/* Awaiting enrollment (state 1): invited, not yet onboarded. */}
-      {rosterReady && awaitingEnrollment.length > 0 ? (
-        <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
-          <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">
-            <div className="flex flex-col">
-              <h2 className="text-lg font-semibold">Awaiting enrollment</h2>
-              <span className="mt-0.5 text-sm text-base-content/60">
-                Invited, but haven&apos;t completed onboarding yet.
-              </span>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {statusAvailable ? (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
-                  onClick={() => setConfirmResendAllOpen(true)}
-                >
-                  <Send className="size-4" />
-                  Resend invites
-                </button>
-              ) : null}
-              <div className="badge badge-ghost badge-soft text-base">
-                {awaitingEnrollment.length}
+      <AnimatePresence initial={false}>
+        {rosterReady && awaitingEnrollment.length > 0 ? (
+          <motion.div
+            key="awaiting-enrollment"
+            layout
+            variants={enterExit}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="card card-border w-full overflow-hidden bg-base-100 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">
+              <div className="flex flex-col">
+                <h2 className="text-lg font-semibold">Awaiting enrollment</h2>
+                <span className="mt-0.5 text-sm text-base-content/60">
+                  Invited, but haven&apos;t completed onboarding yet.
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {statusAvailable ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => setConfirmResendAllOpen(true)}
+                  >
+                    <Send className="size-4" />
+                    Resend invites
+                  </button>
+                ) : null}
+                <div className="badge badge-ghost badge-soft text-base">
+                  {awaitingEnrollment.length}
+                </div>
               </div>
             </div>
-          </div>
-          <ul className="divide-y divide-base-300">
-            {awaitingEnrollment.map((student) => renderStudentRow(student))}
-          </ul>
-        </div>
-      ) : null}
+            <ul className="divide-y divide-base-300">
+              <AnimatePresence initial={false}>
+                {awaitingEnrollment.map((student) => renderStudentRow(student))}
+              </AnimatePresence>
+            </ul>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* Enrolled students (state 3) — reviewed last. */}
       {rosterReady ? (
-        <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
+        <EnterDiv className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
           <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
             <h2 className="text-lg font-semibold">Enrolled students</h2>
             <div className="flex items-center gap-3">
@@ -1385,14 +1431,18 @@ const EnrolledStudents = ({
                       </span>
                     </div>
                     <ul className="divide-y divide-base-300">
-                      {group.map((student) => renderStudentRow(student))}
+                      <AnimatePresence initial={false}>
+                        {group.map((student) => renderStudentRow(student))}
+                      </AnimatePresence>
                     </ul>
                   </div>
                 ))}
               </div>
             ) : (
               <ul className="divide-y divide-base-300">
-                {enrolled.map((student) => renderStudentRow(student))}
+                <AnimatePresence initial={false}>
+                  {enrolled.map((student) => renderStudentRow(student))}
+                </AnimatePresence>
               </ul>
             )
           ) : (
@@ -1400,7 +1450,7 @@ const EnrolledStudents = ({
               No students enrolled yet.
             </div>
           )}
-        </div>
+        </EnterDiv>
       ) : null}
 
       <ConfirmModal

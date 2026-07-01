@@ -25,6 +25,7 @@ import type {
 import { REPAIRABLE_CONCERNS, repairConcern } from "@/orgPolicy/repair"
 import type { CheckState } from "@/hooks/github/orgChecks"
 import SettingsSection from "./SettingsSection"
+import { CalloutDiv } from "@/lib/motionComponents"
 
 // Org policy audit pane: surfaces every org/repo policy concern with its live
 // drift verdict, the unenforced member-default fields (each with its manual
@@ -203,7 +204,7 @@ function AuditBody({
 
   return (
     <>
-      <div
+      <CalloutDiv
         className={[
           "mt-4 flex items-start gap-3 rounded-xl border p-4 text-sm",
           banner.className,
@@ -226,7 +227,7 @@ function AuditBody({
             </p>
           )}
         </div>
-      </div>
+      </CalloutDiv>
 
       <div className="mt-4 grid gap-2">
         {report.concerns.map((c) => (

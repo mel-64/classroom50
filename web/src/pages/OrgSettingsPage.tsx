@@ -16,6 +16,7 @@ import OrgPolicyAuditPane from "@/pages/orgSettings/OrgPolicyAuditPane"
 import RerunOnboarding from "@/pages/orgSettings/RerunOnboarding"
 import TeardownSection from "@/pages/orgSettings/TeardownSection"
 import SettingsSection from "@/pages/orgSettings/SettingsSection"
+import { CalloutDiv } from "@/lib/motionComponents"
 import {
   CalendarClock,
   CheckCircle2,
@@ -220,7 +221,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           const banner = TOKEN_STATUS_BANNER[tokenStatus.status]
           const { Icon } = banner
           return (
-            <div
+            <CalloutDiv
               className={[
                 "flex items-start gap-3 rounded-xl border p-4 text-sm",
                 banner.className,
@@ -243,7 +244,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                   </p>
                 )}
               </div>
-            </div>
+            </CalloutDiv>
           )
         })()}
 

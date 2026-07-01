@@ -20,6 +20,7 @@ import EditAssignmentForm from "./assignments/EditAssignmentForm"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { isClassroomArchived } from "@/types/classroom"
+import { EnterDiv } from "@/lib/motionComponents"
 
 const EditAssignmentFormStudent = ({
   org,
@@ -60,7 +61,7 @@ const EditAssignmentFormStudent = ({
 
   if (!assignmentRepo) {
     return (
-      <div className="alert alert-warning mt-6">
+      <EnterDiv className="alert alert-warning mt-6">
         <div>
           You do not have this assignment yet! Do you need to{" "}
           <Link
@@ -72,7 +73,7 @@ const EditAssignmentFormStudent = ({
           </Link>{" "}
           first?
         </div>
-      </div>
+      </EnterDiv>
     )
   }
 

@@ -4,31 +4,82 @@
   themes: corporate --default;
 }
 
+/* Motion design tokens. One source of truth for animation timing shared by the
+   `.btn` press rule below and the JS variants in src/lib/motion.ts. Durations
+   are deliberately short (a productivity tool should feel responsive, not
+   theatrical); ease-out gives a fast start and gentle settle. */
+@theme {
+  --duration-fast: 100ms;
+  --duration-base: 150ms;
+  --duration-slow: 200ms;
+  --ease-out-soft: cubic-bezier(0, 0, 0.2, 1);
+}
+
 html,
 body {
   font-family: "Inter", system-ui, sans-serif;
 }
 
-/* App-wide affordance for clickable list rows: a subtle hover lift + tint that
-   signals the whole row is interactive. Pairs with `group/row` so children
-   (e.g. a trailing chevron) can react via `group-hover/row:`. Respects reduced
-   motion by only transitioning color there. */
-@utility clickable-row {
-  cursor: pointer;
-  transition:
-    background-color 150ms ease,
-    transform 150ms ease,
-    box-shadow 150ms ease;
-  &:hover {
-    background-color: var(--color-base-200);
-    transform: translateY(-1px);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+/* Loading skeletons: a moving sheen sweeping left-to-right signals "loading"
+   more clearly than a static block. Layered over daisyUI's `skeleton` base via
+   `className="skeleton skeleton-shimmer"`. */
+@utility skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(255 255 255 / 0.45),
+      transparent
+    );
+    animation: shimmer 1.5s ease-in-out infinite;
   }
   @media (prefers-reduced-motion: reduce) {
-    transition: background-color 150ms ease;
-    &:hover {
-      transform: none;
-      box-shadow: none;
+    &::after {
+      animation: none;
+      display: none;
     }
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Micro-interaction feedback for every daisyUI button (there is no shared
+   Button component; this covers all `.btn` sites at once). A slight press-in on
+   :active makes clicks feel tactile. daisyUI already handles hover colors. */
+.btn {
+  transition:
+    transform var(--duration-fast) var(--ease-out-soft),
+    background-color var(--duration-base) var(--ease-out-soft),
+    border-color var(--duration-base) var(--ease-out-soft),
+    color var(--duration-base) var(--ease-out-soft),
+    box-shadow var(--duration-base) var(--ease-out-soft);
+}
+.btn:active:not(.btn-disabled):not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Global safety net: honor an explicit reduced-motion preference everywhere,
+   even for animations that forgot their own guard. Near-instant rather than
+   truly 0ms so single-run transitions still fire their end events. Functional
+   spinners (daisyUI `.loading`, Tailwind `animate-spin`) are exempted so they
+   keep spinning during real async work — a frozen loading ring reads as a hang. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.loading):not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -11,6 +11,8 @@ import {
   Loader2,
   ShieldAlert,
 } from "lucide-react"
+import { motion } from "motion/react"
+import { enterExit, staggerTransition } from "@/lib/motion"
 
 import Drawer, {
   DrawerContent,
@@ -233,9 +235,11 @@ function ResourceRow({ resource }: { resource: Resource }) {
 function ClassroomResources({
   org,
   classroom,
+  index = 0,
 }: {
   org: string
   classroom: string
+  index?: number
 }) {
   const base = pagesBaseUrl(org)
   const { data: classroomData } = useGetClassroom(org, classroom)
@@ -293,7 +297,13 @@ function ClassroomResources({
   }, [assignments, classroomBase])
 
   return (
-    <div className="rounded-2xl border border-base-200 bg-base-100">
+    <motion.div
+      className="rounded-2xl border border-base-200 bg-base-100"
+      variants={enterExit}
+      initial="initial"
+      animate="animate"
+      transition={staggerTransition(index)}
+    >
       <button
         type="button"
         className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
@@ -345,7 +355,7 @@ function ClassroomResources({
           ))}
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }
 
@@ -430,8 +440,13 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
           </div>
         ) : (
           <div className="mt-4 flex flex-col gap-4">
-            {classes.map((cl) => (
-              <ClassroomResources key={cl.path} org={org} classroom={cl.path} />
+            {classes.map((cl, i) => (
+              <ClassroomResources
+                key={cl.path}
+                org={org}
+                classroom={cl.path}
+                index={i}
+              />
             ))}
           </div>
         )}

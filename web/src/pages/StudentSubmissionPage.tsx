@@ -25,6 +25,7 @@ import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { safeHttpUrl } from "@/util/url"
 import type { GitHubRelease } from "@/hooks/github/types"
 import type { Assignment } from "@/types/classroom"
+import { EnterDiv } from "@/lib/motionComponents"
 
 // Strips the `submit/` tag prefix for a friendlier label, falling back to the
 // release name when present.
@@ -122,8 +123,8 @@ const SubmissionBody = ({
   if (isLoading || repoLoading) {
     return (
       <div className="mt-8 space-y-4">
-        <div className="skeleton h-24 w-full rounded-box" />
-        <div className="skeleton h-64 w-full rounded-box" />
+        <div className="skeleton skeleton-shimmer h-24 w-full rounded-box" />
+        <div className="skeleton skeleton-shimmer h-64 w-full rounded-box" />
       </div>
     )
   }
@@ -146,7 +147,7 @@ const SubmissionBody = ({
   // No repo means the student hasn't accepted yet.
   if (!studentRepo) {
     return (
-      <div className="alert alert-warning mt-6">
+      <EnterDiv className="alert alert-warning mt-6">
         <div>
           You haven't accepted this assignment yet.{" "}
           <Link
@@ -159,13 +160,13 @@ const SubmissionBody = ({
           </Link>{" "}
           to get your repository, then push your work to be graded.
         </div>
-      </div>
+      </EnterDiv>
     )
   }
 
   if (!releases || releases.length === 0) {
     return (
-      <div className="mt-6 space-y-4">
+      <EnterDiv className="mt-6 space-y-4">
         <div className="alert alert-info">
           <div>
             No graded submission yet. Push a commit to your assignment
@@ -181,7 +182,7 @@ const SubmissionBody = ({
           <ExternalLink className="size-4" />
           Open my repository
         </a>
-      </div>
+      </EnterDiv>
     )
   }
 
@@ -203,13 +204,13 @@ const SubmissionBody = ({
         </a>
       </div>
 
-      <div className="card border border-base-200 bg-base-100 shadow-sm">
+      <EnterDiv className="card border border-base-200 bg-base-100 shadow-sm">
         <ul className="divide-y divide-base-200">
           {releases.map((release) => (
             <ReleaseRow key={release.id} release={release} />
           ))}
         </ul>
-      </div>
+      </EnterDiv>
     </div>
   )
 }

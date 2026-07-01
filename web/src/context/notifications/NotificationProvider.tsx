@@ -9,6 +9,8 @@ import {
   type PropsWithChildren,
 } from "react"
 import { X } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
+import { toastVariants } from "@/lib/motion"
 
 export type ToastTone = "info" | "success" | "warning" | "error"
 
@@ -130,28 +132,35 @@ const ToastViewport = ({
   toasts: Toast[]
   onDismiss: (id: string) => void
 }) => {
-  if (toasts.length === 0) return null
-
+  // Keep the container mounted even when empty so AnimatePresence can play the
+  // exit animation of the last toast before it disappears.
   return (
     <div className="toast toast-end toast-bottom z-50">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          role="alert"
-          aria-live={toast.tone === "error" ? "assertive" : "polite"}
-          className={`${TONE_CLASS[toast.tone]} max-w-sm`}
-        >
-          <span className="text-sm">{toast.message}</span>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            aria-label="Dismiss notification"
-            onClick={() => onDismiss(toast.id)}
+      <AnimatePresence>
+        {toasts.map((toast) => (
+          <motion.div
+            key={toast.id}
+            layout
+            variants={toastVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            role="alert"
+            aria-live={toast.tone === "error" ? "assertive" : "polite"}
+            className={`${TONE_CLASS[toast.tone]} max-w-sm`}
           >
-            <X className="size-4" />
-          </button>
-        </div>
-      ))}
+            <span className="text-sm">{toast.message}</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              aria-label="Dismiss notification"
+              onClick={() => onDismiss(toast.id)}
+            >
+              <X className="size-4" />
+            </button>
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   )
 }

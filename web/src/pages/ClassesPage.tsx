@@ -34,6 +34,7 @@ import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import OrgPreflightNotice from "@/pages/orgSettings/OrgPreflightNotice"
+import { EnterDiv } from "@/lib/motionComponents"
 
 type ClassFilter = "active" | "archived" | "all"
 
@@ -65,7 +66,7 @@ const ClassCard = ({
   if (filter === "archived" && !archived) return null
 
   return (
-    <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
+    <EnterDiv className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
       {canEdit && (
         <Link
           to="/$org/$classroom/edit"
@@ -105,7 +106,7 @@ const ClassCard = ({
           View Assignments
         </Link>
       </div>
-    </div>
+    </EnterDiv>
   )
 }
 
@@ -210,7 +211,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
     Boolean(classroom && assignment) && assignmentData?.mode === "group"
 
   return (
-    <div className="card relative col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
+    <EnterDiv className="card relative col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
       {canManageGroup && classroom && assignment && (
         <Link
           to="/$org/$classroom/assignments/$assignment/edit"
@@ -309,7 +310,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
           </a>
         </div>
       </div>
-    </div>
+    </EnterDiv>
   )
 }
 
@@ -402,7 +403,7 @@ const ClassesPage = () => {
 
                 <div>
                   {roleLoading ? (
-                    <div className="skeleton h-8 w-48" />
+                    <div className="skeleton skeleton-shimmer h-8 w-48" />
                   ) : (
                     <h1 className="text-2xl font-bold tracking-tight">
                       My {isTeacher ? "Classes" : "Assignments"}
@@ -437,7 +438,7 @@ const ClassesPage = () => {
               {Array.from({ length: 3 }).map((_, i) => (
                 <div
                   key={i}
-                  className="skeleton col-span-6 h-32 rounded-xl xl:col-span-4"
+                  className="skeleton skeleton-shimmer col-span-6 h-32 rounded-xl xl:col-span-4"
                 />
               ))}
             </div>
