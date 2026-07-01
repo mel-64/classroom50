@@ -60,7 +60,7 @@ export const AppBanner = ({
             className="btn btn-ghost btn-xs btn-square -mr-1 shrink-0"
             onClick={onDismiss}
           >
-            <X className="size-4" />
+            <X aria-hidden="true" className="size-4" />
           </button>
         ) : null}
       </div>

@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { RouterProvider } from "@tanstack/react-router"
 
 import router from "./router"
+import { Spinner } from "@/components/Spinner"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 
 export function App() {
@@ -15,7 +16,7 @@ export function App() {
   if (status === "loading") {
     return (
       <div className="min-h-screen grid place-items-center">
-        <span className="loading loading-spinner loading-lg" />
+        <Spinner size="lg" label="Loading Classroom 50" />
       </div>
     )
   }

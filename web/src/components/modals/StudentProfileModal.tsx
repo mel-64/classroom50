@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useId, useRef } from "react"
 import { ExternalLink, X } from "lucide-react"
 
 import GitHub from "@/assets/github.svg?react"
@@ -24,6 +24,7 @@ export const StudentProfileModal = ({
   repoName?: string
 }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
 
   // Mounted only while a profile is selected (caller gates on `profileStudent`
   // + remounts via `key`), so open once on mount; ESC/backdrop/X fire onClose,
@@ -56,7 +57,7 @@ export const StudentProfileModal = ({
           target="_blank"
           rel="noreferrer"
         >
-          <GitHub className="size-4" />@{student.username}
+          <GitHub aria-hidden="true" className="size-4" />@{student.username}
         </a>
       ) : (
         <span className="text-base-content/70">Not linked yet</span>
@@ -68,14 +69,19 @@ export const StudentProfileModal = ({
   ]
 
   return (
-    <dialog ref={dialogRef} className="modal" onClose={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="modal"
+      onClose={onClose}
+      aria-labelledby={titleId}
+    >
       <div className="modal-box max-w-md">
         <form method="dialog">
           <button
             className="btn btn-sm btn-circle btn-ghost absolute right-3 top-3"
             aria-label="Close"
           >
-            <X className="size-4" />
+            <X className="size-4" aria-hidden="true" />
           </button>
         </form>
 
@@ -86,7 +92,9 @@ export const StudentProfileModal = ({
             </div>
           </div>
           <div className="min-w-0">
-            <h3 className="truncate text-lg font-bold">{name}</h3>
+            <h3 id={titleId} className="truncate text-lg font-bold">
+              {name}
+            </h3>
             {student.section?.trim() ? (
               <span className="badge badge-sm badge-ghost">
                 {student.section.trim()}
@@ -117,8 +125,9 @@ export const StudentProfileModal = ({
             rel="noreferrer"
             title={repoName}
           >
-            <GitHub className="size-4" /> Open assignment repo
-            <ExternalLink className="size-3.5" />
+            <GitHub aria-hidden="true" className="size-4" /> Open assignment
+            repo
+            <ExternalLink aria-hidden="true" className="size-3.5" />
           </a>
         ) : null}
       </div>

@@ -156,7 +156,7 @@ const ToastViewport = ({
               aria-label="Dismiss notification"
               onClick={() => onDismiss(toast.id)}
             >
-              <X className="size-4" />
+              <X aria-hidden="true" className="size-4" />
             </button>
           </motion.div>
         ))}

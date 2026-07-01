@@ -39,13 +39,15 @@ const DeleteAssignmentButton = ({
   return (
     <>
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation()
           setOpen(true)
         }}
         className="btn btn-circle btn-sm btn-ghost text-error"
+        aria-label={`Delete ${assignment.name || assignment.slug}`}
       >
-        <Trash2 className="size-4" />
+        <Trash2 className="size-4" aria-hidden="true" />
       </button>
 
       <ConfirmModal
@@ -105,7 +107,7 @@ const ReuseAssignmentButton = ({
         title="Reuse in another classroom"
         aria-label="Reuse assignment in another classroom"
       >
-        <Copy className="size-4" />
+        <Copy aria-hidden="true" className="size-4" />
       </button>
 
       {open ? (
@@ -171,13 +173,16 @@ const AssignmentsTable = ({
       className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100"
     >
       <table className="table">
+        <caption className="sr-only">Assignments</caption>
         <thead>
           <tr>
-            <th>Assignment</th>
-            <th>Type</th>
-            <th>Due Date</th>
-            <th>Submissions</th>
-            <th></th>
+            <th scope="col">Assignment</th>
+            <th scope="col">Type</th>
+            <th scope="col">Due Date</th>
+            <th scope="col">Submissions</th>
+            <th scope="col">
+              <span className="sr-only">Actions</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -222,12 +227,17 @@ const AssignmentsTable = ({
                 >
                   {assignment.mode === "individual" && (
                     <div className="flex gap-2 h-full">
-                      <UserRound className="max-xl:size-3" /> Individual
+                      <UserRound className="max-xl:size-3" aria-hidden="true" />{" "}
+                      Individual
                     </div>
                   )}
                   {assignment.mode === "group" && (
                     <div className="flex gap-2 h-full">
-                      <UsersRound className="max-xl:size-3" /> Group
+                      <UsersRound
+                        className="max-xl:size-3"
+                        aria-hidden="true"
+                      />{" "}
+                      Group
                     </div>
                   )}
                 </td>
@@ -299,9 +309,9 @@ const AssignmentsTable = ({
                     }}
                   >
                     {archived ? (
-                      <Eye className="size-4" />
+                      <Eye aria-hidden="true" className="size-4" />
                     ) : (
-                      <Pencil className="size-4" />
+                      <Pencil aria-hidden="true" className="size-4" />
                     )}
                   </Link>
                   {archived ? null : (

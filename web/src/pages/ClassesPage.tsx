@@ -22,6 +22,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubFileListing, GitHubRepo } from "@/hooks/github/types"
 import MissingParams from "@/components/MissingParams"
 import useGetClassroom from "@/hooks/useGetClassroom"
@@ -75,7 +76,7 @@ const ClassCard = ({
           aria-label={`Edit ${cl.name}`}
           title="Edit assignment"
         >
-          <Pencil className="size-4" />
+          <Pencil aria-hidden="true" className="size-4" />
         </Link>
       )}
       <div className="card-body gap-4">
@@ -93,7 +94,7 @@ const ClassCard = ({
             "Unknown Class Name"}
         </h1>
         <div className="flex gap-2 h-6">
-          <UsersRound />
+          <UsersRound aria-hidden="true" />
           {students ? `${students.length} Students` : "No Students"}
         </div>
         <Link
@@ -102,7 +103,7 @@ const ClassCard = ({
           params={{ org, classroom: cl.path }}
           className="btn btn-outline btn-primary w-full"
         >
-          <BookText />
+          <BookText aria-hidden="true" />
           View Assignments
         </Link>
       </div>
@@ -114,7 +115,7 @@ const CreateClassroomPane = ({ org }: { org: string }) => (
   <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
     <div className="card-body items-center py-12 text-center">
       <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Plus className="size-7" />
+        <Plus aria-hidden="true" className="size-7" />
       </div>
 
       <h2 className="card-title text-xl">No classrooms yet</h2>
@@ -131,7 +132,7 @@ const CreateClassroomPane = ({ org }: { org: string }) => (
           type="button"
           className="btn btn-primary"
         >
-          <Plus className="size-4" />
+          <Plus aria-hidden="true" className="size-4" />
           Create classroom
         </Link>
       </div>
@@ -158,7 +159,7 @@ const JoinOrgCard = ({ org }: { org: string }) => {
     <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
       <div className="card-body items-center py-12 text-center">
         <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Plus className="size-7" />
+          <Plus aria-hidden="true" className="size-7" />
         </div>
 
         <h2 className="card-title text-xl">Join this classroom</h2>
@@ -183,9 +184,12 @@ const JoinOrgCard = ({ org }: { org: string }) => {
             onClick={() => void run(() => mutation.mutateAsync())}
           >
             {mutation.isPending ? (
-              <span className="loading loading-spinner loading-sm" />
+              <span
+                className="loading loading-spinner loading-sm"
+                aria-hidden="true"
+              />
             ) : (
-              <Plus className="size-4" />
+              <Plus aria-hidden="true" className="size-4" />
             )}
             {mutation.isPending ? "Joining..." : "Join organization"}
           </button>
@@ -220,7 +224,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
           aria-label={`Manage group for ${assignment}`}
           title="Manage group"
         >
-          <Pencil className="size-4" />
+          <Pencil aria-hidden="true" className="size-4" />
         </Link>
       )}
 
@@ -229,7 +233,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <BookOpen className="size-5" />
+                <BookOpen aria-hidden="true" className="size-5" />
               </div>
 
               <div className="min-w-0">
@@ -257,7 +261,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
                 params={{ org, classroom }}
                 className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
               >
-                <GraduationCap className="size-4" />
+                <GraduationCap aria-hidden="true" className="size-4" />
                 <span className="truncate">
                   Classroom:{" "}
                   <span className="font-medium text-base-content/80 group-hover:text-primary">
@@ -273,7 +277,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
                 params={{ org, classroom, assignment }}
                 className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
               >
-                <BookOpen className="size-4" />
+                <BookOpen aria-hidden="true" className="size-4" />
                 <span className="truncate">
                   Assignment:{" "}
                   <span className="font-medium text-base-content/80 group-hover:text-primary">
@@ -289,12 +293,12 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
           <div className="flex flex-wrap items-end gap-2">
             {assignmentData?.mode === "individual" && (
               <div className="badge badge-ghost badge-sm py-3">
-                <UserRound className="size-4" /> Individual
+                <UserRound aria-hidden="true" className="size-4" /> Individual
               </div>
             )}
             {assignmentData?.mode === "group" && (
               <div className="badge badge-ghost badge-sm">
-                <UsersRound className="size-4" /> Group
+                <UsersRound aria-hidden="true" className="size-4" /> Group
               </div>
             )}
           </div>
@@ -306,7 +310,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
             className="btn btn-sm btn-primary"
           >
             Open repo
-            <ExternalLink className="size-4" />
+            <ExternalLink aria-hidden="true" className="size-4" />
           </a>
         </div>
       </div>
@@ -336,7 +340,10 @@ export const OrgRepos = ({
     return (
       <div className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center">
         <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-base-200">
-          <BookOpen className="size-6 text-base-content/70" />
+          <BookOpen
+            aria-hidden="true"
+            className="size-6 text-base-content/70"
+          />
         </div>
 
         <h2 className="text-lg font-semibold">No assignment repos yet</h2>
@@ -359,6 +366,7 @@ export const OrgRepos = ({
 }
 
 const ClassesPage = () => {
+  useDocumentTitle("Classes")
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
   const {
@@ -389,7 +397,7 @@ const ClassesPage = () => {
             <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <GitHub className="size-5 opacity-70" />
+                  <GitHub aria-hidden="true" className="size-5 opacity-70" />
 
                   <div>
                     <div className="text-xs font-medium uppercase tracking-wide text-base-content/70">

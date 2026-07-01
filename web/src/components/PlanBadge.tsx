@@ -20,7 +20,7 @@ const PlanBadge = ({
       className={`badge badge-ghost badge-sm gap-1 capitalize ${className}`.trim()}
       title={title}
     >
-      <GitHub className="size-3" />
+      <GitHub className="size-3" aria-hidden="true" />
       {name} plan
     </span>
   )

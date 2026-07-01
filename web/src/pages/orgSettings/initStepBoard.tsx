@@ -193,10 +193,12 @@ const STATUS_BADGE_CLASS: Record<InitStepStatus, string> = {
 }
 
 const STATUS_ICON: Record<InitStepStatus, ReactNode> = {
-  complete: <CheckCircle className="size-4" />,
-  warning: <AlertCircle className="size-4" />,
-  error: <AlertTriangle className="size-4" />,
-  running: <span className="loading loading-spinner size-4" />,
+  complete: <CheckCircle aria-hidden="true" className="size-4" />,
+  warning: <AlertCircle aria-hidden="true" className="size-4" />,
+  error: <AlertTriangle aria-hidden="true" className="size-4" />,
+  running: (
+    <span className="loading loading-spinner size-4" aria-hidden="true" />
+  ),
   pending: null,
   skipped: null,
 }
@@ -242,9 +244,15 @@ export const InitStep = ({
       >
         <div className="flex min-w-0 items-start gap-2">
           {open ? (
-            <ChevronDown className="mt-0.5 size-4 shrink-0 text-base-content/70" />
+            <ChevronDown
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-base-content/70"
+            />
           ) : (
-            <ChevronRight className="mt-0.5 size-4 shrink-0 text-base-content/70" />
+            <ChevronRight
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-base-content/70"
+            />
           )}
           <div className="min-w-0">
             <div className="font-semibold">{title}</div>
@@ -286,7 +294,7 @@ export const InitStep = ({
                   className="mt-2 inline-flex items-center gap-1 text-base-content/70 hover:text-primary"
                 >
                   Open the relevant GitHub settings
-                  <ExternalLink className="size-3.5" />
+                  <ExternalLink aria-hidden="true" className="size-3.5" />
                 </a>
               )}
             </div>

@@ -95,14 +95,20 @@ export const DrawerContent = ({
   className?: string
 }) => (
   <div className={`${className} drawer-content`}>
+    <a
+      href="#main-content"
+      className="btn btn-primary btn-sm sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50"
+    >
+      Skip to main content
+    </a>
     <label
       htmlFor={MOBILE_DRAWER_ID}
       aria-label="Open menu"
       className="btn btn-ghost btn-square fixed top-3 left-3 z-30 lg:hidden"
     >
-      <Menu className="size-6" />
+      <Menu className="size-6" aria-hidden="true" />
     </label>
-    {children}
+    <main id="main-content">{children}</main>
   </div>
 )
 
@@ -123,7 +129,8 @@ export const DrawerSidebar = ({
         aria-label="Close menu"
         className="drawer-overlay"
       />
-      <div
+      <nav
+        aria-label="Primary"
         className={`flex flex-col min-h-full bg-neutral text-neutral-content transition-[width] duration-200 ease-out ${
           collapsed
             ? "w-16 min-w-16 [&>div]:px-2"
@@ -137,7 +144,7 @@ export const DrawerSidebar = ({
         ) : (
           <SidebarContent selected={selected} />
         )}
-      </div>
+      </nav>
     </div>
   )
 }
@@ -208,7 +215,10 @@ export const ClassroomLogo = () => {
           data-tip="Expand sidebar"
           aria-label="Expand sidebar"
         >
-          <GraduationCap className="size-8 text-[var(--sidebar-accent)]" />
+          <GraduationCap
+            aria-hidden="true"
+            className="size-8 text-[var(--sidebar-accent)]"
+          />
         </button>
       </div>
     )
@@ -221,7 +231,10 @@ export const ClassroomLogo = () => {
         className="flex flex-1 min-w-0 items-center text-lg text-neutral-content font-bold"
         title="Classroom 50"
       >
-        <GraduationCap className="size-8 text-[var(--sidebar-accent)] shrink-0 mr-2" />
+        <GraduationCap
+          aria-hidden="true"
+          className="size-8 text-[var(--sidebar-accent)] shrink-0 mr-2"
+        />
         <span className="whitespace-nowrap">Classroom 50</span>
       </Link>
       <button
@@ -231,7 +244,7 @@ export const ClassroomLogo = () => {
         aria-label="Collapse sidebar"
         title="Collapse sidebar"
       >
-        <ChevronLeft className="size-5" />
+        <ChevronLeft aria-hidden="true" className="size-5" />
       </button>
     </div>
   )
@@ -250,7 +263,7 @@ const ExpandSidebarButton = () => {
         data-tip="Expand sidebar"
         aria-label="Expand sidebar"
       >
-        <ChevronRight className="size-5" />
+        <ChevronRight aria-hidden="true" className="size-5" />
       </button>
     </div>
   )
@@ -269,7 +282,7 @@ export const AllClasses = ({ org }: { org: string }) => {
           data-tip="All Classes"
           aria-label="All Classes"
         >
-          <ArrowLeft className="size-5" />
+          <ArrowLeft aria-hidden="true" className="size-5" />
         </Link>
       </div>
     )
@@ -397,7 +410,7 @@ const AssignmentSidebarMenu = ({
             data-tip="All Assignments"
             aria-label="All Assignments"
           >
-            <ArrowLeft className="size-5" />
+            <ArrowLeft aria-hidden="true" className="size-5" />
           </Link>
         </div>
       ) : (
@@ -434,7 +447,7 @@ const AssignmentSidebarMenu = ({
                 >
                   <SidebarItemBody
                     label="Submissions"
-                    icon={<UsersRound />}
+                    icon={<UsersRound aria-hidden="true" />}
                     active={onSubmissions}
                   />
                 </Link>
@@ -446,7 +459,7 @@ const AssignmentSidebarMenu = ({
                 >
                   <SidebarItemBody
                     label="Settings"
-                    icon={<Settings />}
+                    icon={<Settings aria-hidden="true" />}
                     active={onSettings}
                   />
                 </Link>
@@ -463,7 +476,7 @@ const AssignmentSidebarMenu = ({
                   >
                     <SidebarItemBody
                       label="Accept Assignment"
-                      icon={<FilePlus2 />}
+                      icon={<FilePlus2 aria-hidden="true" />}
                       active={onAccept}
                     />
                   </Link>
@@ -476,7 +489,7 @@ const AssignmentSidebarMenu = ({
                 >
                   <SidebarItemBody
                     label="My Submission"
-                    icon={<FileCheck2 />}
+                    icon={<FileCheck2 aria-hidden="true" />}
                     active={onSubmission}
                   />
                 </Link>
@@ -489,7 +502,7 @@ const AssignmentSidebarMenu = ({
                   >
                     <SidebarItemBody
                       label="Manage Group"
-                      icon={<UsersRound />}
+                      icon={<UsersRound aria-hidden="true" />}
                       active={onSettings}
                     />
                   </Link>
@@ -531,7 +544,7 @@ export const TeacherSidebarMenu = ({
           <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
             <SidebarItemBody
               label="Assignments"
-              icon={<BookText />}
+              icon={<BookText aria-hidden="true" />}
               active={selected === "assignments"}
             />
           </Link>
@@ -554,7 +567,7 @@ export const TeacherSidebarMenu = ({
                 >
                   <SidebarItemBody
                     label="Students"
-                    icon={<UsersRound />}
+                    icon={<UsersRound aria-hidden="true" />}
                     active={selected === "students"}
                   />
                 </Link>
@@ -564,7 +577,7 @@ export const TeacherSidebarMenu = ({
                   <Link to="/$org/$classroom/edit" params={{ org, classroom }}>
                     <SidebarItemBody
                       label="Settings"
-                      icon={<Settings />}
+                      icon={<Settings aria-hidden="true" />}
                       active={selected === "settings"}
                     />
                   </Link>
@@ -694,6 +707,7 @@ export const SidebarFooter = () => {
       tabIndex={0}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
+      aria-label="Account menu"
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -726,7 +740,7 @@ export const SidebarFooter = () => {
               <li>
                 <details key={menuOpen ? "open" : "closed"}>
                   <summary>
-                    <Eye className="size-4" />
+                    <Eye aria-hidden="true" className="size-4" />
                     <span className="flex-1">View as</span>
                   </summary>
                   <ul>
@@ -750,7 +764,7 @@ export const SidebarFooter = () => {
                             }}
                           >
                             {active ? (
-                              <Check className="size-4" />
+                              <Check aria-hidden="true" className="size-4" />
                             ) : (
                               <span className="size-4" />
                             )}
@@ -775,9 +789,9 @@ export const SidebarFooter = () => {
               aria-pressed={isDark}
             >
               {isDark ? (
-                <Moon className="size-4" />
+                <Moon aria-hidden="true" className="size-4" />
               ) : (
-                <Sun className="size-4" />
+                <Sun aria-hidden="true" className="size-4" />
               )}
               <span className="flex-1 text-left">
                 {isDark ? "Dark mode" : "Light mode"}
@@ -799,14 +813,17 @@ export const SidebarFooter = () => {
               target="_blank"
               rel="noreferrer"
             >
-              <MessageCircleQuestionMark className="size-4" />
+              <MessageCircleQuestionMark
+                aria-hidden="true"
+                className="size-4"
+              />
               Classroom 50 Help
             </a>
           </li>
 
           <li>
             <button type="button" className="text-error" onClick={signOut}>
-              <LogOut className="size-4" />
+              <LogOut aria-hidden="true" className="size-4" />
               Sign Out
             </button>
           </li>
@@ -845,7 +862,7 @@ export const SidebarFooter = () => {
                     className="badge badge-warning badge-xs gap-1"
                     title="You are previewing a role. Your real access is unchanged."
                   >
-                    <Eye className="size-3" />
+                    <Eye aria-hidden="true" className="size-3" />
                     preview
                   </span>
                 ) : null}
@@ -923,7 +940,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             <Link to="/$org" params={{ org }}>
               <SidebarItemBody
                 label={classesLabel}
-                icon={<BookText />}
+                icon={<BookText aria-hidden="true" />}
                 active={!onSettings && !onPublished && !onMembers}
               />
             </Link>
@@ -934,7 +951,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             <Link to="/$org/published" params={{ org }}>
               <SidebarItemBody
                 label="Published"
-                icon={<Globe />}
+                icon={<Globe aria-hidden="true" />}
                 active={onPublished}
               />
             </Link>
@@ -945,7 +962,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             <Link to="/$org/members" params={{ org }}>
               <SidebarItemBody
                 label="Members"
-                icon={<UsersRound />}
+                icon={<UsersRound aria-hidden="true" />}
                 active={onMembers}
               />
             </Link>
@@ -956,7 +973,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             <Link to="/$org/settings" params={{ org }}>
               <SidebarItemBody
                 label="Settings"
-                icon={<Settings />}
+                icon={<Settings aria-hidden="true" />}
                 active={onSettings}
               />
             </Link>
@@ -975,7 +992,7 @@ export const MyOrgs = ({ settings = false }) => {
           <Link to="/">
             <SidebarItemBody
               label="Organizations"
-              icon={<BookText />}
+              icon={<BookText aria-hidden="true" />}
               active={!settings}
             />
           </Link>

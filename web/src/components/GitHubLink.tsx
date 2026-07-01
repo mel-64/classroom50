@@ -23,9 +23,9 @@ export const GitHubLink = ({
     title={title}
     className={`inline-flex cursor-pointer items-center gap-1.5 text-sm text-base-content/70 hover:text-primary ${className}`}
   >
-    {showLogo && <GitHub className="size-4" />}
+    {showLogo && <GitHub className="size-4" aria-hidden="true" />}
     {label}
-    <ExternalLink className="size-3" />
+    <ExternalLink className="size-3" aria-hidden="true" />
   </a>
 )
 

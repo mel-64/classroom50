@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import globals from "globals"
 import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
+import jsxA11y from "eslint-plugin-jsx-a11y"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
 import { defineConfig, globalIgnores } from "eslint/config"
@@ -15,6 +16,7 @@ export default defineConfig([
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
+      jsxA11y.flatConfigs.recommended,
     ],
     languageOptions: {
       globals: globals.browser,
@@ -35,6 +37,60 @@ export default defineConfig([
       // `console.warn`/`console.error` for genuine diagnostics; DEV-only debug
       // logging should be guarded by `import.meta.env.DEV`.
       "no-console": ["warn", { allow: ["warn", "error"] }],
+      // Keep the accessibility invariants from #274 self-checking. Advisory
+      // (warn) so the plugin's stricter defaults don't block the build on
+      // pre-existing markup, but new violations (missing alt/label, invalid
+      // aria-*, click-without-keyboard) surface in `npm run check` output.
+      // Downgraded from the recommended-set's `error` to match the repo's
+      // advisory-warning convention (react-hooks/no-console above).
+      "jsx-a11y/alt-text": "warn",
+      "jsx-a11y/anchor-ambiguous-text": "warn",
+      "jsx-a11y/anchor-has-content": "warn",
+      "jsx-a11y/anchor-is-valid": "warn",
+      "jsx-a11y/aria-activedescendant-has-tabindex": "warn",
+      "jsx-a11y/aria-props": "warn",
+      "jsx-a11y/aria-proptypes": "warn",
+      "jsx-a11y/aria-role": "warn",
+      "jsx-a11y/aria-unsupported-elements": "warn",
+      "jsx-a11y/autocomplete-valid": "warn",
+      "jsx-a11y/click-events-have-key-events": "warn",
+      "jsx-a11y/control-has-associated-label": "warn",
+      "jsx-a11y/heading-has-content": "warn",
+      "jsx-a11y/html-has-lang": "warn",
+      "jsx-a11y/iframe-has-title": "warn",
+      "jsx-a11y/img-redundant-alt": "warn",
+      "jsx-a11y/interactive-supports-focus": "warn",
+      "jsx-a11y/label-has-associated-control": "warn",
+      "jsx-a11y/media-has-caption": "warn",
+      "jsx-a11y/mouse-events-have-key-events": "warn",
+      "jsx-a11y/no-access-key": "warn",
+      // Off: the app uses autoFocus deliberately in modals/forms (a focus-
+      // management aid, not a hazard here).
+      "jsx-a11y/no-autofocus": "off",
+      "jsx-a11y/no-distracting-elements": "warn",
+      "jsx-a11y/no-interactive-element-to-noninteractive-role": "warn",
+      "jsx-a11y/no-noninteractive-element-interactions": "warn",
+      "jsx-a11y/no-noninteractive-element-to-interactive-role": "warn",
+      "jsx-a11y/no-noninteractive-tabindex": "warn",
+      "jsx-a11y/no-redundant-roles": "warn",
+      "jsx-a11y/no-static-element-interactions": "warn",
+      "jsx-a11y/role-has-required-aria-props": "warn",
+      "jsx-a11y/role-supports-aria-props": "warn",
+      "jsx-a11y/scope": "warn",
+      "jsx-a11y/tabindex-no-positive": "warn",
+      // Nudge new loading UI toward the accessible <Spinner> (role=status +
+      // sr-only label) instead of a bare, silent daisyUI spinner span. In-button
+      // spinners may stay inline when the button already carries an aria-label;
+      // this only flags the literal utility class in JSX className literals.
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "JSXAttribute[name.name='className'] > Literal[value=/\\bloading-spinner\\b/]",
+          message:
+            'Prefer the accessible <Spinner> component over a bare `loading loading-spinner` span (it adds role="status" + an sr-only label). In-button spinners may stay inline if the button already has an accessible name.',
+        },
+      ],
     },
   },
   // Last: turn off ESLint rules that conflict with Prettier (formatting is

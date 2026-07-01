@@ -27,7 +27,7 @@ export function ScopeWarningBanner() {
         <AppBanner
           key="revoked"
           tone="error"
-          icon={<TriangleAlert className="size-5" />}
+          icon={<TriangleAlert className="size-5" aria-hidden="true" />}
           title="Your GitHub session has expired"
         >
           <p className="text-base-content/70">
@@ -56,7 +56,7 @@ export function ScopeWarningBanner() {
         <AppBanner
           key="missing-scopes"
           tone="warning"
-          icon={<ShieldAlert className="size-5" />}
+          icon={<ShieldAlert className="size-5" aria-hidden="true" />}
           title="Some GitHub permissions are missing"
           onDismiss={() => setDismissed(true)}
         >

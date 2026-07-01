@@ -15,35 +15,48 @@ const Breadcrumb = ({
   if (!org && !classroom) return <div></div>
 
   return (
-    <div className={`[&>a]:text-primary ${className}`}>
-      {org && (
-        <Link to="/$org" params={{ org }}>
-          Classes
-        </Link>
-      )}{" "}
-      {org && classroom && <>› </>}
-      {org && classroom && (
-        <Link to="/$org/$classroom" params={{ org, classroom }}>
-          {classData?.name || classData?.short_name || classroom}
-        </Link>
-      )}{" "}
-      {org && classroom && assignment && (
-        <>
-          ›{" "}
-          <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
-            Assignments
-          </Link>{" "}
-          ›{" "}
-          <Link
-            to="/$org/$classroom/assignments/$assignment"
-            params={{ org, classroom, assignment }}
-          >
-            {assignment}
-          </Link>
-        </>
-      )}{" "}
-      {endpoint && <>› {endpoint}</>}
-    </div>
+    <nav
+      aria-label="Breadcrumb"
+      className={`breadcrumbs text-sm [&_a]:text-primary ${className ?? ""}`}
+    >
+      <ol>
+        {org && (
+          <li>
+            <Link to="/$org" params={{ org }}>
+              Classes
+            </Link>
+          </li>
+        )}
+        {org && classroom && (
+          <li>
+            <Link to="/$org/$classroom" params={{ org, classroom }}>
+              {classData?.name || classData?.short_name || classroom}
+            </Link>
+          </li>
+        )}
+        {org && classroom && assignment && (
+          <>
+            <li>
+              <Link
+                to="/$org/$classroom/assignments"
+                params={{ org, classroom }}
+              >
+                Assignments
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/$org/$classroom/assignments/$assignment"
+                params={{ org, classroom, assignment }}
+              >
+                {assignment}
+              </Link>
+            </li>
+          </>
+        )}
+        {endpoint && <li aria-current="page">{endpoint}</li>}
+      </ol>
+    </nav>
   )
 }
 

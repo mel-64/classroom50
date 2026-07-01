@@ -114,7 +114,7 @@ function ConcernRow({
             className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/70 hover:text-primary"
           >
             View on GitHub
-            <ExternalLink className="size-3" />
+            <ExternalLink aria-hidden="true" className="size-3" />
           </a>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -126,7 +126,10 @@ function ConcernRow({
               onClick={() => onFix(concern.id)}
             >
               {fixing ? (
-                <span className="loading loading-spinner loading-xs" />
+                <span
+                  className="loading loading-spinner loading-xs"
+                  aria-hidden="true"
+                />
               ) : (
                 "Fix it"
               )}
@@ -154,14 +157,17 @@ function ConcernRow({
               className="link inline-flex items-center gap-0.5"
             >
               GitHub
-              <ExternalLink className="size-3" />
+              <ExternalLink aria-hidden="true" className="size-3" />
             </a>
             {showFix ? ' (or use "Fix it")' : ""}:
           </p>
           <ul className="mt-1 space-y-1">
             {driftedDetails.map((d) => (
               <li key={d.field} className="flex items-start gap-2 text-xs">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-error" />
+                <TriangleAlert
+                  aria-hidden="true"
+                  className="mt-0.5 size-3.5 shrink-0 text-error"
+                />
                 <span className="text-base-content/70">
                   {d.desc}
                   {d.manualFix && (
@@ -276,7 +282,7 @@ function AuditBody({
                     className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/70 hover:text-primary"
                   >
                     View on GitHub
-                    <ExternalLink className="size-3" />
+                    <ExternalLink aria-hidden="true" className="size-3" />
                   </a>
                 </div>
                 <span className="badge badge-warning badge-soft shrink-0">
@@ -297,9 +303,9 @@ function AuditBody({
             onClick={() => setShowPermissions((open) => !open)}
           >
             {showPermissions ? (
-              <ChevronUp className="size-4" />
+              <ChevronUp aria-hidden="true" className="size-4" />
             ) : (
-              <ChevronRight className="size-4" />
+              <ChevronRight aria-hidden="true" className="size-4" />
             )}
             Member permissions we configure
           </button>
@@ -326,9 +332,15 @@ function AuditBody({
                       )}
                     </span>
                     {v.enforced ? (
-                      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                      <CheckCircle2
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0 text-success"
+                      />
                     ) : (
-                      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+                      <TriangleAlert
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0 text-warning"
+                      />
                     )}
                   </li>
                 ))}
@@ -410,21 +422,30 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     >
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-base-content/70">
-          <span className="loading loading-spinner loading-sm" />
+          <span
+            className="loading loading-spinner loading-sm"
+            aria-hidden="true"
+          />
           Auditing organization policy…
         </div>
       )}
 
       {isError && (
         <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0"
+          />
           <span>Couldn&apos;t run the policy audit. Try re-checking.</span>
         </div>
       )}
 
       {fixMutation.isError && (
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0"
+          />
           <span>
             Couldn&apos;t apply the fix. You may lack owner permissions, or an
             enterprise policy blocks this change.

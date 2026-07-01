@@ -154,12 +154,16 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="name">
             {(field) => (
               <div className="flex mb-2 items-center">
-                <UserRound className="mr-2 text-base-content/70" />
+                <UserRound
+                  className="mr-2 text-base-content/70"
+                  aria-hidden="true"
+                />
                 <input
                   id={field.name}
                   name={field.name}
                   type="text"
                   placeholder="Name (optional)"
+                  aria-label="Name (optional)"
                   className="input w-full"
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
@@ -172,19 +176,33 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
             {(field) => (
               <div className="mb-2">
                 <div className="flex items-center">
-                  <GitHub className="size-6 mr-2 text-base-content/30 opacity-25" />
+                  <GitHub
+                    className="size-6 mr-2 text-base-content/30 opacity-25"
+                    aria-hidden="true"
+                  />
                   <input
                     id={field.name}
                     name={field.name}
                     type="text"
                     placeholder="github-username"
+                    aria-label="GitHub username"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                    aria-describedby={
+                      field.state.meta.errors.length > 0
+                        ? `${field.name}-error`
+                        : undefined
+                    }
                     className="input w-full"
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
                   />
                 </div>
                 {field.state.meta.errors.length > 0 && (
-                  <p className="text-error text-sm mt-1">
+                  <p
+                    id={`${field.name}-error`}
+                    className="text-error text-sm mt-1"
+                    role="alert"
+                  >
                     {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
@@ -196,19 +214,33 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
             {(field) => (
               <div className="mb-4">
                 <div className="flex items-center">
-                  <Mail className="size-6 mr-2 text-base-content/70" />
+                  <Mail
+                    className="size-6 mr-2 text-base-content/70"
+                    aria-hidden="true"
+                  />
                   <input
                     id={field.name}
                     name={field.name}
                     type="email"
                     placeholder="student@university.edu (optional)"
+                    aria-label="Email (optional)"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                    aria-describedby={
+                      field.state.meta.errors.length > 0
+                        ? `${field.name}-error`
+                        : undefined
+                    }
                     className="input w-full"
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
                   />
                 </div>
                 {field.state.meta.errors.length > 0 && (
-                  <p className="text-error text-sm mt-1">
+                  <p
+                    id={`${field.name}-error`}
+                    className="text-error text-sm mt-1"
+                    role="alert"
+                  >
                     {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
@@ -219,12 +251,16 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="section">
             {(field) => (
               <div className="flex mb-4 items-center">
-                <Users className="mr-2 text-base-content/70" />
+                <Users
+                  className="mr-2 text-base-content/70"
+                  aria-hidden="true"
+                />
                 <input
                   id={field.name}
                   name={field.name}
                   type="text"
                   placeholder="Section (optional, e.g. Period 3)"
+                  aria-label="Section (optional)"
                   className="input w-full"
                   value={field.state.value}
                   onBlur={field.handleBlur}

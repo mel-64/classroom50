@@ -304,7 +304,7 @@ const RunnerVerificationNote = ({
   if (pending && hasValue) {
     return (
       <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
-        <Loader2 className="size-4 shrink-0 animate-spin" />
+        <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
         Checking…
       </p>
     )
@@ -321,7 +321,7 @@ const RunnerVerificationNote = ({
     case "hosted":
       return (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
-          <CheckCircle2 className="size-4 shrink-0" />
+          <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
           GitHub-hosted runner
         </p>
       )
@@ -336,7 +336,7 @@ const RunnerVerificationNote = ({
       const uniqueNames = Array.from(new Set(matchNames))
       return (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
-          <ServerCog className="size-4 shrink-0" />
+          <ServerCog aria-hidden="true" className="size-4 shrink-0" />
           {verification.confirmed && uniqueNames.length > 0
             ? `Self-hosted runner${
                 uniqueNames.length === 1 ? "" : "s"
@@ -372,7 +372,7 @@ const RunnerVerificationNote = ({
       }
       return (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
-          <AlertTriangle className="size-4 shrink-0" />
+          <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
           {parts.join(" ")}
         </p>
       )
@@ -381,7 +381,7 @@ const RunnerVerificationNote = ({
     case "too-many":
       return (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
-          <AlertTriangle className="size-4 shrink-0" />
+          <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
           Too many labels ({verification.count}) — 10 max.
         </p>
       )
@@ -389,7 +389,7 @@ const RunnerVerificationNote = ({
     case "unknown":
       return (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
-          <HelpCircle className="size-4 shrink-0" />
+          <HelpCircle aria-hidden="true" className="size-4 shrink-0" />
           Can't verify — used as entered.
         </p>
       )
@@ -507,6 +507,8 @@ const CreateAssignmentForm = ({
                     id={field.name}
                     name={field.name}
                     type="text"
+                    required
+                    aria-required="true"
                     className="input w-full mb-4"
                     placeholder="e.g., Loops Assignment"
                     value={field.state.value}
@@ -533,6 +535,14 @@ const CreateAssignmentForm = ({
                       id={field.name}
                       name={field.name}
                       type="text"
+                      required
+                      aria-required="true"
+                      aria-invalid={field.state.meta.errors.length > 0}
+                      aria-describedby={
+                        field.state.meta.errors.length > 0
+                          ? `${field.name}-error`
+                          : undefined
+                      }
                       className="input w-full"
                       placeholder="e.g., loops-assignment"
                       value={field.state.value}
@@ -553,7 +563,11 @@ const CreateAssignmentForm = ({
                       unique in this classroom.
                     </p>
                     {field.state.meta.errors.length > 0 && (
-                      <p className="text-error text-sm mb-4">
+                      <p
+                        id={`${field.name}-error`}
+                        className="text-error text-sm mb-4"
+                        role="alert"
+                      >
                         {String(field.state.meta.errors[0])}
                       </p>
                     )}
@@ -621,13 +635,12 @@ const CreateAssignmentForm = ({
             <div>
               <form.Field name="mode">
                 {(field) => (
-                  <>
-                    <div>
-                      <label className="label font-bold mb-2">
-                        Assignment Type
-                      </label>
-                    </div>
+                  <fieldset>
+                    <legend className="label font-bold mb-2">
+                      Assignment Type
+                    </legend>
                     <input
+                      id={`${field.name}-individual`}
                       type="radio"
                       className="radio"
                       name={field.name}
@@ -636,8 +649,14 @@ const CreateAssignmentForm = ({
                       onBlur={field.handleBlur}
                       onChange={() => field.handleChange("individual")}
                     />
-                    <label className="label pl-2">Individual</label>
+                    <label
+                      htmlFor={`${field.name}-individual`}
+                      className="label pl-2"
+                    >
+                      Individual
+                    </label>
                     <input
+                      id={`${field.name}-group`}
                       type="radio"
                       className="radio ml-6"
                       name={field.name}
@@ -646,8 +665,13 @@ const CreateAssignmentForm = ({
                       onBlur={field.handleBlur}
                       onChange={() => field.handleChange("group")}
                     />
-                    <label className="label pl-2">Group Project</label>
-                  </>
+                    <label
+                      htmlFor={`${field.name}-group`}
+                      className="label pl-2"
+                    >
+                      Group Project
+                    </label>
+                  </fieldset>
                 )}
               </form.Field>
             </div>
@@ -660,7 +684,10 @@ const CreateAssignmentForm = ({
                       {(field) => (
                         <>
                           <div>
-                            <label className="label font-bold mb-2">
+                            <label
+                              htmlFor={field.name}
+                              className="label font-bold mb-2"
+                            >
                               Max Group Size
                             </label>
                           </div>
@@ -840,7 +867,10 @@ const CreateAssignmentForm = ({
                       role="alert"
                       className="mt-3 flex items-center gap-1.5 text-sm text-error"
                     >
-                      <AlertTriangle className="size-4 shrink-0" />
+                      <AlertTriangle
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                      />
                       {warning}
                     </p>
                   ) : null
@@ -909,7 +939,10 @@ const CreateAssignmentForm = ({
                           role="alert"
                           className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
                         >
-                          <AlertTriangle className="size-4 shrink-0" />
+                          <AlertTriangle
+                            aria-hidden="true"
+                            className="size-4 shrink-0"
+                          />
                           {error}
                         </p>
                       ) : (
@@ -977,7 +1010,10 @@ const CreateAssignmentForm = ({
                                   role="alert"
                                   className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
                                 >
-                                  <AlertTriangle className="size-4 shrink-0" />
+                                  <AlertTriangle
+                                    aria-hidden="true"
+                                    className="size-4 shrink-0"
+                                  />
                                   {error}
                                 </p>
                               ) : null}
@@ -1027,7 +1063,10 @@ const CreateAssignmentForm = ({
                 }
               >
                 {isSubmitting || loading ? (
-                  <span className="loading loading-spinner" />
+                  <span
+                    className="loading loading-spinner"
+                    aria-hidden="true"
+                  />
                 ) : edit ? (
                   "Save Changes"
                 ) : (

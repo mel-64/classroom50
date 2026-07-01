@@ -10,6 +10,7 @@ import {
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { LoadingSwap } from "@/lib/LoadingSwap"
+import { Spinner } from "@/components/Spinner"
 
 const EditAssignmentForm = ({
   org,
@@ -50,7 +51,7 @@ const EditAssignmentForm = ({
       loading={!defaultData}
       fallback={
         <div className="flex">
-          <div className="m-auto loading loading-spinner" />
+          <Spinner className="m-auto" label="Loading assignment" />
         </div>
       }
     >

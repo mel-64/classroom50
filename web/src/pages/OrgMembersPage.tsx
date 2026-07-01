@@ -15,6 +15,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import RequireTeacher from "@/components/RequireTeacher"
 import Avatar from "@/components/avatar"
 import GitHub from "@/assets/github.svg?react"
@@ -72,7 +73,7 @@ const initialsFor = (row: OrgMemberRow) =>
 // the @username and the immutable numeric GitHub id together.
 const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => (
   <span className="inline-flex items-center gap-1.5 text-xs text-base-content/70">
-    <GitHub className="size-3.5 opacity-50" />
+    <GitHub aria-hidden="true" className="size-3.5 opacity-50" />
     {row.username ? (
       <span className="font-mono">@{row.username}</span>
     ) : (
@@ -88,14 +89,15 @@ const ClassificationBadge = ({ row }: { row: OrgMemberRow }) => {
   if (row.classification === "on-roster-not-member") {
     return (
       <span className="badge badge-sm badge-error badge-soft gap-1">
-        <AlertTriangle className="size-3" /> Not an org member
+        <AlertTriangle aria-hidden="true" className="size-3" /> Not an org
+        member
       </span>
     )
   }
   if (row.classification === "member-no-roster") {
     return (
       <span className="badge badge-sm badge-ghost gap-1">
-        <Info className="size-3" /> No classroom
+        <Info aria-hidden="true" className="size-3" /> No classroom
       </span>
     )
   }
@@ -189,7 +191,7 @@ const MemberDetail = ({
             onClick={onClose}
             aria-label="Close"
           >
-            <X className="size-4" />
+            <X aria-hidden="true" className="size-4" />
           </button>
         </div>
 
@@ -216,7 +218,7 @@ const MemberDetail = ({
             rel="noreferrer"
             className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
           >
-            <ExternalLink className="size-3.5" />
+            <ExternalLink aria-hidden="true" className="size-3.5" />
             Manage on GitHub
           </a>
 
@@ -251,7 +253,10 @@ const MemberDetail = ({
                         </span>
                       ) : null}
                       {access.enrollment_status || "—"}
-                      <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/70" />
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/70"
+                      />
                     </span>
                   </Link>
                 ))}
@@ -284,12 +289,15 @@ const MemberDetail = ({
                 >
                   {inviting ? (
                     <>
-                      <span className="loading loading-spinner loading-xs" />
+                      <span
+                        className="loading loading-spinner loading-xs"
+                        aria-hidden="true"
+                      />
                       Inviting...
                     </>
                   ) : (
                     <>
-                      <UserPlus className="size-4" />
+                      <UserPlus aria-hidden="true" className="size-4" />
                       Invite to organization
                     </>
                   )}
@@ -341,7 +349,10 @@ const MemberDetail = ({
                 >
                   {working ? (
                     <>
-                      <span className="loading loading-spinner loading-xs" />
+                      <span
+                        className="loading loading-spinner loading-xs"
+                        aria-hidden="true"
+                      />
                       Removing...
                     </>
                   ) : (
@@ -366,6 +377,7 @@ const MemberDetail = ({
 }
 
 const OrgMembersPage = () => {
+  useDocumentTitle("Members")
   const { org } = useParams({ strict: false })
   const client = useGitHubClient()
   const { notify } = useToast()
@@ -460,20 +472,26 @@ const OrgMembersPage = () => {
                 rel="noreferrer"
                 className="mt-2 inline-flex items-center gap-1 text-sm text-primary hover:underline"
               >
-                <ExternalLink className="size-3.5" />
+                <ExternalLink aria-hidden="true" className="size-3.5" />
                 Manage organization members on GitHub
               </a>
             </div>
 
             {notes.length > 0 ? (
-              <div className="alert alert-warning alert-soft mt-6 text-sm">
+              <div
+                className="alert alert-warning alert-soft mt-6 text-sm"
+                role="status"
+              >
                 <span>{notes.join(" ")}</span>
               </div>
             ) : null}
 
             {discrepancyCount > 0 ? (
-              <div className="alert alert-error alert-soft mt-6 text-sm">
-                <AlertTriangle className="size-4" />
+              <div
+                className="alert alert-error alert-soft mt-6 text-sm"
+                role="status"
+              >
+                <AlertTriangle className="size-4" aria-hidden="true" />
                 <span>
                   {discrepancyCount} student
                   {discrepancyCount === 1 ? " is" : "s are"} on a roster but not
@@ -487,6 +505,7 @@ const OrgMembersPage = () => {
                 type="search"
                 className="input input-bordered w-full max-w-sm"
                 placeholder="Search by name, username, or email"
+                aria-label="Search members"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -495,7 +514,10 @@ const OrgMembersPage = () => {
             <div className="mt-4 card card-border w-full overflow-hidden bg-base-100 shadow-sm">
               {isLoading ? (
                 <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/70">
-                  <span className="loading loading-spinner loading-md" />
+                  <span
+                    className="loading loading-spinner loading-md"
+                    aria-hidden="true"
+                  />
                   <span className="text-sm">Loading members...</span>
                 </div>
               ) : isError ? (
@@ -548,10 +570,16 @@ const OrgMembersPage = () => {
                             }}
                           >
                             {invitingKey === row.key ? (
-                              <span className="loading loading-spinner loading-xs" />
+                              <span
+                                className="loading loading-spinner loading-xs"
+                                aria-hidden="true"
+                              />
                             ) : (
                               <>
-                                <UserPlus className="size-3.5" />
+                                <UserPlus
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
                                 Invite
                               </>
                             )}
@@ -562,7 +590,10 @@ const OrgMembersPage = () => {
                           {row.classrooms.length === 1 ? "" : "s"}
                         </span>
                         <ClassificationBadge row={row} />
-                        <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70" />
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70"
+                        />
                       </div>
                     </ClickableRow>
                   ))}

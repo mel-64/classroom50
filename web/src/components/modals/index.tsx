@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
 type ConfirmModalProps = {
   open: boolean
@@ -28,6 +28,7 @@ export function ConfirmModal({
   onClose,
 }: ConfirmModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const confirmInputRef = useRef<HTMLInputElement | null>(null)
   const [hasAcknowledged, setHasAcknowledged] = useState(false)
   const [typedText, setTypedText] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -41,6 +42,8 @@ export function ConfirmModal({
 
   const matches = typedText === confirmText
   const canSubmit = !needsConfirm || matches
+  const titleId = useId()
+  const confirmHintId = useId()
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -54,6 +57,13 @@ export function ConfirmModal({
       dialog.close()
     }
   }, [open])
+
+  // The acknowledge → confirm step swaps content inside the same open dialog, so
+  // the input's `autoFocus` won't re-fire. Move focus to it explicitly so a
+  // keyboard/SR user lands on the field they now have to fill in.
+  useEffect(() => {
+    if (hasAcknowledged) confirmInputRef.current?.focus()
+  }, [hasAcknowledged])
 
   useEffect(() => {
     if (!open) {
@@ -99,6 +109,7 @@ export function ConfirmModal({
     <dialog
       ref={dialogRef}
       className="modal"
+      aria-labelledby={titleId}
       onClose={(event) => handleClose(event)}
       onCancel={(event) => {
         if (isSubmitting) {
@@ -119,11 +130,13 @@ export function ConfirmModal({
                 : "bg-warning/10 text-warning",
             ].join(" ")}
           >
-            <AlertTriangle className="size-5" />
+            <AlertTriangle className="size-5" aria-hidden="true" />
           </div>
 
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg font-bold">{title}</h3>
+            <h3 id={titleId} className="text-lg font-bold">
+              {title}
+            </h3>
 
             {description ? (
               <div className="mt-2 text-sm leading-6 text-base-content/70">
@@ -143,7 +156,10 @@ export function ConfirmModal({
             ) : null}
 
             {error ? (
-              <div className="alert alert-error alert-soft mt-4 text-sm">
+              <div
+                className="alert alert-error alert-soft mt-4 text-sm"
+                role="alert"
+              >
                 {error}
               </div>
             ) : null}
@@ -175,7 +191,10 @@ export function ConfirmModal({
               >
                 {isSubmitting && !needsConfirm ? (
                   <>
-                    <span className="loading loading-spinner loading-sm" />
+                    <span
+                      className="loading loading-spinner loading-sm"
+                      aria-hidden="true"
+                    />
                     Working...
                   </>
                 ) : needsConfirm ? (
@@ -189,7 +208,7 @@ export function ConfirmModal({
         ) : (
           <>
             <div className="mt-6 space-y-3">
-              <p className="text-sm text-base-content/70">
+              <p id={confirmHintId} className="text-sm text-base-content/70">
                 To confirm, type{" "}
                 <span className="font-mono font-semibold text-base-content">
                   {confirmText}
@@ -198,11 +217,14 @@ export function ConfirmModal({
               </p>
 
               <input
+                ref={confirmInputRef}
                 type="text"
                 className="input input-bordered w-full font-mono"
                 value={typedText}
                 disabled={isSubmitting}
                 autoFocus
+                aria-label={`Type ${confirmText} to confirm`}
+                aria-describedby={confirmHintId}
                 onChange={(event) => setTypedText(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && matches) {
@@ -212,7 +234,10 @@ export function ConfirmModal({
               />
 
               {error ? (
-                <div className="alert alert-error alert-soft text-sm">
+                <div
+                  className="alert alert-error alert-soft text-sm"
+                  role="alert"
+                >
                   {error}
                 </div>
               ) : null}
@@ -236,7 +261,10 @@ export function ConfirmModal({
               >
                 {isSubmitting ? (
                   <>
-                    <span className="loading loading-spinner loading-sm" />
+                    <span
+                      className="loading loading-spinner loading-sm"
+                      aria-hidden="true"
+                    />
                     Working...
                   </>
                 ) : (

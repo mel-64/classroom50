@@ -14,6 +14,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetSubmissionReleases from "@/hooks/useGetSubmissionReleases"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
@@ -53,7 +54,7 @@ const ReleaseRow = ({ release }: { release: GitHubRelease }) => {
           rel="noreferrer"
           className="btn btn-sm btn-outline shrink-0"
         >
-          <FileText className="size-4" />
+          <FileText aria-hidden="true" className="size-4" />
           View grade
         </a>
       ) : (
@@ -72,17 +73,17 @@ const AssignmentMeta = ({ assignment }: { assignment?: Assignment }) => {
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {assignment.mode === "group" ? (
         <span className="badge badge-ghost badge-sm gap-1">
-          <UsersRound className="size-3.5" /> Group
+          <UsersRound aria-hidden="true" className="size-3.5" /> Group
         </span>
       ) : assignment.mode === "individual" ? (
         <span className="badge badge-ghost badge-sm gap-1">
-          <UserRound className="size-3.5" /> Individual
+          <UserRound aria-hidden="true" className="size-3.5" /> Individual
         </span>
       ) : null}
       <span
         className={`badge badge-sm gap-1 ${overdue ? "badge-error badge-soft" : "badge-ghost"}`}
       >
-        <CalendarClock className="size-3.5" />
+        <CalendarClock aria-hidden="true" className="size-3.5" />
         {due ? `Due ${formatDueDateTime(due)}` : "No due date"}
       </span>
     </div>
@@ -179,7 +180,7 @@ const SubmissionBody = ({
           rel="noreferrer"
           className="btn btn-sm btn-outline"
         >
-          <ExternalLink className="size-4" />
+          <ExternalLink aria-hidden="true" className="size-4" />
           Open my repository
         </a>
       </EnterDiv>
@@ -199,7 +200,7 @@ const SubmissionBody = ({
           rel="noreferrer"
           className="btn btn-sm btn-outline"
         >
-          <ExternalLink className="size-4" />
+          <ExternalLink aria-hidden="true" className="size-4" />
           Open my repository
         </a>
       </div>
@@ -216,6 +217,7 @@ const SubmissionBody = ({
 }
 
 const StudentSubmissionPage = () => {
+  useDocumentTitle("My Submission")
   const { org, classroom, assignment } = useParams({ strict: false })
   const { user } = useGithubAuth()
   // Resolve the capability-URL secret (if the classroom is protected) from two

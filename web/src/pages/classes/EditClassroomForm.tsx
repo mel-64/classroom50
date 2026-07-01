@@ -52,13 +52,15 @@ const DeleteClassroomButton = ({
   return (
     <>
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation()
           setOpen(true)
         }}
         className="btn btn-circle btn-sm btn-ghost text-error"
+        aria-label="Delete classroom"
       >
-        <Trash2 className="size-4" />
+        <Trash2 className="size-4" aria-hidden="true" />
       </button>
 
       <ConfirmModal
@@ -157,11 +159,11 @@ const ArchiveClassroomButton = ({
       >
         {archived ? (
           <>
-            <ArchiveRestore className="size-4" /> Unarchive
+            <ArchiveRestore aria-hidden="true" className="size-4" /> Unarchive
           </>
         ) : (
           <>
-            <Archive className="size-4" /> Archive
+            <Archive aria-hidden="true" className="size-4" /> Archive
           </>
         )}
       </button>
@@ -320,6 +322,14 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                   id={field.name}
                   name={field.name}
                   type="text"
+                  required
+                  aria-required="true"
+                  aria-invalid={field.state.meta.errors.length > 0}
+                  aria-describedby={
+                    field.state.meta.errors.length > 0
+                      ? `${field.name}-error`
+                      : undefined
+                  }
                   className="input w-full mb-4"
                   placeholder="e.g., AP CS Principles"
                   value={field.state.value}
@@ -328,7 +338,11 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                 />
 
                 {field.state.meta.errors.length > 0 && (
-                  <p className="text-error text-sm mb-4">
+                  <p
+                    id={`${field.name}-error`}
+                    className="text-error text-sm mb-4"
+                    role="alert"
+                  >
                     {field.state.meta.errors[0]}
                   </p>
                 )}
@@ -337,11 +351,12 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
           </form.Field>
 
           <>
-            <label className="label font-bold">
+            <label htmlFor="classroom-slug-display" className="label font-bold">
               Classroom Slug<span className="text-error">*</span>
             </label>
 
             <input
+              id="classroom-slug-display"
               type="text"
               disabled
               className="input w-full mb-4"
@@ -369,7 +384,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                 />
 
                 {field.state.meta.errors.length > 0 && (
-                  <p className="text-error text-sm mb-4">
+                  <p className="text-error text-sm mb-4" role="alert">
                     {field.state.meta.errors[0]}
                   </p>
                 )}
@@ -429,7 +444,10 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                 >
                   {isSubmitting ? (
                     <>
-                      <span className="loading loading-spinner loading-sm" />
+                      <span
+                        className="loading loading-spinner loading-sm"
+                        aria-hidden="true"
+                      />
                       Saving...
                     </>
                   ) : (

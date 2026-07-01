@@ -42,7 +42,7 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
 
   return (
     <CalloutDiv role="alert" className="alert alert-error alert-soft mb-6">
-      <XCircle className="size-5" />
+      <XCircle aria-hidden="true" className="size-5" />
       <div className="text-sm">
         <p className="font-semibold">Organization preflight check failed</p>
         <p className="mt-0.5 text-base-content/70">

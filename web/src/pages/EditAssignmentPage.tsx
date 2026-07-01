@@ -8,6 +8,8 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { Spinner } from "@/components/Spinner"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
@@ -54,7 +56,7 @@ const EditAssignmentFormStudent = ({
   if (loadingPublic || loadingRepo) {
     return (
       <div className="flex">
-        <div className="loading loading-spinner m-auto" />
+        <Spinner className="m-auto" label="Loading assignment" />
       </div>
     )
   }
@@ -104,7 +106,7 @@ const EditAssignmentFormStudent = ({
         <div className="card-body gap-6">
           <div className="flex items-start gap-4">
             <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <UsersRound className="size-6" />
+              <UsersRound aria-hidden="true" className="size-6" />
             </div>
 
             <div>
@@ -118,7 +120,7 @@ const EditAssignmentFormStudent = ({
                 target="_blank"
                 rel="noreferrer"
               >
-                <GitHub className="size-4" />
+                <GitHub aria-hidden="true" className="size-4" />
                 View repository
               </a>
               <p className="mt-2 text-sm text-base-content/70">
@@ -139,7 +141,7 @@ const EditAssignmentFormStudent = ({
               className="btn btn-primary"
               onClick={() => setCollaboratorsOpen(true)}
             >
-              <UsersRound className="size-4" />
+              <UsersRound aria-hidden="true" className="size-4" />
               Manage collaborators
             </button>
           </div>
@@ -163,6 +165,7 @@ const EditAssignmentFormStudent = ({
 }
 
 const EditAssignmentPage = () => {
+  useDocumentTitle("Assignment Settings")
   const { org, classroom, assignment } = useParams({ strict: false })
   const router = useRouter()
   const { isTeacher, isStudent } = useCourseTeacherAccess(org)

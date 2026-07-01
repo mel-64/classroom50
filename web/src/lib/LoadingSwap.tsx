@@ -31,6 +31,7 @@ export function LoadingSwap({
         animate="animate"
         exit="exit"
         className={className}
+        aria-busy={loading}
       >
         {loading ? fallback : children}
       </motion.div>

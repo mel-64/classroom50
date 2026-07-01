@@ -1,5 +1,5 @@
 import { Copy, TriangleAlert, X } from "lucide-react"
-import { useEffect, type ReactNode, type RefObject } from "react"
+import { useEffect, useId, type ReactNode, type RefObject } from "react"
 
 // Shared chrome for the two reuse modals — close button, header, error/warning
 // alerts, Cancel/Reuse footer — so each only supplies its title, description,
@@ -38,9 +38,15 @@ export const ReuseModalShell = ({
   }, [dialogRef])
 
   const closeDialog = () => dialogRef.current?.close()
+  const titleId = useId()
 
   return (
-    <dialog ref={dialogRef} className="modal" onClose={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="modal"
+      onClose={onClose}
+      aria-labelledby={titleId}
+    >
       <div className="modal-box max-w-lg">
         <form method="dialog">
           <button
@@ -48,16 +54,18 @@ export const ReuseModalShell = ({
             aria-label="Close"
             disabled={isPending}
           >
-            <X className="size-4" />
+            <X className="size-4" aria-hidden="true" />
           </button>
         </form>
 
         <div className="flex items-start gap-4">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Copy className="size-5" />
+            <Copy className="size-5" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg font-bold">{title}</h3>
+            <h3 id={titleId} className="text-lg font-bold">
+              {title}
+            </h3>
             <p className="mt-1 text-sm text-base-content/70">{description}</p>
           </div>
         </div>
@@ -72,7 +80,7 @@ export const ReuseModalShell = ({
 
         {warning ? (
           <div className="alert alert-warning alert-soft mt-4 items-start text-sm">
-            <TriangleAlert className="size-4 shrink-0" />
+            <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
             <span>{warning}</span>
           </div>
         ) : null}
@@ -95,12 +103,16 @@ export const ReuseModalShell = ({
             >
               {isPending ? (
                 <>
-                  <span className="loading loading-spinner loading-sm" />
+                  <span
+                    className="loading loading-spinner loading-sm"
+                    aria-hidden="true"
+                  />
                   Copying…
                 </>
               ) : (
                 <>
-                  <Copy className="size-4" /> Reuse assignment
+                  <Copy aria-hidden="true" className="size-4" /> Reuse
+                  assignment
                 </>
               )}
             </button>

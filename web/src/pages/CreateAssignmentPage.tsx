@@ -11,6 +11,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -25,6 +26,7 @@ import type {
 } from "@/api/mutations/assignments"
 
 const CreateAssignmentPage = () => {
+  useDocumentTitle("New Assignment")
   const client = useGitHubClient()
   const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })

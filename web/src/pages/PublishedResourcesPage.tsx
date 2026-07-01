@@ -19,6 +19,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import RequireTeacher from "@/components/RequireTeacher"
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetClassroom from "@/hooks/useGetClassroom"
@@ -125,9 +126,9 @@ function CopyButton({ value }: { value: string }) {
       onClick={copy}
     >
       {copied ? (
-        <Check className="size-3.5 text-success" />
+        <Check aria-hidden="true" className="size-3.5 text-success" />
       ) : (
-        <Copy className="size-3.5" />
+        <Copy aria-hidden="true" className="size-3.5" />
       )}
     </button>
   )
@@ -147,7 +148,7 @@ function StatusBadge({ url }: { url: string }) {
         ref={ref}
         className="inline-flex items-center gap-1 text-xs text-base-content/70"
       >
-        <Loader2 className="size-3.5 animate-spin" />
+        <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
         Checking
       </span>
     )
@@ -156,7 +157,7 @@ function StatusBadge({ url }: { url: string }) {
   if (status === "public") {
     return (
       <span ref={ref} className="badge badge-success badge-soft badge-sm gap-1">
-        <Globe className="size-3" />
+        <Globe aria-hidden="true" className="size-3" />
         Public
       </span>
     )
@@ -220,7 +221,7 @@ function ResourceRow({ resource }: { resource: Resource }) {
             aria-label="Open URL"
             title="Open URL"
           >
-            <ExternalLink className="size-3.5" />
+            <ExternalLink aria-hidden="true" className="size-3.5" />
           </a>
         </div>
       </div>
@@ -315,7 +316,7 @@ function ClassroomResources({
             <h3 className="truncate font-semibold">{classroom}</h3>
             {secret ? (
               <span className="badge badge-warning badge-soft badge-sm gap-1">
-                <ShieldAlert className="size-3" />
+                <ShieldAlert aria-hidden="true" className="size-3" />
                 Unlisted
               </span>
             ) : (
@@ -329,6 +330,7 @@ function ClassroomResources({
           </p>
         </div>
         <ChevronDown
+          aria-hidden="true"
           className={`size-5 shrink-0 text-base-content/70 transition-transform ${
             open ? "rotate-180" : ""
           }`}
@@ -338,7 +340,10 @@ function ClassroomResources({
         <div className="flex flex-col gap-3 border-t border-base-200 p-5">
           {secret && (
             <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-base-content/70">
-              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+              <ShieldAlert
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0 text-warning"
+              />
               <span>
                 This classroom uses an unlisted URL: its resources are served at
                 an unguessable path instead of a guessable one. This is
@@ -392,7 +397,7 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
   return (
     <div className="mt-8 flex flex-col gap-8">
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info/10 p-4 text-sm">
-        <Info className="mt-0.5 size-5 shrink-0 text-info" />
+        <Info aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-info" />
         <div>
           <p className="font-semibold text-base-content">
             Everything below is served publicly over the internet
@@ -412,7 +417,7 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
 
       <section>
         <div className="flex items-center gap-2">
-          <Globe className="size-5 text-base-content/70" />
+          <Globe aria-hidden="true" className="size-5 text-base-content/70" />
           <h2 className="text-lg font-bold">Organization-level</h2>
         </div>
         <p className="mt-1 text-sm text-base-content/70">
@@ -427,7 +432,10 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
 
       <section>
         <div className="flex items-center gap-2">
-          <ShieldAlert className="size-5 text-base-content/70" />
+          <ShieldAlert
+            aria-hidden="true"
+            className="size-5 text-base-content/70"
+          />
           <h2 className="text-lg font-bold">Per-classroom</h2>
         </div>
         <p className="mt-1 text-sm text-base-content/70">
@@ -456,6 +464,7 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
 }
 
 const PublishedResourcesPage = () => {
+  useDocumentTitle("Published Resources")
   const { org } = useParams({ strict: false })
 
   return (

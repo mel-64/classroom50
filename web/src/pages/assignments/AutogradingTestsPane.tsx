@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Pencil, Trash } from "lucide-react"
 import type { AssignmentForm } from "./CreateAssignmentForm"
 
@@ -24,8 +24,12 @@ const TYPE_OPTIONS = [
   },
 ] as const
 
-const FieldError = ({ error }: { error?: string }) =>
-  error ? <p className="text-error text-sm mt-1">{error}</p> : null
+const FieldError = ({ error, id }: { error?: string; id?: string }) =>
+  error ? (
+    <p id={id} className="text-error text-sm mt-1" role="alert">
+      {error}
+    </p>
+  ) : null
 
 // Every draft field that can carry a validation error; stale errors on
 // these are cleared whenever the test re-validates.
@@ -53,6 +57,7 @@ const AutogradingTestModal = ({
   index,
   onClose,
 }: AutogradingTestModalProps) => {
+  const titleId = useId()
   if (index === null) return null
 
   // Validate this test now (the form-level validator only runs on the
@@ -91,6 +96,7 @@ const AutogradingTestModal = ({
     <dialog
       ref={dialogRef}
       className="modal"
+      aria-labelledby={titleId}
       onClose={onClose}
       onKeyDown={(e) => {
         // Enter inside a modal input would implicitly submit the
@@ -110,7 +116,9 @@ const AutogradingTestModal = ({
     >
       <div className="modal-box max-w-3xl max-h-[90vh]">
         <div className="mb-6">
-          <h3 className="text-lg font-bold">Edit Test {index + 1}</h3>
+          <h3 id={titleId} className="text-lg font-bold">
+            Edit Test {index + 1}
+          </h3>
           <p className="text-sm opacity-70">
             Pick a test type, then fill in the command and pass criteria.
             Commands run in the student&apos;s repository checkout.
@@ -121,23 +129,35 @@ const AutogradingTestModal = ({
           <form.Field name={`tests[${index}].name`}>
             {(field) => (
               <div>
-                <label className="label font-bold">Test Name</label>
+                <label htmlFor={field.name} className="label font-bold">
+                  Test Name
+                </label>
                 <input
+                  id={field.name}
                   className="input w-full"
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
                   placeholder="e.g., Prints hello"
+                  aria-invalid={field.state.meta.errors.length > 0}
+                  aria-describedby={
+                    field.state.meta.errors.length > 0
+                      ? `${field.name}-error`
+                      : undefined
+                  }
                 />
-                <FieldError error={field.state.meta.errors[0]} />
+                <FieldError
+                  error={field.state.meta.errors[0]}
+                  id={`${field.name}-error`}
+                />
               </div>
             )}
           </form.Field>
 
           <form.Field name={`tests[${index}].type`}>
             {(field) => (
-              <div>
-                <label className="label font-bold">Test Type</label>
+              <fieldset>
+                <legend className="label font-bold">Test Type</legend>
                 <div className="join w-full">
                   {TYPE_OPTIONS.map((option) => (
                     <input
@@ -157,15 +177,18 @@ const AutogradingTestModal = ({
                       ?.hint
                   }
                 </p>
-              </div>
+              </fieldset>
             )}
           </form.Field>
 
           <form.Field name={`tests[${index}].setup`}>
             {(field) => (
               <div>
-                <label className="label font-bold">Setup Command</label>
+                <label htmlFor={field.name} className="label font-bold">
+                  Setup Command
+                </label>
                 <input
+                  id={field.name}
                   className="input w-full font-mono"
                   value={field.state.value}
                   onBlur={field.handleBlur}
@@ -179,15 +202,27 @@ const AutogradingTestModal = ({
           <form.Field name={`tests[${index}].run`}>
             {(field) => (
               <div>
-                <label className="label font-bold">Run Command</label>
+                <label htmlFor={field.name} className="label font-bold">
+                  Run Command
+                </label>
                 <input
+                  id={field.name}
                   className="input w-full font-mono"
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
                   placeholder="e.g., ./hello or python3 main.py"
+                  aria-invalid={field.state.meta.errors.length > 0}
+                  aria-describedby={
+                    field.state.meta.errors.length > 0
+                      ? `${field.name}-error`
+                      : undefined
+                  }
                 />
-                <FieldError error={field.state.meta.errors[0]} />
+                <FieldError
+                  error={field.state.meta.errors[0]}
+                  id={`${field.name}-error`}
+                />
               </div>
             )}
           </form.Field>
@@ -200,10 +235,14 @@ const AutogradingTestModal = ({
                     <form.Field name={`tests[${index}].input`}>
                       {(field) => (
                         <div>
-                          <label className="label font-bold">
+                          <label
+                            htmlFor={field.name}
+                            className="label font-bold"
+                          >
                             Input (stdin)
                           </label>
                           <textarea
+                            id={field.name}
                             className="textarea w-full font-mono"
                             value={field.state.value}
                             onBlur={field.handleBlur}
@@ -218,18 +257,31 @@ const AutogradingTestModal = ({
                     <form.Field name={`tests[${index}].expected`}>
                       {(field) => (
                         <div>
-                          <label className="label font-bold">
+                          <label
+                            htmlFor={field.name}
+                            className="label font-bold"
+                          >
                             Expected Output
                           </label>
                           <textarea
+                            id={field.name}
                             className="textarea w-full font-mono"
                             value={field.state.value}
                             onBlur={field.handleBlur}
                             onChange={(e) => field.handleChange(e.target.value)}
                             placeholder="Expected stdout"
                             rows={5}
+                            aria-invalid={field.state.meta.errors.length > 0}
+                            aria-describedby={
+                              field.state.meta.errors.length > 0
+                                ? `${field.name}-error`
+                                : undefined
+                            }
                           />
-                          <FieldError error={field.state.meta.errors[0]} />
+                          <FieldError
+                            error={field.state.meta.errors[0]}
+                            id={`${field.name}-error`}
+                          />
                         </div>
                       )}
                     </form.Field>
@@ -237,8 +289,14 @@ const AutogradingTestModal = ({
                     <form.Field name={`tests[${index}].comparison`}>
                       {(field) => (
                         <div>
-                          <label className="label font-bold">Comparison</label>
+                          <label
+                            htmlFor={field.name}
+                            className="label font-bold"
+                          >
+                            Comparison
+                          </label>
                           <select
+                            id={field.name}
                             className="select w-full"
                             value={field.state.value}
                             onBlur={field.handleBlur}
@@ -269,10 +327,11 @@ const AutogradingTestModal = ({
                   <form.Field name={`tests[${index}].exitCode`}>
                     {(field) => (
                       <div className="flex flex-col">
-                        <label className="label font-bold">
+                        <label htmlFor={field.name} className="label font-bold">
                           Required Exit Code
                         </label>
                         <input
+                          id={field.name}
                           className="input w-32"
                           type="number"
                           min={0}
@@ -288,11 +347,20 @@ const AutogradingTestModal = ({
                             )
                           }
                           placeholder="0"
+                          aria-invalid={field.state.meta.errors.length > 0}
+                          aria-describedby={
+                            field.state.meta.errors.length > 0
+                              ? `${field.name}-error`
+                              : undefined
+                          }
                         />
                         <p className="label text-sm pt-1">
                           Leave empty to require a successful exit (0).
                         </p>
-                        <FieldError error={field.state.meta.errors[0]} />
+                        <FieldError
+                          error={field.state.meta.errors[0]}
+                          id={`${field.name}-error`}
+                        />
                       </div>
                     )}
                   </form.Field>
@@ -314,8 +382,11 @@ const AutogradingTestModal = ({
             <form.Field name={`tests[${index}].timeout`}>
               {(field) => (
                 <div className="flex flex-col">
-                  <label className="label font-bold">Timeout (seconds)</label>
+                  <label htmlFor={field.name} className="label font-bold">
+                    Timeout (seconds)
+                  </label>
                   <input
+                    id={field.name}
                     className="input w-32"
                     type="number"
                     min={0}
@@ -328,9 +399,18 @@ const AutogradingTestModal = ({
                         e.target.value === "" ? 0 : e.target.valueAsNumber,
                       )
                     }
+                    aria-invalid={field.state.meta.errors.length > 0}
+                    aria-describedby={
+                      field.state.meta.errors.length > 0
+                        ? `${field.name}-error`
+                        : undefined
+                    }
                   />
                   <p className="label text-sm pt-1">0 = default (10s)</p>
-                  <FieldError error={field.state.meta.errors[0]} />
+                  <FieldError
+                    error={field.state.meta.errors[0]}
+                    id={`${field.name}-error`}
+                  />
                 </div>
               )}
             </form.Field>
@@ -338,8 +418,11 @@ const AutogradingTestModal = ({
             <form.Field name={`tests[${index}].points`}>
               {(field) => (
                 <div className="flex flex-col">
-                  <label className="label font-bold">Points</label>
+                  <label htmlFor={field.name} className="label font-bold">
+                    Points
+                  </label>
                   <input
+                    id={field.name}
                     className="input w-32"
                     type="number"
                     min={0}
@@ -352,8 +435,17 @@ const AutogradingTestModal = ({
                         e.target.value === "" ? 0 : e.target.valueAsNumber,
                       )
                     }
+                    aria-invalid={field.state.meta.errors.length > 0}
+                    aria-describedby={
+                      field.state.meta.errors.length > 0
+                        ? `${field.name}-error`
+                        : undefined
+                    }
                   />
-                  <FieldError error={field.state.meta.errors[0]} />
+                  <FieldError
+                    error={field.state.meta.errors[0]}
+                    id={`${field.name}-error`}
+                  />
                 </div>
               )}
             </form.Field>
@@ -444,13 +536,16 @@ const AutogradingTestsPane = ({ form }: { form: AssignmentForm }) => {
               </div>
             </div>
             <table className="table">
+              <caption className="sr-only">Autograding tests</caption>
               <thead>
                 <tr>
-                  <th>Test Name</th>
-                  <th>Type</th>
-                  <th>Run Command</th>
-                  <th>Points</th>
-                  <th className="w-28"></th>
+                  <th scope="col">Test Name</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Run Command</th>
+                  <th scope="col">Points</th>
+                  <th scope="col" className="w-28">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -500,7 +595,7 @@ const AutogradingTestsPane = ({ form }: { form: AssignmentForm }) => {
                               onClick={() => openEditor(index)}
                               aria-label={`Edit test ${index + 1}`}
                             >
-                              <Pencil size={16} />
+                              <Pencil aria-hidden="true" size={16} />
                             </button>
 
                             <button
@@ -509,7 +604,7 @@ const AutogradingTestsPane = ({ form }: { form: AssignmentForm }) => {
                               onClick={() => field.removeValue(index)}
                               aria-label={`Remove test ${index + 1}`}
                             >
-                              <Trash size={16} />
+                              <Trash aria-hidden="true" size={16} />
                             </button>
                           </div>
                         </td>

@@ -11,6 +11,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { ReuseFromClassroomModal } from "@/components/modals/ReuseFromClassroomModal"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
@@ -41,7 +42,7 @@ const NewAssignmentButton = ({
           params={{ org, classroom }}
           className="btn btn-primary join-item"
         >
-          <Plus className="size-4" /> Assignment
+          <Plus aria-hidden="true" className="size-4" /> Assignment
         </Link>
         <div className="dropdown dropdown-end join-item">
           <button
@@ -49,7 +50,7 @@ const NewAssignmentButton = ({
             className="btn btn-primary join-item border-l border-primary-content/20 px-2"
             aria-label="More assignment options"
           >
-            <ChevronDown className="size-4" />
+            <ChevronDown aria-hidden="true" className="size-4" />
           </button>
           <ul
             tabIndex={0}
@@ -65,7 +66,7 @@ const NewAssignmentButton = ({
                   setReuseOpen(true)
                 }}
               >
-                <Copy className="size-4" /> Reuse assignment
+                <Copy aria-hidden="true" className="size-4" /> Reuse assignment
               </button>
             </li>
           </ul>
@@ -188,6 +189,7 @@ const StudentAssignmentsView = ({
 }
 
 const AssignmentsPage = () => {
+  useDocumentTitle("Assignments")
   const { org, classroom } = useParams({ strict: false })
   const {
     isTeacher,

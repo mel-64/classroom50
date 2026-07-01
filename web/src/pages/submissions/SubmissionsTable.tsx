@@ -6,7 +6,7 @@ import {
   ScrollText,
   UsersRound,
 } from "lucide-react"
-import { Fragment, useRef, useState } from "react"
+import { Fragment, useId, useRef, useState } from "react"
 
 import GitHub from "@/assets/github.svg?react"
 import {
@@ -159,7 +159,7 @@ const GroupMembers = ({
         rel="noreferrer"
         title="Open the shared group repository"
       >
-        <GitHub className="size-4 shrink-0" />
+        <GitHub aria-hidden="true" className="size-4 shrink-0" />
         <span className="font-mono text-sm">{repoLabel}</span>
       </a>
 
@@ -206,6 +206,7 @@ const GroupMembers = ({
 // act on the result.
 const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
   const [resolving, setResolving] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   // enabled: false — driven by refetch() on click, never on mount.
@@ -242,16 +243,19 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
         title="Review"
       >
         {resolving ? (
-          <span className="loading loading-spinner loading-xs" />
+          <span
+            className="loading loading-spinner loading-xs"
+            aria-hidden="true"
+          />
         ) : (
-          <MessageCircle className="size-4" />
+          <MessageCircle aria-hidden="true" className="size-4" />
         )}
       </button>
-      <dialog ref={dialogRef} className="modal">
+      <dialog ref={dialogRef} className="modal" aria-labelledby={titleId}>
         <div className="modal-box max-w-md">
           {errorMsg ? (
             <>
-              <h3 className="text-lg font-bold">
+              <h3 id={titleId} className="text-lg font-bold">
                 Couldn't check for a feedback PR
               </h3>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-base-content/70">
@@ -260,7 +264,7 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
             </>
           ) : (
             <>
-              <h3 className="text-lg font-bold">
+              <h3 id={titleId} className="text-lg font-bold">
                 No feedback pull request yet
               </h3>
               <p className="mt-2 text-sm leading-6 text-base-content/70">
@@ -356,9 +360,13 @@ const RegradeButton = ({
         title={title}
       >
         {inFlight ? (
-          <span className="loading loading-spinner loading-xs" />
+          <span
+            className="loading loading-spinner loading-xs"
+            aria-hidden="true"
+          />
         ) : (
           <RefreshCw
+            aria-hidden="true"
             className={`size-4 ${phase === "completed" ? "text-success" : phase === "failed" ? "text-error" : ""}`}
           />
         )}
@@ -524,13 +532,16 @@ const SubmissionsTable = ({
     <>
       <EnterDiv className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
         <table className="table">
+          <caption className="sr-only">
+            {isGroup ? "Group submissions" : "Student submissions"}
+          </caption>
           <thead>
             <tr>
-              <th>{isGroup ? "Group" : "Student"}</th>
-              <th>Submissions</th>
-              <th>Score</th>
-              <th>Last Submitted</th>
-              <th>Actions</th>
+              <th scope="col">{isGroup ? "Group" : "Student"}</th>
+              <th scope="col">Submissions</th>
+              <th scope="col">Score</th>
+              <th scope="col">Last Submitted</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -596,6 +607,7 @@ const SubmissionsTable = ({
                             onClick={() => toggle(rest.owner)}
                           >
                             <ChevronRight
+                              aria-hidden="true"
                               className={`size-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
                             />
                             {submissionCount} Submissions
@@ -648,7 +660,10 @@ const SubmissionsTable = ({
                               aria-label="View and manage group members"
                               title="Members"
                             >
-                              <UsersRound className="size-4" />
+                              <UsersRound
+                                aria-hidden="true"
+                                className="size-4"
+                              />
                             </button>
                           )}
                           <ActionIconLink

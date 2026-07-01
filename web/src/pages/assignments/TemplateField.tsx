@@ -109,7 +109,10 @@ export const TemplateField = ({
         htmlFor={field.name}
         className="label font-bold mb-2 flex items-center gap-1.5"
       >
-        <GitHub className="size-4 text-base-content/30 opacity-70" />
+        <GitHub
+          aria-hidden="true"
+          className="size-4 text-base-content/30 opacity-70"
+        />
         Template Repository
       </label>
       <input
@@ -156,7 +159,7 @@ const TemplateVerificationNote = ({
   if (pending) {
     return (
       <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
-        <Loader2 className="size-4 shrink-0 animate-spin" />
+        <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
         Checking template access…
       </p>
     )
@@ -311,7 +314,7 @@ const Note = ({
         className="mt-1 flex items-center gap-1 font-semibold underline"
       >
         Check {policy.owner}'s OAuth app policy
-        <ExternalLink className="size-3.5 shrink-0" />
+        <ExternalLink aria-hidden="true" className="size-3.5 shrink-0" />
       </a>
     )}
   </InlineNote>

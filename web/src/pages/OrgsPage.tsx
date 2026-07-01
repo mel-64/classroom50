@@ -3,6 +3,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { Classroom50OrgSummary } from "@/hooks/github/queries"
 import useGetOrgs from "@/hooks/useGetOrgs"
 import useNeedsSetupPlans from "@/hooks/useNeedsSetupPlans"
@@ -27,7 +28,7 @@ function MissingOrgNotice({
     <div className="rounded-2xl border border-info/20 bg-info/5 p-5 shadow-sm">
       <div className="flex gap-4">
         <div className="mt-1 flex size-10 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
-          <Info className="size-5" />
+          <Info aria-hidden="true" className="size-5" />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -53,7 +54,7 @@ function MissingOrgNotice({
               className="btn btn-info btn-sm"
             >
               Manage GitHub OAuth access
-              <ExternalLink className="size-4" />
+              <ExternalLink aria-hidden="true" className="size-4" />
             </a>
 
             <button
@@ -63,6 +64,7 @@ function MissingOrgNotice({
               onClick={onRefresh}
             >
               <RefreshCw
+                aria-hidden="true"
                 className={["size-4", refreshing ? "animate-spin" : ""].join(
                   " ",
                 )}
@@ -139,7 +141,7 @@ function OrgCard({
             {showNoAccessBadge && (
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="badge badge-neutral gap-1">
-                  <Lock className="size-3" />
+                  <Lock aria-hidden="true" className="size-3" />
                   No <code>classroom50</code> access
                 </span>
               </div>
@@ -203,6 +205,7 @@ function OrgCard({
 }
 
 const OrgsPage = () => {
+  useDocumentTitle("Organizations")
   const queryClient = useQueryClient()
   const { data: orgs = [], isLoading, isFetching } = useGetOrgs()
   const [showUnsupported, setShowUnsupported] = useState(false)
@@ -263,7 +266,10 @@ const OrgsPage = () => {
         <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           {isLoading ? (
             <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-              <span className="loading loading-spinner loading-lg text-primary" />
+              <span
+                className="loading loading-spinner loading-lg text-primary"
+                aria-hidden="true"
+              />
               <div>
                 <p className="text-base font-semibold">
                   Loading your organizations…

@@ -113,6 +113,14 @@ const CreateClassroomForm = ({
                 id={field.name}
                 name={field.name}
                 type="text"
+                required
+                aria-required="true"
+                aria-invalid={field.state.meta.errors.length > 0}
+                aria-describedby={
+                  field.state.meta.errors.length > 0
+                    ? `${field.name}-error`
+                    : undefined
+                }
                 className="input w-full mb-4"
                 placeholder="e.g., AP CS Principles"
                 value={field.state.value}
@@ -124,7 +132,11 @@ const CreateClassroomForm = ({
               />
 
               {field.state.meta.errors.length > 0 && (
-                <p className="text-error text-sm mb-4">
+                <p
+                  id={`${field.name}-error`}
+                  className="text-error text-sm mb-4"
+                  role="alert"
+                >
                   {field.state.meta.errors[0]}
                 </p>
               )}
@@ -143,6 +155,14 @@ const CreateClassroomForm = ({
                 id={field.name}
                 name={field.name}
                 type="text"
+                required
+                aria-required="true"
+                aria-invalid={field.state.meta.errors.length > 0}
+                aria-describedby={
+                  field.state.meta.errors.length > 0
+                    ? `${field.name}-error`
+                    : undefined
+                }
                 className="input w-full mb-4"
                 placeholder="e.g., ap-cs-principles"
                 value={field.state.value}
@@ -151,7 +171,11 @@ const CreateClassroomForm = ({
               />
 
               {field.state.meta.errors.length > 0 && (
-                <p className="text-error text-sm mb-4">
+                <p
+                  id={`${field.name}-error`}
+                  className="text-error text-sm mb-4"
+                  role="alert"
+                >
                   {field.state.meta.errors[0]}
                 </p>
               )}
@@ -178,7 +202,7 @@ const CreateClassroomForm = ({
               />
 
               {field.state.meta.errors.length > 0 && (
-                <p className="text-error text-sm mb-4">
+                <p className="text-error text-sm mb-4" role="alert">
                   {field.state.meta.errors[0]}
                 </p>
               )}
@@ -275,7 +299,7 @@ const CreateClassroomForm = ({
                             re-accepting assignments.
                           </p>
                           {secretField.state.meta.errors.length > 0 && (
-                            <p className="text-error text-sm mt-1">
+                            <p className="text-error text-sm mt-1" role="alert">
                               {secretField.state.meta.errors[0]}
                             </p>
                           )}
@@ -305,7 +329,10 @@ const CreateClassroomForm = ({
                 >
                   {busy ? (
                     <>
-                      <span className="loading loading-spinner loading-sm" />
+                      <span
+                        className="loading loading-spinner loading-sm"
+                        aria-hidden="true"
+                      />
                       Creating...
                     </>
                   ) : (

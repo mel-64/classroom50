@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { Plus, Trash2, UsersRound } from "lucide-react"
 
 import GitHub from "@/assets/github.svg?react"
+import { Spinner } from "@/components/Spinner"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
@@ -90,6 +91,7 @@ export function GroupCollaboratorsModal({
   students = [],
 }: GroupCollaboratorsModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Synchronous re-entrancy guard: isSaving (from mutation.isPending) updates a
   // tick late, so a rapid double-click could start two overlapping saves.
@@ -375,6 +377,7 @@ export function GroupCollaboratorsModal({
     <dialog
       ref={dialogRef}
       className="modal"
+      aria-labelledby={titleId}
       onClose={() => {
         if (!isSaving) onClose()
       }}
@@ -389,11 +392,11 @@ export function GroupCollaboratorsModal({
       <div className="modal-box max-w-xl">
         <div className="flex items-start gap-4">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <UsersRound className="size-5" />
+            <UsersRound className="size-5" aria-hidden="true" />
           </div>
 
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg font-bold">
+            <h3 id={titleId} className="text-lg font-bold">
               {assignmentName || "Group collaborators"}
             </h3>
             {repoName && (
@@ -403,7 +406,7 @@ export function GroupCollaboratorsModal({
                 target="_blank"
                 rel="noreferrer"
               >
-                <GitHub className="size-4" />
+                <GitHub aria-hidden="true" className="size-4" />
                 View repository
               </a>
             )}
@@ -412,7 +415,7 @@ export function GroupCollaboratorsModal({
 
         {loadingCollaborators ? (
           <div className="flex py-10">
-            <span className="loading loading-spinner m-auto" />
+            <Spinner className="m-auto" label="Loading collaborators" />
           </div>
         ) : (
           <>
@@ -454,7 +457,10 @@ export function GroupCollaboratorsModal({
               <ul className="divide-y divide-base-200 rounded-2xl border border-base-200">
                 {ownerDisplayLogin && (
                   <li className="flex items-center gap-3 px-4 py-2.5">
-                    <GitHub className="size-5 shrink-0 text-base-content/70" />
+                    <GitHub
+                      aria-hidden="true"
+                      className="size-5 shrink-0 text-base-content/70"
+                    />
                     <span className="min-w-0 flex-1 leading-tight">
                       <CollaboratorIdentity
                         login={ownerDisplayLogin}
@@ -480,6 +486,7 @@ export function GroupCollaboratorsModal({
                       ].join(" ")}
                     >
                       <GitHub
+                        aria-hidden="true"
                         className={[
                           "size-5 shrink-0",
                           isInvalid ? "text-error" : "text-base-content/70",
@@ -504,7 +511,7 @@ export function GroupCollaboratorsModal({
                           aria-label={`Remove ${username}`}
                           onClick={() => removeFromDraft(username)}
                         >
-                          <Trash2 className="size-4" />
+                          <Trash2 aria-hidden="true" className="size-4" />
                         </button>
                       )}
                     </li>
@@ -520,7 +527,10 @@ export function GroupCollaboratorsModal({
                       key={`remove-${username}`}
                       className="flex items-center gap-3 bg-error/5 px-4 py-2.5"
                     >
-                      <GitHub className="size-5 shrink-0 text-error/50" />
+                      <GitHub
+                        aria-hidden="true"
+                        className="size-5 shrink-0 text-error/50"
+                      />
                       <span className="min-w-0 flex-1 leading-tight text-error line-through opacity-70">
                         <CollaboratorIdentity
                           login={username}
@@ -568,6 +578,7 @@ export function GroupCollaboratorsModal({
                   <input
                     className="input input-bordered flex-1"
                     placeholder="Add a GitHub username (e.g. octocat)"
+                    aria-label="Add a GitHub username"
                     value={newCollaborator}
                     onChange={(e) => setNewCollaborator(e.target.value)}
                     onKeyDown={(e) => {
@@ -582,7 +593,7 @@ export function GroupCollaboratorsModal({
                     className="btn btn-outline"
                     onClick={addPendingUsername}
                   >
-                    <Plus className="size-4" />
+                    <Plus aria-hidden="true" className="size-4" />
                     Add
                   </button>
                 </div>
@@ -629,7 +640,9 @@ export function GroupCollaboratorsModal({
               }
               onClick={() => void handleSave()}
             >
-              {isSaving && <span className="loading loading-spinner" />}
+              {isSaving && (
+                <span className="loading loading-spinner" aria-hidden="true" />
+              )}
               Save collaborators
             </button>
           )}

@@ -5,6 +5,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import EnrolledStudents from "@/pages/students/EnrolledStudents"
 import UploadRoster from "@/pages/students/UploadRoster"
 import { useParams } from "@tanstack/react-router"
@@ -75,6 +76,7 @@ const StudentListContent = ({
 }
 
 const StudentListPage = () => {
+  useDocumentTitle("Students")
   const { org = "", classroom = "" } = useParams({ strict: false })
 
   return (

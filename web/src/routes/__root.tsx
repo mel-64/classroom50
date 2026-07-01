@@ -26,7 +26,7 @@ const RootErrorComponent = ({ error }: { error: Error }) => {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-10 text-center">
       <div className="flex size-16 items-center justify-center rounded-2xl bg-error/10 text-error">
-        <TriangleAlert className="size-8" />
+        <TriangleAlert aria-hidden="true" className="size-8" />
       </div>
       <div>
         <h1 className="text-2xl font-bold">Something went wrong</h1>

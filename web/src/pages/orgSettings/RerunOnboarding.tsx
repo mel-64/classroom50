@@ -137,7 +137,10 @@ const RerunOnboarding = ({ org }: { org: string }) => {
         >
           {mutation.isPending ? (
             <>
-              <span className="loading loading-spinner loading-sm" />
+              <span
+                className="loading loading-spinner loading-sm"
+                aria-hidden="true"
+              />
               Re-running…
             </>
           ) : (

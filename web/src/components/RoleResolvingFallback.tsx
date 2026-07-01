@@ -1,3 +1,5 @@
+import { Spinner } from "@/components/Spinner"
+
 // Shared pending state for the role-gated surfaces (RequireTeacher, the
 // assignment index redirect, the SubmissionsPage self-guard).
 const RoleResolvingFallback = ({
@@ -6,7 +8,7 @@ const RoleResolvingFallback = ({
   className?: string
 }) => (
   <div className={`flex items-center justify-center ${className}`}>
-    <span className="loading loading-spinner loading-lg" />
+    <Spinner size="lg" label="Loading" />
   </div>
 )
 

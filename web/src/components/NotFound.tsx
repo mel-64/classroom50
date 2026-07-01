@@ -1,5 +1,8 @@
 import { Link } from "@tanstack/react-router"
 import { FileQuestion } from "lucide-react"
+import { useEffect, useRef } from "react"
+
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 
 // Role/visibility-gated pages render this when the current user can't access a
 // resource. We deliberately present a 404 ("not found") rather than a 403
@@ -13,13 +16,25 @@ const NotFound = ({
   title?: string
   message?: string
 }) => {
+  useDocumentTitle(title)
+  const headingRef = useRef<HTMLHeadingElement | null>(null)
+
+  // Client-side navigation doesn't reload the page, so a screen reader isn't
+  // told the view changed to "not found". Move focus to the heading to announce
+  // it and give keyboard users a sensible starting point.
+  useEffect(() => {
+    headingRef.current?.focus()
+  }, [])
+
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-10 text-center">
       <div className="flex size-16 items-center justify-center rounded-2xl bg-base-200 text-base-content/70">
-        <FileQuestion className="size-8" />
+        <FileQuestion className="size-8" aria-hidden="true" />
       </div>
       <div>
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold">
+          {title}
+        </h1>
         <p className="mt-1 max-w-md text-base-content/70">{message}</p>
       </div>
       <Link to="/" className="btn btn-primary btn-sm">

@@ -6,6 +6,8 @@ import {
   UserPlus,
 } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
+import { Spinner } from "@/components/Spinner"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { Link, useParams, useSearch, useRouter } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
@@ -22,7 +24,11 @@ const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
     <Link to="/">
       <div className="flex p-6 text-lg font-bold">
-        <GraduationCap className="size-8 text-primary mr-2" /> Classroom 50
+        <GraduationCap
+          aria-hidden="true"
+          className="size-8 text-primary mr-2"
+        />{" "}
+        Classroom 50
       </div>
     </Link>
   </div>
@@ -47,7 +53,7 @@ const NotOrgMember = ({
       <EnterDiv className="card-body gap-6">
         <div>
           <span className="badge badge-ghost badge-soft gap-2">
-            <Mail className="size-4" />
+            <Mail aria-hidden="true" className="size-4" />
             Onboarding
           </span>
           <h1 className="mt-6 text-2xl font-bold">Nothing to do here yet</h1>
@@ -61,7 +67,7 @@ const NotOrgMember = ({
         <div className="rounded-2xl border border-base-300 bg-base-200/50 p-5">
           <div className="flex gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-base-300/40 text-base-content/70">
-              <UserPlus className="size-5" />
+              <UserPlus aria-hidden="true" className="size-5" />
             </div>
             <div className="min-w-0">
               <h2 className="font-semibold text-base-content">
@@ -108,7 +114,7 @@ const OnboardingStatus = ({
         <EnterDiv className="card-body gap-6">
           <div>
             <span className="badge badge-primary badge-soft gap-2">
-              <Mail className="size-4" />
+              <Mail aria-hidden="true" className="size-4" />
               Onboarding
             </span>
             <h1 className="mt-6 text-2xl font-bold">{title}</h1>
@@ -118,7 +124,10 @@ const OnboardingStatus = ({
           </div>
           <div className={`rounded-2xl border p-5 ${toneClasses.box}`}>
             <div className="flex gap-3">
-              <CheckCircle2 className={`size-6 shrink-0 ${toneClasses.icon}`} />
+              <CheckCircle2
+                aria-hidden="true"
+                className={`size-6 shrink-0 ${toneClasses.icon}`}
+              />
               <p className="text-sm text-base-content/70">{message}</p>
             </div>
           </div>
@@ -130,6 +139,7 @@ const OnboardingStatus = ({
 }
 
 const OnboardingPage = () => {
+  useDocumentTitle("Get Started")
   const { org, classroom } = useParams({ strict: false })
   // Untrusted: only seeds the claimed-email field; the session authorizes.
   const search = useSearch({ strict: false }) as {
@@ -245,7 +255,7 @@ const OnboardingPage = () => {
       <div className="min-h-screen bg-base-100">
         <OnboardNavbar />
         <OnboardCard>
-          <div className="loading loading-spinner loading-xl text-center m-auto" />
+          <Spinner size="xl" label="Loading" className="m-auto" />
         </OnboardCard>
       </div>
     )
@@ -308,7 +318,7 @@ const OnboardingPage = () => {
         <EnterDiv className="card-body gap-6">
           <div>
             <span className="badge badge-primary badge-soft gap-2">
-              <Mail className="size-4" />
+              <Mail aria-hidden="true" className="size-4" />
               Onboarding
             </span>
             <h1 className="mt-6 text-2xl font-bold">
@@ -329,7 +339,7 @@ const OnboardingPage = () => {
           <div className="flex gap-4 bg-base-200 p-4 rounded-xl border border-base-300">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1 text-sm text-base-content/70">
-                <GitHub className="size-4" />
+                <GitHub aria-hidden="true" className="size-4" />
                 <span>{user?.login ?? "Checking GitHub user..."}</span>
               </div>
             </div>
@@ -384,7 +394,10 @@ const OnboardingPage = () => {
               match you to the class roster.
             </p>
             <div className="mt-2 flex">
-              <Mail className="size-6 mr-2 text-base-content/70" />
+              <Mail
+                aria-hidden="true"
+                className="size-6 mr-2 text-base-content/70"
+              />
               <input
                 id="onboard-email"
                 type="email"
@@ -418,7 +431,7 @@ const OnboardingPage = () => {
           >
             {onboardMutation.isPending ? (
               <>
-                <Loader2 className="size-4 animate-spin" />
+                <Loader2 aria-hidden="true" className="size-4 animate-spin" />
                 Confirming...
               </>
             ) : (

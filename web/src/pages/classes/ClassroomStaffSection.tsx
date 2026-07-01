@@ -45,7 +45,10 @@ const ClassroomStaffSection = ({
       <div className="card-body">
         <div className="flex items-center gap-3 pb-1">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="size-5 text-base-content/70" />
+            <ShieldCheck
+              aria-hidden="true"
+              className="size-5 text-base-content/70"
+            />
             <h3 className="text-lg font-bold">Staff &amp; roles</h3>
           </div>
           <GitHubLink
@@ -214,9 +217,9 @@ const AddStaff = ({
         disabled={disabled || addMutation.isPending || !username.trim()}
       >
         {addMutation.isPending ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 aria-hidden="true" className="size-4 animate-spin" />
         ) : (
-          <UserPlus className="size-4" />
+          <UserPlus aria-hidden="true" className="size-4" />
         )}
         Add
       </button>
@@ -251,7 +254,8 @@ const StaffRoleList = ({
       </div>
       {membersQuery.isLoading ? (
         <div className="flex items-center gap-2 text-sm text-base-content/70">
-          <Loader2 className="size-4 animate-spin" /> Loading…
+          <Loader2 aria-hidden="true" className="size-4 animate-spin" />{" "}
+          Loading…
         </div>
       ) : members.length === 0 ? (
         <p className="text-sm text-base-content/70">
@@ -346,9 +350,9 @@ const StaffMemberRow = ({
         onClick={() => removeMutation.mutate()}
       >
         {removeMutation.isPending ? (
-          <Loader2 className="size-3.5 animate-spin" />
+          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
         ) : (
-          <X className="size-3.5" />
+          <X aria-hidden="true" className="size-3.5" />
         )}
       </button>
     </li>

@@ -92,7 +92,9 @@ const TeardownSection = ({ org }: { org: string }) => {
     <SettingsSection
       tone="danger"
       title="Danger zone"
-      titleAdornment={<TriangleAlert className="size-5 text-error" />}
+      titleAdornment={
+        <TriangleAlert aria-hidden="true" className="size-5 text-error" />
+      }
       description={
         <>
           Tear down this organization by deleting <strong>every</strong>{" "}

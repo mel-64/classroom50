@@ -54,7 +54,7 @@ import { Link2 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { collapseVariants, enterExit } from "@/lib/motion"
 import { EnterDiv } from "@/lib/motionComponents"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 // #218: group students by roster `section`, sorted by name with the unlabeled
 // ("No section") bucket last. Section labels are trimmed; blank/absent folds
@@ -105,7 +105,7 @@ const EditStudentButton = ({
         aria-label={`Edit ${label}`}
         title="Edit student"
       >
-        <Pencil className="size-4" />
+        <Pencil aria-hidden="true" className="size-4" />
       </button>
 
       <EditStudent
@@ -152,6 +152,7 @@ const UnenrollStudentButton = ({
   // identifiable before reconciliation.
   const label = student.username || student.email
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -198,12 +199,13 @@ const UnenrollStudentButton = ({
         className="btn btn-ghost btn-square text-error"
         aria-label={`Unenroll ${label}`}
       >
-        <Trash />
+        <Trash aria-hidden="true" />
       </button>
 
       <dialog
         ref={dialogRef}
         className="modal"
+        aria-labelledby={titleId}
         onClose={closeDialog}
         onCancel={(event) => {
           if (submitting) {
@@ -214,7 +216,9 @@ const UnenrollStudentButton = ({
         }}
       >
         <div className="modal-box max-w-lg">
-          <h3 className="text-lg font-bold">Unenroll student from roster?</h3>
+          <h3 id={titleId} className="text-lg font-bold">
+            Unenroll student from roster?
+          </h3>
 
           <div className="mt-2 text-sm leading-6 text-base-content/70">
             This will remove student{" "}
@@ -278,7 +282,10 @@ const UnenrollStudentButton = ({
             >
               {submitting ? (
                 <>
-                  <span className="loading loading-spinner loading-sm" />
+                  <span
+                    className="loading loading-spinner loading-sm"
+                    aria-hidden="true"
+                  />
                   Working...
                 </>
               ) : (
@@ -321,9 +328,9 @@ const InviteLink = ({
         aria-expanded={expanded}
       >
         {expanded ? (
-          <ChevronDown className="size-3.5" />
+          <ChevronDown aria-hidden="true" className="size-3.5" />
         ) : (
-          <ChevronRight className="size-3.5" />
+          <ChevronRight aria-hidden="true" className="size-3.5" />
         )}
         Native GitHub organization invite link
       </button>
@@ -350,12 +357,12 @@ const InviteLink = ({
             >
               {copied ? (
                 <>
-                  <Check className="size-4 text-success" />
+                  <Check aria-hidden="true" className="size-4 text-success" />
                   Copied
                 </>
               ) : (
                 <>
-                  <Copy className="size-4" />
+                  <Copy aria-hidden="true" className="size-4" />
                   Copy
                 </>
               )}
@@ -395,9 +402,9 @@ const SecureLinkButton = ({
       title="Copy secure onboarding link"
     >
       {copied ? (
-        <Check className="size-4 text-success" />
+        <Check aria-hidden="true" className="size-4 text-success" />
       ) : (
-        <LinkIcon className="size-4" />
+        <LinkIcon aria-hidden="true" className="size-4" />
       )}
     </button>
   )
@@ -438,12 +445,12 @@ const OnboardingLink = ({
         >
           {copied ? (
             <>
-              <Check className="size-4 text-success" />
+              <Check aria-hidden="true" className="size-4 text-success" />
               Copied
             </>
           ) : (
             <>
-              <Copy className="size-4" />
+              <Copy aria-hidden="true" className="size-4" />
               Copy
             </>
           )}
@@ -479,6 +486,7 @@ const MatchAccountButton = ({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -543,13 +551,14 @@ const MatchAccountButton = ({
         title="Joined the org without onboarding — match their GitHub account"
         onClick={() => setOpen(true)}
       >
-        <Link2 className="size-3.5" />
+        <Link2 aria-hidden="true" className="size-3.5" />
         Match account
       </button>
 
       <dialog
         ref={dialogRef}
         className="modal"
+        aria-labelledby={titleId}
         onClose={close}
         onCancel={(event) => {
           if (submitting) {
@@ -560,7 +569,9 @@ const MatchAccountButton = ({
         }}
       >
         <div className="modal-box max-w-lg">
-          <h3 className="text-lg font-bold">Match a GitHub account</h3>
+          <h3 id={titleId} className="text-lg font-bold">
+            Match a GitHub account
+          </h3>
           <p className="mt-2 text-sm leading-6 text-base-content/70">
             <span className="font-semibold text-base-content">
               {student.email}
@@ -620,7 +631,10 @@ const MatchAccountButton = ({
                             }
                           />
                           {isSelected ? (
-                            <Check className="size-4 shrink-0 text-primary" />
+                            <Check
+                              aria-hidden="true"
+                              className="size-4 shrink-0 text-primary"
+                            />
                           ) : null}
                         </button>
                       </li>
@@ -631,7 +645,10 @@ const MatchAccountButton = ({
 
               {selectedCandidate ? (
                 <div className="mt-3 flex items-center gap-2 rounded-box border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-                  <Check className="size-4 shrink-0 text-primary" />
+                  <Check
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-primary"
+                  />
                   <span className="text-base-content/80">
                     Selected{" "}
                     <span className="font-semibold text-base-content">
@@ -672,7 +689,10 @@ const MatchAccountButton = ({
               onClick={() => void handleConfirm()}
             >
               {submitting ? (
-                <span className="loading loading-spinner loading-sm" />
+                <span
+                  className="loading loading-spinner loading-sm"
+                  aria-hidden="true"
+                />
               ) : selectedCandidate ? (
                 `Confirm match: @${selectedCandidate.login}`
               ) : (
@@ -1083,7 +1103,10 @@ const EnrolledStudents = ({
               onClick={() => void handleResend(student)}
             >
               {isResending ? (
-                <span className="loading loading-spinner loading-xs" />
+                <span
+                  className="loading loading-spinner loading-xs"
+                  aria-hidden="true"
+                />
               ) : status === "none" ? (
                 "Send invite"
               ) : (
@@ -1113,10 +1136,13 @@ const EnrolledStudents = ({
               }
             >
               {isMarking ? (
-                <span className="loading loading-spinner loading-xs" />
+                <span
+                  className="loading loading-spinner loading-xs"
+                  aria-hidden="true"
+                />
               ) : (
                 <>
-                  <UserCheck className="size-3.5" />
+                  <UserCheck aria-hidden="true" className="size-3.5" />
                   Mark enrolled
                 </>
               )}
@@ -1263,7 +1289,10 @@ const EnrolledStudents = ({
       {!rosterReady ? (
         <div className="card card-border w-full bg-base-100 shadow-sm">
           <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/70">
-            <span className="loading loading-spinner loading-md" />
+            <span
+              className="loading loading-spinner loading-md"
+              aria-hidden="true"
+            />
             <span className="text-sm">Loading roster...</span>
           </div>
         </div>
@@ -1301,6 +1330,7 @@ const EnrolledStudents = ({
                 disabled={reconcileMutation.isPending}
               >
                 <RefreshCw
+                  aria-hidden="true"
                   className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
                 />
                 Confirm enrollment ({readyToConfirm.length})
@@ -1377,7 +1407,7 @@ const EnrolledStudents = ({
                     className="btn btn-sm btn-ghost"
                     onClick={() => setConfirmResendAllOpen(true)}
                   >
-                    <Send className="size-4" />
+                    <Send aria-hidden="true" className="size-4" />
                     Resend invites
                   </button>
                 ) : null}

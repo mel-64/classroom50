@@ -11,6 +11,8 @@ import {
 
 import GitHub from "@/assets/github.svg?react"
 import GitHubWhite from "@/assets/github_white.svg?react"
+import { Spinner } from "@/components/Spinner"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubUser } from "@/hooks/github/types"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -47,7 +49,11 @@ const AcceptNavbar = () => {
     <div className="navbar bg-base-100 shadow-sm">
       <Link to="/">
         <div className="flex p-6 text-lg font-bold">
-          <GraduationCap className="size-8 text-primary mr-2" /> Classroom 50
+          <GraduationCap
+            aria-hidden="true"
+            className="size-8 text-primary mr-2"
+          />{" "}
+          Classroom 50
         </div>
       </Link>
     </div>
@@ -84,7 +90,7 @@ const UserInfo = ({ user }: { user: GitHubUser | null }) => {
         <div className="font-medium text-base-content">{displayName}</div>
 
         <div className="flex items-center gap-1 text-sm text-base-content/70">
-          <GitHub className="size-4" />
+          <GitHub aria-hidden="true" className="size-4" />
           <span>{username ?? "Checking GitHub user..."}</span>
         </div>
       </div>
@@ -107,7 +113,7 @@ const AssignmentNotFound = ({
         <div className="card-body gap-8">
           <div>
             <span className="badge badge-error badge-soft gap-2">
-              <AlertTriangle className="size-4" />
+              <AlertTriangle aria-hidden="true" className="size-4" />
               Assignment unavailable
             </span>
 
@@ -126,7 +132,7 @@ const AssignmentNotFound = ({
           <div className="rounded-xl border border-error/20 bg-error/5 p-5">
             <div className="flex items-start gap-4">
               <div className="rounded-full bg-error/10 p-3 text-error">
-                <AlertTriangle className="size-6" />
+                <AlertTriangle aria-hidden="true" className="size-6" />
               </div>
 
               <div className="min-w-0">
@@ -186,7 +192,7 @@ const NotOrgMember = ({
         <div className="card-body gap-8">
           <div>
             <span className="badge badge-error badge-soft gap-2">
-              <AlertTriangle className="size-4" />
+              <AlertTriangle aria-hidden="true" className="size-4" />
               Access Denied
             </span>
 
@@ -201,7 +207,7 @@ const NotOrgMember = ({
           <div className="rounded-2xl border border-info/20 bg-info/5 p-5">
             <div className="flex gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-info/10 text-info">
-                <UserPlus className="size-5" />
+                <UserPlus aria-hidden="true" className="size-5" />
               </div>
 
               <div className="min-w-0">
@@ -270,11 +276,26 @@ const initialStepState: StepState = ACCEPT_STEP_ORDER.reduce((acc, step) => {
 
 const StatusIcon = ({ status }: { status: AcceptStepStatus }) => {
   if (status === "complete")
-    return <CheckCircle2 className="size-5 shrink-0 text-success" />
+    return (
+      <CheckCircle2
+        aria-hidden="true"
+        className="size-5 shrink-0 text-success"
+      />
+    )
   if (status === "running")
-    return <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
+    return (
+      <Loader2
+        aria-hidden="true"
+        className="size-5 shrink-0 animate-spin text-primary"
+      />
+    )
   if (status === "error")
-    return <AlertTriangle className="size-5 shrink-0 text-error" />
+    return (
+      <AlertTriangle
+        aria-hidden="true"
+        className="size-5 shrink-0 text-error"
+      />
+    )
   return (
     <span className="flex size-5 shrink-0 items-center justify-center">
       <span className="size-2.5 rounded-full bg-base-300" />
@@ -355,6 +376,7 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
             {completed}/{ACCEPT_STEP_ORDER.length}
           </span>
           <ChevronDown
+            aria-hidden="true"
             className={`size-4 transition-transform ${
               expanded ? "rotate-180" : ""
             }`}
@@ -399,7 +421,10 @@ const RepairToggle = ({
     <details className="group rounded-xl border border-base-300 bg-base-200/40">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium">
         <span>Having trouble?</span>
-        <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 transition-transform group-open:rotate-180"
+        />
       </summary>
 
       <div className="border-t border-base-300 p-4">
@@ -421,6 +446,7 @@ const RepairToggle = ({
 }
 
 const AcceptAssignmentPage = () => {
+  useDocumentTitle("Accept Assignment")
   const { org, classroom, assignment } = useParams({ strict: false })
   // The capability key from the accept link (?k=...). For a protected
   // classroom this selects the <classroom>/<secret>/ Pages path; absent for
@@ -494,7 +520,9 @@ const AcceptAssignmentPage = () => {
       <div className="min-h-screen bg-base-100">
         <AcceptNavbar />
         <AcceptCard>
-          <div className="loading loading-spinner loading-xl text-center m-auto" />
+          <div className="flex justify-center">
+            <Spinner size="xl" label="Loading assignment" />
+          </div>
         </AcceptCard>
       </div>
     )
@@ -533,7 +561,7 @@ const AcceptAssignmentPage = () => {
         <EnterDiv className="card-body gap-4">
           <div className="flex justify-between">
             <span className="badge badge-primary badge-soft">
-              <UserRound className="size-4" />
+              <UserRound aria-hidden="true" className="size-4" />
               {modeMap[assignmentData?.mode ?? ""] ?? ""}
             </span>
             <span
@@ -555,7 +583,7 @@ const AcceptAssignmentPage = () => {
 
           {pastDue && (
             <div className="alert alert-warning items-start">
-              <AlertTriangle className="size-5 shrink-0" />
+              <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
               <div className="text-sm">
                 This assignment is past due. You can still accept it, but check
                 with your instructor about late submissions.
@@ -578,7 +606,7 @@ const AcceptAssignmentPage = () => {
               </label>
 
               <div className="flex gap-4 min-w-0">
-                <GitHub className="size-6 shrink-0" />
+                <GitHub aria-hidden="true" className="size-6 shrink-0" />
                 <pre className="text-lg overflow-x-auto">
                   {org}/{expectedRepoName}
                 </pre>
@@ -591,7 +619,7 @@ const AcceptAssignmentPage = () => {
 
             {acceptMutation.isError && (
               <div className="alert alert-error items-start">
-                <AlertTriangle className="size-5 shrink-0" />
+                <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
                 <div>
                   <div className="font-bold">Could not accept assignment</div>
                   <div className="mt-1 whitespace-pre-wrap text-sm">
@@ -610,7 +638,7 @@ const AcceptAssignmentPage = () => {
 
             {acceptMutation.data && (
               <div className="alert alert-success items-start">
-                <CheckCircle2 className="size-5 shrink-0" />
+                <CheckCircle2 aria-hidden="true" className="size-5 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-bold">
                     {acceptMutation.data.status === "already-accepted"
@@ -643,7 +671,7 @@ const AcceptAssignmentPage = () => {
                 target="_blank"
                 rel="noreferrer"
               >
-                <GitHubWhite className="size-6" />
+                <GitHubWhite aria-hidden="true" className="size-6" />
                 Open Repository
               </a>
             )}
@@ -655,7 +683,7 @@ const AcceptAssignmentPage = () => {
                   className="btn btn-outline w-full text-lg p-5"
                   onClick={() => setCollaboratorsOpen(true)}
                 >
-                  <UsersRound className="size-5" />
+                  <UsersRound aria-hidden="true" className="size-5" />
                   Edit collaborators
                 </button>
               )}
@@ -671,7 +699,7 @@ const AcceptAssignmentPage = () => {
                     void runAccept(() => acceptMutation.mutateAsync())
                   }
                 >
-                  <GitHubWhite className="size-6" />
+                  <GitHubWhite aria-hidden="true" className="size-6" />
                   Accept Assignment & Create Repository
                 </button>
               )}

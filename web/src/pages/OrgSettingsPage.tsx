@@ -4,6 +4,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
@@ -256,9 +257,9 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
           onClick={() => setManualOpen(!configOpen)}
         >
           {configOpen ? (
-            <ChevronUp className="size-4" />
+            <ChevronUp aria-hidden="true" className="size-4" />
           ) : (
-            <ChevronRight className="size-4" />
+            <ChevronRight aria-hidden="true" className="size-4" />
           )}
           {configOpen ? "Hide token configuration" : "Update or replace token"}
         </button>
@@ -295,7 +296,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
 
               {expiresDate ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-base-200 px-3 py-1 text-xs text-base-content/70">
-                  <CalendarClock className="size-3.5" />
+                  <CalendarClock aria-hidden="true" className="size-3.5" />
                   Expires {expiresDate.toLocaleDateString()}
                 </span>
               ) : (
@@ -331,7 +332,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               window.setTimeout(() => tokenInputRef.current?.focus(), 0)
             }}
           >
-            <ExternalLink className="size-4" />
+            <ExternalLink aria-hidden="true" className="size-4" />
             Generate token on GitHub
           </a>
           <p className="mt-2 text-xs text-base-content/70">
@@ -388,12 +389,16 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
             }}
           >
             <div className="flex flex-col gap-2 w-full pb-10">
-              <label className="label font-bold mt-4 text-sm">
+              <label
+                htmlFor="service-token"
+                className="label font-bold mt-4 text-sm"
+              >
                 {tokenAlreadySet
                   ? "Enter new service token"
                   : "Enter service token"}
               </label>
               <input
+                id="service-token"
                 ref={tokenInputRef}
                 type="password"
                 placeholder="Enter token (e.g., github_pat_123...)"
@@ -413,7 +418,10 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               </p>
               {patMutation.isError && (
                 <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                  <TriangleAlert
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
                   <span>
                     {patMutation.error instanceof Error
                       ? patMutation.error.message
@@ -423,7 +431,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               )}
               {savedKind && (
                 <p className="flex items-center gap-1 text-sm text-success">
-                  <CheckCircle2 className="size-4" />
+                  <CheckCircle2 aria-hidden="true" className="size-4" />
                   {savedKind === "updated"
                     ? "Service token checked and updated."
                     : "Service token checked and saved."}
@@ -436,7 +444,10 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               >
                 {patMutation.isPending ? (
                   <>
-                    <span className="loading loading-spinner loading-sm" />
+                    <span
+                      className="loading loading-spinner loading-sm"
+                      aria-hidden="true"
+                    />
                     Validating…
                   </>
                 ) : tokenAlreadySet ? (
@@ -454,6 +465,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
 }
 
 const OrgSettingsPage = () => {
+  useDocumentTitle("Organization Settings")
   const { org } = useParams({ strict: false })
 
   return (

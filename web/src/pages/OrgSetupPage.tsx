@@ -7,6 +7,8 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { Spinner } from "@/components/Spinner"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import { useState } from "react"
@@ -69,7 +71,10 @@ const OrgSteps = ({
                   onClick={() => void runSetup(() => mutation.mutateAsync())}
                 >
                   {mutation.isPending ? (
-                    <span className="loading loading-spinner" />
+                    <span
+                      className="loading loading-spinner"
+                      aria-hidden="true"
+                    />
                   ) : (
                     "Run setup"
                   )}
@@ -80,12 +85,12 @@ const OrgSteps = ({
                   onClick={() => setStage(2)}
                 >
                   Next: service token
-                  <ArrowRight className="size-4" />
+                  <ArrowRight aria-hidden="true" className="size-4" />
                 </button>
               ))}
             {stage === 2 && (
               <button className="btn btn-ghost" onClick={() => setStage(1)}>
-                <ArrowLeft className="size-4" />
+                <ArrowLeft aria-hidden="true" className="size-4" />
                 Back
               </button>
             )}
@@ -96,7 +101,7 @@ const OrgSteps = ({
           <div className="grid gap-4">
             {nextStep && (
               <EnterDiv className="alert alert-success">
-                <CheckCircle2 className="size-5 shrink-0" />
+                <CheckCircle2 aria-hidden="true" className="size-5 shrink-0" />
                 <div>
                   Organization setup is complete. Review the steps below, then
                   continue to set the service token.
@@ -112,7 +117,7 @@ const OrgSteps = ({
         ) : (
           <EnterDiv className="flex flex-col items-center gap-4 py-8 text-center">
             <div className="flex size-16 items-center justify-center rounded-full bg-success/10 text-success">
-              <CheckCircle2 className="size-9" />
+              <CheckCircle2 aria-hidden="true" className="size-9" />
             </div>
             <div>
               <h2 className="text-xl font-bold">You're all set!</h2>
@@ -125,7 +130,7 @@ const OrgSteps = ({
               <span className="truncate">
                 Go to {org || "your organization"}
               </span>
-              <ArrowRight className="size-4 shrink-0" />
+              <ArrowRight aria-hidden="true" className="size-4 shrink-0" />
             </Link>
           </EnterDiv>
         )}
@@ -154,6 +159,7 @@ const NotTeamOrEnterpriseWarning = () => {
 }
 
 const OrgSetupPage = () => {
+  useDocumentTitle("Setup")
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
 
@@ -227,7 +233,7 @@ const OrgSetupPage = () => {
           {!isLoadingPlanDetails && !isTeamOrEnterprise && (
             <NotTeamOrEnterpriseWarning />
           )}
-          {isLoading && <div className="w-full loading-spinner" />}
+          {isLoading && <Spinner label="Loading organization setup" />}
           {!isLoading && !isOwner && <NotAdminAlert />}
           {!isLoading && isOwner && (
             <OrgSteps

@@ -1,7 +1,7 @@
 import { Mail, UserRound, Users } from "lucide-react"
 import { revalidateLogic, useForm } from "@tanstack/react-form"
 import { useMutation } from "@tanstack/react-query"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 
 import GitHub from "@/assets/github.svg?react"
 import { updateStudentWithConflictRetry } from "@/api/mutations/students"
@@ -61,6 +61,7 @@ const EditStudent = ({
   const client = useGitHubClient()
   const runSave = useSafeSubmit()
   const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
   const [error, setError] = useState<string | null>(null)
 
   const displayHandle = student.username || student.email
@@ -165,6 +166,7 @@ const EditStudent = ({
     <dialog
       ref={dialogRef}
       className="modal"
+      aria-labelledby={titleId}
       onClose={closeDialog}
       onCancel={(event) => {
         if (submitting) {
@@ -175,7 +177,9 @@ const EditStudent = ({
       }}
     >
       <div className="modal-box max-w-lg">
-        <h3 className="text-lg font-bold">Edit student</h3>
+        <h3 id={titleId} className="text-lg font-bold">
+          Edit student
+        </h3>
         <p className="mt-1 text-sm text-base-content/70">
           Editing{" "}
           <span className="font-semibold text-base-content">
@@ -195,12 +199,16 @@ const EditStudent = ({
             <form.Field name="first_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-base-content/70" />
+                  <UserRound
+                    className="mr-2 text-base-content/70"
+                    aria-hidden="true"
+                  />
                   <input
                     id={field.name}
                     name={field.name}
                     type="text"
                     placeholder="First name"
+                    aria-label="First name"
                     className="input w-full"
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -213,12 +221,16 @@ const EditStudent = ({
             <form.Field name="last_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-base-content/70" />
+                  <UserRound
+                    className="mr-2 text-base-content/70"
+                    aria-hidden="true"
+                  />
                   <input
                     id={field.name}
                     name={field.name}
                     type="text"
                     placeholder="Last name"
+                    aria-label="Last name"
                     className="input w-full"
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -247,12 +259,22 @@ const EditStudent = ({
                 return (
                   <div>
                     <div className="flex items-center">
-                      <Mail className="size-6 mr-2 text-base-content/70" />
+                      <Mail
+                        className="size-6 mr-2 text-base-content/70"
+                        aria-hidden="true"
+                      />
                       <input
                         id={field.name}
                         name={field.name}
                         type="email"
                         placeholder="student@university.edu"
+                        aria-label="Email"
+                        aria-invalid={field.state.meta.errors.length > 0}
+                        aria-describedby={
+                          field.state.meta.errors.length > 0
+                            ? `${field.name}-error`
+                            : undefined
+                        }
                         className="input w-full"
                         // Show the self-reported email read-only when the CSV
                         // email is blank; the submitted value stays the CSV email.
@@ -267,7 +289,11 @@ const EditStudent = ({
                       />
                     </div>
                     {field.state.meta.errors.length > 0 && (
-                      <p className="text-error text-sm mt-1">
+                      <p
+                        id={`${field.name}-error`}
+                        className="text-error text-sm mt-1"
+                        role="alert"
+                      >
                         {String(field.state.meta.errors[0] ?? "")}
                       </p>
                     )}
@@ -284,12 +310,16 @@ const EditStudent = ({
             <form.Field name="section">
               {(field) => (
                 <div className="flex items-center">
-                  <Users className="mr-2 text-base-content/70" />
+                  <Users
+                    className="mr-2 text-base-content/70"
+                    aria-hidden="true"
+                  />
                   <input
                     id={field.name}
                     name={field.name}
                     type="text"
                     placeholder="Section (e.g. Period 3)"
+                    aria-label="Section"
                     className="input w-full"
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -301,7 +331,7 @@ const EditStudent = ({
 
             {student.username ? (
               <div className="flex items-center gap-2 rounded-box border border-base-300 bg-base-200/50 px-3 py-2 text-sm text-base-content/70">
-                <GitHub className="size-5 opacity-40" />
+                <GitHub aria-hidden="true" className="size-5 opacity-40" />
                 <span>
                   GitHub: <span className="font-mono">@{student.username}</span>
                   {student.github_id ? ` (id ${student.github_id})` : ""}
@@ -336,7 +366,10 @@ const EditStudent = ({
                 >
                   {isSubmitting ? (
                     <>
-                      <span className="loading loading-spinner loading-sm" />
+                      <span
+                        className="loading loading-spinner loading-sm"
+                        aria-hidden="true"
+                      />
                       Saving...
                     </>
                   ) : (

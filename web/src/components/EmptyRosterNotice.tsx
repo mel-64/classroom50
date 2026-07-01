@@ -21,7 +21,7 @@ export const EmptyRosterNotice = ({
     className={`alert alert-info alert-soft flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between ${className}`}
   >
     <div className="flex items-start gap-2">
-      <Info className="mt-0.5 size-4 shrink-0" />
+      <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <span className="text-sm">
         {hasRosterRows ? (
           <>
@@ -46,7 +46,7 @@ export const EmptyRosterNotice = ({
       params={{ org, classroom }}
       className="btn btn-sm btn-info whitespace-nowrap sm:shrink-0"
     >
-      <UserPlus className="size-4" />
+      <UserPlus className="size-4" aria-hidden="true" />
       {hasRosterRows ? "Manage roster" : "Add students"}
     </Link>
   </div>

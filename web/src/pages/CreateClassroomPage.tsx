@@ -11,6 +11,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import Breadcrumb from "@/components/breadcrumb"
 import MissingParams from "@/components/MissingParams"
 import RequireTeacher from "@/components/RequireTeacher"
@@ -22,6 +23,7 @@ import type {
 } from "@/api/mutations/classrooms"
 
 const CreateClassroomPage = () => {
+  useDocumentTitle("New Classroom")
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const navigate = useNavigate()

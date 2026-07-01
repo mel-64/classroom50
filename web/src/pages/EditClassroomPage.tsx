@@ -5,6 +5,8 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
+import { Spinner } from "@/components/Spinner"
 import { useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
 import ClassroomStaffSection from "./classes/ClassroomStaffSection"
@@ -88,7 +90,7 @@ const EditClassroomContent = ({
       loading={loadingClassroom}
       fallback={
         <div className="flex">
-          <div className="m-auto loading loading-spinner" />
+          <Spinner className="m-auto" label="Loading classroom" />
         </div>
       }
     >
@@ -140,6 +142,7 @@ const EditClassroomContent = ({
 }
 
 const EditClassroomPage = () => {
+  useDocumentTitle("Classroom Settings")
   const { org, classroom } = useParams({ strict: false })
 
   return (

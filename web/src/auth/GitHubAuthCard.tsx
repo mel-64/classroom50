@@ -1,20 +1,25 @@
 import { AlertTriangle, CheckCircle, GraduationCap } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useGithubAuth } from "./useGithubAuth"
 import { GitHubAuthedPanel } from "./GitHubAuthedPanel"
 import { GitHubDevicePrompt } from "./GitHubDevicePrompt"
 
 function LoadingScreen({ label }: { label: string }) {
   return (
-    <div className="flex flex-col items-center gap-4 py-10 text-center text-base-content/70">
-      <span className="loading loading-spinner loading-lg" />
+    <div
+      className="flex flex-col items-center gap-4 py-10 text-center text-base-content/70"
+      role="status"
+    >
+      <span className="loading loading-spinner loading-lg" aria-hidden="true" />
       <p className="text-sm">{label}</p>
     </div>
   )
 }
 
 export function GitHubAuthCard() {
+  useDocumentTitle("Sign in")
   const auth = useGithubAuth()
 
   return (
@@ -22,7 +27,7 @@ export function GitHubAuthCard() {
       <section className="card w-full max-w-lg rounded-xl border border-base-300 bg-base-100 shadow-sm">
         <header className="flex items-center gap-4 border-b border-base-200 px-7 py-6">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <GraduationCap className="size-6" />
+            <GraduationCap aria-hidden="true" className="size-6" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Classroom 50</h1>
@@ -46,7 +51,7 @@ export function GitHubAuthCard() {
           ) : auth.screen === "success" ? (
             <div className="flex flex-col items-center gap-4 py-10 text-center">
               <div className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
-                <CheckCircle className="size-7" />
+                <CheckCircle aria-hidden="true" className="size-7" />
               </div>
               <div>
                 <h2 className="text-xl font-bold tracking-tight">
@@ -75,7 +80,10 @@ export function GitHubAuthCard() {
             >
               {auth.error ? (
                 <div className="alert alert-error items-start text-sm">
-                  <AlertTriangle className="size-4 shrink-0" />
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="size-4 shrink-0"
+                  />
                   <span>{auth.error}</span>
                 </div>
               ) : null}
@@ -87,9 +95,12 @@ export function GitHubAuthCard() {
                   disabled={auth.isStartingWebFlow}
                 >
                   {auth.isStartingWebFlow ? (
-                    <span className="loading loading-spinner loading-sm" />
+                    <span
+                      className="loading loading-spinner loading-sm"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <GitHub className="size-4" />
+                    <GitHub aria-hidden="true" className="size-4" />
                   )}
                   Sign in with GitHub
                 </button>
@@ -101,7 +112,10 @@ export function GitHubAuthCard() {
                   onClick={() => void auth.startDeviceFlow()}
                 >
                   {auth.isRequestingDeviceCode ? (
-                    <span className="loading loading-spinner loading-sm" />
+                    <span
+                      className="loading loading-spinner loading-sm"
+                      aria-hidden="true"
+                    />
                   ) : null}
                   Use a device code instead
                 </button>

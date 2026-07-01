@@ -23,7 +23,7 @@ export function GitHubAuthedPanel({
   return (
     <div className="space-y-5">
       <div className="alert alert-success items-start text-sm">
-        <CheckCircle className="size-4 shrink-0" />
+        <CheckCircle aria-hidden="true" className="size-4 shrink-0" />
         <span>
           Signed in - token stored in{" "}
           <code className="font-mono">localStorage</code>

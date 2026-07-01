@@ -20,6 +20,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import SubmissionsControls from "@/pages/submissions/SubmissionsControls"
 import { ConfirmModal } from "@/components/modals"
@@ -91,7 +92,11 @@ const CopyIconButton = ({
     aria-label={label}
     title={label}
   >
-    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+    {copied ? (
+      <Check aria-hidden="true" className="size-4" />
+    ) : (
+      <Copy aria-hidden="true" className="size-4" />
+    )}
   </button>
 )
 
@@ -498,7 +503,7 @@ const SubmissionsPageContent = () => {
                 onClick={downloadScoresCsv}
                 disabled={!scoresInfo.length && !nonSubmitters.length}
               >
-                <HardDriveDownload /> Download Scores (CSV)
+                <HardDriveDownload aria-hidden="true" /> Download Scores (CSV)
               </button>
             </div>
           </div>
@@ -507,7 +512,10 @@ const SubmissionsPageContent = () => {
                 + a single contextual View link on the right. */}
             <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
-                <Info className="mt-0.5 size-5 shrink-0 text-info" />
+                <Info
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-info"
+                />
                 <p className="text-sm text-base-content/70">
                   Submissions are collected automatically, but new ones can take
                   up to 24 hours to appear.{" "}
@@ -541,7 +549,10 @@ const SubmissionsPageContent = () => {
                   }}
                 >
                   {regradeAllActive && (
-                    <span className="loading loading-spinner loading-xs" />
+                    <span
+                      className="loading loading-spinner loading-xs"
+                      aria-hidden="true"
+                    />
                   )}
                   {regradeAllActive ? "Regrading…" : "Regrade all"}
                 </button>
@@ -562,7 +573,10 @@ const SubmissionsPageContent = () => {
                   }}
                 >
                   {collecting && (
-                    <span className="loading loading-spinner loading-xs" />
+                    <span
+                      className="loading loading-spinner loading-xs"
+                      aria-hidden="true"
+                    />
                   )}
                   {collecting ? "Collecting…" : "Collect now"}
                 </button>
@@ -572,7 +586,7 @@ const SubmissionsPageContent = () => {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  <ExternalLink className="size-4" />
+                  <ExternalLink aria-hidden="true" className="size-4" />
                   {viewLabel}
                 </a>
               </div>
@@ -593,7 +607,10 @@ const SubmissionsPageContent = () => {
                 )}
                 {collectScores.phase === "running" && (
                   <span className="flex items-center gap-1.5 text-base-content/70">
-                    <span className="loading loading-spinner loading-xs" />
+                    <span
+                      className="loading loading-spinner loading-xs"
+                      aria-hidden="true"
+                    />
                     Collection in progress. This page refreshes automatically
                     when it finishes.
                   </span>
@@ -636,7 +653,10 @@ const SubmissionsPageContent = () => {
                 )}
                 {regradeAll.phase === "running" && (
                   <span className="flex items-center gap-1.5">
-                    <span className="loading loading-spinner loading-xs" />
+                    <span
+                      className="loading loading-spinner loading-xs"
+                      aria-hidden="true"
+                    />
                     Regrade in progress. Re-running the autograder for each
                     submitted repo; collection is paused until it finishes.
                   </span>
@@ -671,7 +691,7 @@ const SubmissionsPageContent = () => {
           >
             <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
               <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
-                <LinkIcon className="size-5" />
+                <LinkIcon aria-hidden="true" className="size-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="font-bold">How students accept</h2>
@@ -680,7 +700,10 @@ const SubmissionsPageContent = () => {
                   this assignment.
                 </p>
               </div>
-              <ChevronRight className="size-5 shrink-0 text-base-content/70 transition-transform group-open:rotate-90" />
+              <ChevronRight
+                aria-hidden="true"
+                className="size-5 shrink-0 text-base-content/70 transition-transform group-open:rotate-90"
+              />
             </summary>
             <div className="card-body gap-4 pt-0">
               {secret ? (
@@ -704,7 +727,10 @@ const SubmissionsPageContent = () => {
 
               <details className="group/cli">
                 <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/70 hover:text-base-content">
-                  <ChevronRight className="size-4 transition-transform group-open/cli:rotate-90" />
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="size-4 transition-transform group-open/cli:rotate-90"
+                  />
                   Prefer the command line?
                 </summary>
                 <div className="mt-2 flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
@@ -813,6 +839,7 @@ const SubmissionsPageContent = () => {
               title="Refresh submissions"
             >
               <RefreshCw
+                aria-hidden="true"
                 size={14}
                 className={scoresFetching ? "animate-spin" : ""}
               />
@@ -880,6 +907,7 @@ const SubmissionsPageContent = () => {
 // so a real teacher never bounces. Gating here (before mounting the content)
 // also avoids firing the teacher-only score/roster reads for a student.
 const SubmissionsPage = () => {
+  useDocumentTitle("Submissions")
   const { org, classroom, assignment } = useParams({ strict: false })
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
 

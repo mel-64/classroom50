@@ -1,5 +1,5 @@
 import { HardDriveUpload, X } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
 import Papa from "papaparse"
 import { bulkEnrollStudentsInClassroom } from "@/hooks/github/mutations"
@@ -107,6 +107,8 @@ const UploadRoster = ({
   onSuccess,
 }: UploadRosterProps) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+  const titleId = useId()
 
   const [phase, setPhase] = useState<ImportPhase>("idle")
   const [fileName, setFileName] = useState("")
@@ -120,6 +122,15 @@ const UploadRoster = ({
   const [error, setError] = useState<string | null>(null)
 
   const isOpen = phase !== "idle"
+
+  // Drive the native <dialog> so we get focus-trap, Escape, and backdrop
+  // inertness for free (matches the app's other modals).
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (isOpen && !dialog.open) dialog.showModal()
+    if (!isOpen && dialog.open) dialog.close()
+  }, [isOpen])
 
   const reset = () => {
     setPhase("idle")
@@ -221,7 +232,7 @@ const UploadRoster = ({
             onClick={() => fileInputRef.current?.click()}
             className="btn"
           >
-            <HardDriveUpload />
+            <HardDriveUpload aria-hidden="true" />
             Choose File
           </button>
           <p className="text-center text-base-content/70 text-sm">
@@ -230,210 +241,215 @@ const UploadRoster = ({
         </div>
       </div>
 
-      {isOpen && (
-        <dialog className="modal modal-open">
-          <div className="modal-box max-w-3xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold">Import Students</h3>
-                {fileName && (
-                  <p className="text-sm opacity-70 mt-1">File: {fileName}</p>
-                )}
-              </div>
-
-              {phase !== "importing" && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-circle btn-ghost"
-                  onClick={reset}
-                >
-                  <X size={16} />
-                </button>
+      <dialog
+        ref={dialogRef}
+        className="modal"
+        aria-labelledby={titleId}
+        onCancel={(event) => {
+          // Escape during an in-flight import would abandon it; block it.
+          if (phase === "importing") {
+            event.preventDefault()
+            return
+          }
+          reset()
+        }}
+      >
+        <div className="modal-box max-w-3xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id={titleId} className="text-lg font-bold">
+                Import Students
+              </h3>
+              {fileName && (
+                <p className="text-sm opacity-70 mt-1">File: {fileName}</p>
               )}
             </div>
 
-            {phase === "preview" && (
-              <div className="mt-6">
-                <div className="alert mb-4">
-                  <span>
-                    Found <strong>{usernames.length}</strong> GitHub usernames
-                    {usernames.length === 1 ? "" : "s"} to import.
-                  </span>
-                </div>
-
-                {usernames.length > 0 ? (
-                  <div className="max-h-80 overflow-auto rounded-box border border-base-300">
-                    <table className="table table-sm">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>GitHub username</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {usernames.map((username, index) => (
-                          <tr key={username.toLowerCase()}>
-                            <td>{index + 1}</td>
-                            <td>
-                              <code>{username}</code>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="alert alert-warning">
-                    No valid GitHub usernames were found in this file.
-                  </div>
-                )}
-
-                <div className="modal-action">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={reset}
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={usernames.length === 0}
-                    onClick={startImport}
-                  >
-                    Import {usernames.length} student
-                    {usernames.length === 1 ? "" : "s"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {phase === "importing" && (
-              <div className="mt-6">
-                <p className="mb-2 font-medium">{progress.message}</p>
-
-                <progress
-                  className="progress progress-primary w-full"
-                  value={progress.processed}
-                  max={progress.total || 1}
-                />
-
-                <div className="mt-2 flex justify-between text-sm opacity-70">
-                  <span>
-                    {progress.processed} / {progress.total} processed
-                  </span>
-                  <span>{progressPercent}%</span>
-                </div>
-
-                <div className="mt-6 alert">
-                  <span>
-                    Keep this tab open while the import is running. Students are
-                    being validated and added to the classroom.
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {phase === "complete" && result && (
-              <div className="mt-6 space-y-4">
-                <div className="alert alert-success">
-                  <span>
-                    Added <strong>{result.addedStudents.length}</strong> student
-                    {result.addedStudents.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-
-                {result.addedStudents.length > 0 && (
-                  <ImportResultSection
-                    title="Added"
-                    rows={result.addedStudents.map((student) => ({
-                      key: student.username,
-                      label: student.username,
-                      detail: [student.first_name, student.last_name]
-                        .filter(Boolean)
-                        .join(" "),
-                    }))}
-                  />
-                )}
-
-                {result.skippedStudents.length > 0 && (
-                  <ImportResultSection
-                    title="Skipped"
-                    rows={result.skippedStudents.map((student) => ({
-                      key: student.username,
-                      label: student.username,
-                      detail: student.message ?? student.reason,
-                    }))}
-                  />
-                )}
-
-                {result.teamResults?.some(
-                  (teamResult) => teamResult.status === "failed",
-                ) && (
-                  <ImportResultSection
-                    title="Team add failures"
-                    rows={result.teamResults
-                      .filter((teamResult) => teamResult.status === "failed")
-                      .map((teamResult) => ({
-                        key: teamResult.username,
-                        label: teamResult.username,
-                        detail:
-                          teamResult.message ??
-                          "Could not add this user to the team",
-                      }))}
-                  />
-                )}
-
-                <div className="modal-action">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={reset}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {phase === "error" && (
-              <div className="mt-6">
-                <div className="alert alert-error">
-                  <span>{error ?? "Something went wrong."}</span>
-                </div>
-
-                <div className="modal-action">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={reset}
-                  >
-                    Close
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    Choose another file
-                  </button>
-                </div>
-              </div>
+            {phase !== "importing" && (
+              <button
+                type="button"
+                className="btn btn-sm btn-circle btn-ghost"
+                aria-label="Close"
+                onClick={reset}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
             )}
           </div>
 
+          {phase === "preview" && (
+            <div className="mt-6">
+              <div className="alert mb-4">
+                <span>
+                  Found <strong>{usernames.length}</strong> GitHub usernames
+                  {usernames.length === 1 ? "" : "s"} to import.
+                </span>
+              </div>
+
+              {usernames.length > 0 ? (
+                <div className="max-h-80 overflow-auto rounded-box border border-base-300">
+                  <table className="table table-sm">
+                    <thead>
+                      <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">GitHub username</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usernames.map((username, index) => (
+                        <tr key={username.toLowerCase()}>
+                          <td>{index + 1}</td>
+                          <td>
+                            <code>{username}</code>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="alert alert-warning">
+                  No valid GitHub usernames were found in this file.
+                </div>
+              )}
+
+              <div className="modal-action">
+                <button type="button" className="btn btn-ghost" onClick={reset}>
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={usernames.length === 0}
+                  onClick={startImport}
+                >
+                  Import {usernames.length} student
+                  {usernames.length === 1 ? "" : "s"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {phase === "importing" && (
+            <div className="mt-6">
+              <p className="mb-2 font-medium">{progress.message}</p>
+
+              <progress
+                className="progress progress-primary w-full"
+                value={progress.processed}
+                max={progress.total || 1}
+              />
+
+              <div className="mt-2 flex justify-between text-sm opacity-70">
+                <span>
+                  {progress.processed} / {progress.total} processed
+                </span>
+                <span>{progressPercent}%</span>
+              </div>
+
+              <div className="mt-6 alert">
+                <span>
+                  Keep this tab open while the import is running. Students are
+                  being validated and added to the classroom.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {phase === "complete" && result && (
+            <div className="mt-6 space-y-4">
+              <div className="alert alert-success">
+                <span>
+                  Added <strong>{result.addedStudents.length}</strong> student
+                  {result.addedStudents.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {result.addedStudents.length > 0 && (
+                <ImportResultSection
+                  title="Added"
+                  rows={result.addedStudents.map((student) => ({
+                    key: student.username,
+                    label: student.username,
+                    detail: [student.first_name, student.last_name]
+                      .filter(Boolean)
+                      .join(" "),
+                  }))}
+                />
+              )}
+
+              {result.skippedStudents.length > 0 && (
+                <ImportResultSection
+                  title="Skipped"
+                  rows={result.skippedStudents.map((student) => ({
+                    key: student.username,
+                    label: student.username,
+                    detail: student.message ?? student.reason,
+                  }))}
+                />
+              )}
+
+              {result.teamResults?.some(
+                (teamResult) => teamResult.status === "failed",
+              ) && (
+                <ImportResultSection
+                  title="Team add failures"
+                  rows={result.teamResults
+                    .filter((teamResult) => teamResult.status === "failed")
+                    .map((teamResult) => ({
+                      key: teamResult.username,
+                      label: teamResult.username,
+                      detail:
+                        teamResult.message ??
+                        "Could not add this user to the team",
+                    }))}
+                />
+              )}
+
+              <div className="modal-action">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={reset}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+
+          {phase === "error" && (
+            <div className="mt-6">
+              <div className="alert alert-error" role="alert">
+                <span>{error ?? "Something went wrong."}</span>
+              </div>
+
+              <div className="modal-action">
+                <button type="button" className="btn btn-ghost" onClick={reset}>
+                  Close
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Choose another file
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {phase !== "importing" && (
           <form method="dialog" className="modal-backdrop">
-            {phase !== "importing" && (
-              <button type="button" onClick={reset}>
-                close
-              </button>
-            )}
+            <button type="button" onClick={reset}>
+              close
+            </button>
           </form>
-        </dialog>
-      )}
+        )}
+      </dialog>
     </>
   )
 }

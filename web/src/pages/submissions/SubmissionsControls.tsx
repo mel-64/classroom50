@@ -48,7 +48,7 @@ const SubmissionsControls = ({
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <label className="input input-bordered input-sm flex min-w-[12rem] flex-1 items-center gap-2 sm:max-w-xs">
-        <Search className="size-4 opacity-60" />
+        <Search aria-hidden="true" className="size-4 opacity-60" />
         <input
           type="search"
           className="grow"
@@ -146,7 +146,7 @@ const SubmissionsControls = ({
           className="btn btn-ghost btn-sm"
           onClick={clearAll}
         >
-          <X className="size-4" /> Clear
+          <X aria-hidden="true" className="size-4" /> Clear
         </button>
       )}
 
