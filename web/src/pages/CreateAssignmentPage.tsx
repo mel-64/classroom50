@@ -16,6 +16,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
+import { useActionActivityRegistry } from "@/context/actions/ActionActivityProvider"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { githubKeys } from "@/hooks/github/queries"
@@ -34,6 +35,7 @@ const CreateAssignmentPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const queryClient = useQueryClient()
   const { notify } = useToast()
+  const { register } = useActionActivityRegistry()
   const [errorMessage, setErrorMessage] = useState("")
   const [warningMessage, setWarningMessage] = useState("")
 
@@ -78,6 +80,15 @@ const CreateAssignmentPage = () => {
           `${classroom ?? ""}/assignments.json`,
         ),
       })
+      // Track the publish-pages deploy this commit triggers, anchored on the
+      // commit SHA (head_sha on the runs API).
+      if (org && result.newCommitSha) {
+        register({
+          org,
+          label: t("toasts.publishingAssignment", { name: variables.name }),
+          anchor: { kind: "sha", sha: result.newCommitSha },
+        })
+      }
       // Assignment created. If the template team grant failed, stay on the
       // page to show the warning instead of navigating away.
       if (result.templateGrantWarning) {
@@ -86,8 +97,7 @@ const CreateAssignmentPage = () => {
         return
       }
       // Toast before navigating: the provider is mounted above the router, so
-      // the confirmation survives the redirect. GitHub's contents API is
-      // read-after-write eventual, hence "may take a moment to appear".
+      // the confirmation survives the redirect.
       notify({
         tone: "success",
         durationMs: 6000,

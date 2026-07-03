@@ -143,6 +143,10 @@ export type GitHubOrgDetails = {
 
 export type GitHubWorkflowRun = {
   id: number
+  // Workflow display name; labels an unattributed run in the banner.
+  name?: string
+  // Workflow definition file path; maps a run to a workflow without the name.
+  path?: string
   status:
     "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending"
   conclusion:
@@ -156,6 +160,13 @@ export type GitHubWorkflowRun = {
     | "stale"
     | null
   created_at: string
+  // When the run actually started (may lag created_at while queued).
+  run_started_at?: string
+  // Last-updated time; for a completed run, effectively the finish time (banner
+  // elapsed duration).
+  updated_at?: string
+  // Head commit SHA; the banner matches a publish-pages run to a commit by this.
+  head_sha?: string
   html_url: string
   event: string
 }

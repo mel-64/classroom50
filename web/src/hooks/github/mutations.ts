@@ -1978,6 +1978,20 @@ export async function triggerRegrade(
   return { sinceRunId }
 }
 
+// Re-run the failed jobs of a run in <org>/classroom50 (the banner's retry).
+// Re-running only failed jobs preserves the run id, so the tracker re-binds to
+// the same run as it goes back in progress.
+export async function rerunFailedRun(
+  client: GitHubClient,
+  org: string,
+  runId: number,
+): Promise<void> {
+  await client.request(
+    `/repos/${org}/classroom50/actions/runs/${runId}/rerun-failed-jobs`,
+    { method: "POST" },
+  )
+}
+
 export async function putRepoSecret(
   client: GitHubClient,
   owner: string | undefined,
