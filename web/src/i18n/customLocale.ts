@@ -37,9 +37,24 @@ const MAX_REGISTRY_BYTES = 64 * 1024
 // JSON is accepted on input and flattened before validation.
 export type FlatBundle = Record<string, string>
 
+// Where an installed pack came from. Only "registry" packs auto-refresh; a
+// user's hand-loaded pack is never touched, even if its code is in the
+// registry. Legacy packs (no source field) read as "user", so never clobbered.
+export type PackSource = "registry" | "user"
+
+// Provenance + registry update markers carried alongside a pack: from loader to
+// preview to install. Defaults to user-sourced when the source is omitted.
+export type PackMeta = { source?: PackSource; version?: string; hash?: string }
+
 export type LanguagePack = {
   code: string
   bundle: FlatBundle
+  // Origin; defaults to "user" on read for legacy stored packs.
+  source: PackSource
+  // Registry-pack update markers captured at install: skip a re-download when
+  // unchanged. Absent for user packs.
+  version?: string
+  hash?: string
 }
 
 // BCP-47-ish tag: 2-3 letter primary subtag plus optional `-` subtags. Rejects
@@ -66,20 +81,31 @@ const flatBundleSchema = z
 const packSchema = z.object({
   code: langCodeSchema,
   bundle: flatBundleSchema,
+  // Legacy packs (stored before this field) parse as "user" via the default, so
+  // an existing pack is never mistaken for a registry pack and auto-overwritten.
+  source: z.enum(["registry", "user"]).default("user"),
+  version: z.string().max(200).optional(),
+  hash: z.string().max(200).optional(),
 })
 
 const storedPacksSchema = z.record(z.string(), packSchema)
 
 // Shape of the registry's index.json: { "languages": [{ "code": "ja" }, ...] }.
 // Unknown/invalid entries are tolerated per-item so one bad row doesn't sink
-// the whole list.
-const registryEntrySchema = z.object({ code: langCodeSchema })
+// the whole list. `version`/`hash` are optional update markers.
+const registryEntrySchema = z.object({
+  code: langCodeSchema,
+  version: z.string().max(200).optional(),
+  hash: z.string().max(200).optional(),
+})
 const registrySchema = z.object({
   languages: z.array(z.unknown()),
 })
 
 export type RegistryLanguage = {
   code: string
+  version?: string
+  hash?: string
 }
 
 export class LanguagePackError extends Error {
@@ -321,14 +347,25 @@ export function hydratePacks(): string[] {
 }
 
 // Install (or replace) a pack: register it and persist. Returns the code.
-export function installPack(codeInput: string, bundle: FlatBundle): string {
+// `meta` records provenance + registry update markers; defaults to user-sourced.
+export function installPack(
+  codeInput: string,
+  bundle: FlatBundle,
+  meta?: PackMeta,
+): string {
   const code = normalizeLangCode(codeInput)
   if (code === BASE_LANG) {
     throw new LanguagePackError(
       `"${BASE_LANG}" is the built-in base language and can't be replaced.`,
     )
   }
-  const pack: LanguagePack = { code, bundle }
+  const pack: LanguagePack = {
+    code,
+    bundle,
+    source: meta?.source ?? "user",
+    ...(meta?.version ? { version: meta.version } : {}),
+    ...(meta?.hash ? { hash: meta.hash } : {}),
+  }
   // Re-read before writing so a concurrent install in another tab isn't
   // clobbered by a stale snapshot (lost update on read-modify-write).
   const packs = readStoredPacks()
@@ -403,6 +440,11 @@ export type PackPreview = {
   coverage: number
   keyCount: number
   sample: string[]
+  // Provenance + update markers carried from loader to commit time.
+  source: PackSource
+  version?: string
+  // Manifest hash when available, else a computed content hash — always set.
+  hash: string
 }
 
 // Sample keys shown in the preview so the user sees real translated text before
@@ -415,7 +457,26 @@ const SAMPLE_KEYS = [
   "common.save",
 ] as const
 
-function buildPreview(code: string, bundle: FlatBundle): PackPreview {
+// Order-independent content hash of a flat bundle (FNV-1a over sorted
+// key=value pairs). The fallback update signal when the manifest has no hash.
+export function hashBundle(bundle: FlatBundle): string {
+  const serialized = Object.keys(bundle)
+    .sort()
+    .map((key) => `${key}=${bundle[key]}`)
+    .join("\u0000")
+  let h = 0x811c9dc5
+  for (let i = 0; i < serialized.length; i++) {
+    h ^= serialized.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+function buildPreview(
+  code: string,
+  bundle: FlatBundle,
+  meta?: PackMeta,
+): PackPreview {
   const sample = SAMPLE_KEYS.map((key) => bundle[key]).filter(
     (value): value is string => typeof value === "string",
   )
@@ -425,6 +486,10 @@ function buildPreview(code: string, bundle: FlatBundle): PackPreview {
     coverage: coverage(bundle),
     keyCount: Object.keys(bundle).length,
     sample,
+    source: meta?.source ?? "user",
+    ...(meta?.version ? { version: meta.version } : {}),
+    // Manifest hash if supplied, else the computed content hash.
+    hash: meta?.hash ?? hashBundle(bundle),
   }
 }
 
@@ -457,10 +522,12 @@ const FETCH_TIMEOUT_MS = 10_000
 
 // Fetch a pack from a URL into a preview. Requires http/https, bounds the
 // response size, times out, and maps every failure to a LanguagePackError. Code
-// is inferred from the URL's last path segment when omitted.
+// is inferred from the URL's last path segment when omitted. `requireHttps`
+// rejects cleartext http (used by the unattended auto-refresh path).
 export async function prepareFromUrl(
   url: string,
   code?: string,
+  options?: { requireHttps?: boolean },
 ): Promise<PackPreview> {
   let parsed: URL
   try {
@@ -470,6 +537,9 @@ export async function prepareFromUrl(
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new LanguagePackError("Only http(s) URLs are supported.")
+  }
+  if (options?.requireHttps && parsed.protocol !== "https:") {
+    throw new LanguagePackError("Only https URLs are supported here.")
   }
 
   const resolved = resolveCode(code, parsed.pathname)
@@ -508,9 +578,43 @@ export async function prepareFromUrl(
 
 // ---- Built-in registry ------------------------------------------------------
 
+// Short-lived memoization of the manifest fetch: startup refresh and the Browse
+// dialog both hit index.json. Only successful results cache (a failure must not
+// poison later calls); an in-flight promise dedupes concurrent callers.
+const REGISTRY_CACHE_TTL_MS = 30_000
+let registryCache: { at: number; langs: RegistryLanguage[] } | null = null
+let registryInFlight: Promise<RegistryLanguage[]> | null = null
+
+// Test-only: clear the memo so a per-test fetch mock isn't shadowed by a cached
+// result (vitest doesn't isolate tests within a file). Call in beforeEach.
+export function resetRegistryCache(): void {
+  registryCache = null
+  registryInFlight = null
+}
+
+// Fetch the manifest and return the offered language codes, memoized. Invalid
+// entries are skipped; a fetch/parse failure throws LanguagePackError for the
+// UI to show.
+export function fetchRegistry(): Promise<RegistryLanguage[]> {
+  if (registryInFlight) return registryInFlight
+  if (registryCache && Date.now() - registryCache.at < REGISTRY_CACHE_TTL_MS) {
+    return Promise.resolve(registryCache.langs)
+  }
+  const request = fetchRegistryUncached()
+    .then((langs) => {
+      registryCache = { at: Date.now(), langs }
+      return langs
+    })
+    .finally(() => {
+      registryInFlight = null
+    })
+  registryInFlight = request
+  return request
+}
+
 // Fetch the manifest and return the offered language codes. Invalid entries are
 // skipped; a fetch/parse failure throws LanguagePackError for the UI to show.
-export async function fetchRegistry(): Promise<RegistryLanguage[]> {
+async function fetchRegistryUncached(): Promise<RegistryLanguage[]> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   let res: Response
@@ -561,10 +665,10 @@ export async function fetchRegistry(): Promise<RegistryLanguage[]> {
   for (const entry of parsed.data.languages) {
     const one = registryEntrySchema.safeParse(entry)
     if (!one.success) continue
-    const { code } = one.data
+    const { code, version, hash } = one.data
     if (code === BASE_LANG || seen.has(code)) continue
     seen.add(code)
-    langs.push({ code })
+    langs.push({ code, version, hash })
   }
   return langs
 }
@@ -583,21 +687,159 @@ export async function availableBuiltInLangs(): Promise<RegistryLanguage[]> {
 }
 
 // Preview a registry language by reusing the URL loader (same size/timeout/
-// validation guardrails). The code is explicit so it doesn't rely on inference.
-export async function prepareFromBuiltIn(code: string): Promise<PackPreview> {
+// validation guardrails). Pass `requireHttps` for the silent auto-refresh path,
+// and `entry` (the manifest row) to stamp the registry source + version/hash.
+export async function prepareFromBuiltIn(
+  code: string,
+  options?: { requireHttps?: boolean; entry?: RegistryLanguage },
+): Promise<PackPreview> {
   const resolved = normalizeLangCode(code)
-  return prepareFromUrl(packUrl(resolved), resolved)
+  const preview = await prepareFromUrl(packUrl(resolved), resolved, {
+    requireHttps: options?.requireHttps,
+  })
+  const version = options?.entry?.version
+  const manifestHash = options?.entry?.hash
+  return {
+    ...preview,
+    source: "registry",
+    ...(version ? { version } : {}),
+    // Manifest hash if present, else the computed content hash.
+    hash: manifestHash ?? preview.hash,
+  }
 }
 
 // Install and activate a previewed pack — the only step that mutates
-// localStorage and i18next.
+// localStorage and i18next. Pass the preview's provenance/markers.
 export async function commitPack(
   code: string,
   bundle: FlatBundle,
+  meta?: PackMeta,
 ): Promise<string> {
-  const installed = installPack(code, bundle)
+  const installed = installPack(code, bundle, meta)
   await selectLang(installed)
   return installed
+}
+
+// ---- Auto-refresh + update notifications ------------------------------------
+
+// Listeners for codes updated by refreshInstalledPacks. Bridges the non-React
+// startup refresh to a toast: startup runs before mount, so codes updated then
+// are buffered and flushed to the first subscriber.
+const updateListeners = new Set<(codes: string[]) => void>()
+let pendingUpdatedCodes: string[] = []
+
+function emitPackUpdates(codes: string[]): void {
+  if (codes.length === 0) return
+  if (updateListeners.size === 0) {
+    // No subscriber yet (startup before mount) — buffer for the first one.
+    pendingUpdatedCodes = [...pendingUpdatedCodes, ...codes]
+    return
+  }
+  for (const listener of updateListeners) listener(codes)
+}
+
+// Subscribe to auto-update events, immediately flushing any buffered codes.
+// Returns an unsubscribe fn.
+export function subscribeToPackUpdates(
+  onUpdate: (codes: string[]) => void,
+): () => void {
+  updateListeners.add(onUpdate)
+  if (pendingUpdatedCodes.length > 0) {
+    const buffered = pendingUpdatedCodes
+    pendingUpdatedCodes = []
+    onUpdate(buffered)
+  }
+  return () => {
+    updateListeners.delete(onUpdate)
+  }
+}
+
+// Whether the registry copy warrants refetching the pack. Compare markers
+// (version, else hash) so an unchanged pack costs no download; with neither
+// marker, fall through to fetch (the post-download bundlesEqual check still
+// prevents a needless overwrite).
+function registryPackChanged(
+  installed: LanguagePack,
+  entry: RegistryLanguage,
+): boolean {
+  if (entry.version && installed.version) {
+    return entry.version !== installed.version
+  }
+  if (entry.hash && installed.hash) {
+    return entry.hash !== installed.hash
+  }
+  return true
+}
+
+// Silent background refresh: re-fetch each installed registry pack whose marker
+// changed and overwrite in place. Only source==="registry" packs are eligible.
+// Every failure is swallowed so a flaky network never wipes a working pack.
+// Returns (and emits) the updated codes. Never changes the active language;
+// installPack -> addResourceBundle live-updates the active pack's strings.
+export async function refreshInstalledPacks(): Promise<string[]> {
+  const packs = readStoredPacks()
+  const registryPacks = Object.values(packs).filter(
+    (p) => p.source === "registry",
+  )
+  if (registryPacks.length === 0) return []
+
+  let offered: RegistryLanguage[]
+  try {
+    offered = await fetchRegistry()
+  } catch {
+    // Offline / registry unreachable — keep everything as-is.
+    return []
+  }
+  const byCode = new Map(offered.map((l) => [l.code, l]))
+
+  const updated: string[] = []
+  for (const pack of registryPacks) {
+    const entry = byCode.get(pack.code)
+    if (!entry) continue // no longer offered — leave the installed copy.
+    if (!registryPackChanged(pack, entry)) continue // cheap skip, no fetch.
+    try {
+      const preview = await prepareFromBuiltIn(pack.code, {
+        requireHttps: true,
+        entry,
+      })
+      // The per-pack fetch above is an await window in which another tab may
+      // have removed this pack. Re-read storage and skip if it's gone, so we
+      // don't resurrect a pack the user just deleted elsewhere (installPack
+      // does its own read-modify-write and would otherwise re-add the code).
+      if (!(pack.code in readStoredPacks())) continue
+      // Content identical despite a changed marker: refresh the stored marker
+      // quietly (stop refetching) but don't toast.
+      if (bundlesEqual(preview.bundle, pack.bundle)) {
+        installPack(pack.code, pack.bundle, {
+          source: "registry",
+          version: preview.version,
+          hash: preview.hash,
+        })
+        continue
+      }
+      installPack(pack.code, preview.bundle, {
+        source: "registry",
+        version: preview.version,
+        hash: preview.hash,
+      })
+      updated.push(pack.code)
+    } catch {
+      // One pack failing must not abort the rest or wipe the existing pack.
+    }
+  }
+
+  emitPackUpdates(updated)
+  return updated
+}
+
+// Order-independent equality of two flat bundles: same keys, same values.
+function bundlesEqual(a: FlatBundle, b: FlatBundle): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
 }
 
 // ---- Deep-link (?lang=) -----------------------------------------------------
@@ -671,9 +913,14 @@ export async function applyLangFromQuery(): Promise<void> {
 
     // Only honor codes the registry offers, then fetch + install + activate.
     const offered = await fetchRegistry()
-    if (!offered.some((l) => l.code === code)) return
-    const preview = await prepareFromBuiltIn(code)
-    await commitPack(preview.code, preview.bundle)
+    const entry = offered.find((l) => l.code === code)
+    if (!entry) return
+    const preview = await prepareFromBuiltIn(code, { entry })
+    await commitPack(preview.code, preview.bundle, {
+      source: preview.source,
+      version: preview.version,
+      hash: preview.hash,
+    })
   } catch {
     // Invalid code, unavailable pack, or network failure — stay put.
   } finally {
