@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
-  applyReconciledToRoster,
-  countEnrolled,
-  isRosterReady,
-  partitionRoster,
   removeFromRoster,
   resolveEmptyRosterWarning,
   splitName,
   studentKey,
   toStudent,
 } from "./roster"
-import type { RosterPartition } from "./roster"
 import type { Student } from "@/types/classroom"
-import type { InviteStatus } from "@/util/inviteStatus"
 
 const student = (overrides: Partial<Student> = {}): Student => ({
   username: "octocat",
@@ -21,7 +15,6 @@ const student = (overrides: Partial<Student> = {}): Student => ({
   email: "octocat@example.com",
   section: "",
   github_id: "583231",
-  enrollment_status: "invited",
   ...overrides,
 })
 
@@ -63,121 +56,56 @@ describe("splitName", () => {
 })
 
 describe("toStudent", () => {
-  it("passes through valid enrollment_status / enrollment_method", () => {
+  it("passes through the 6 identity/metadata columns", () => {
     const row = {
       username: "x",
-      first_name: "",
-      last_name: "",
+      first_name: "First",
+      last_name: "Last",
       email: "x@y.io",
-      section: "",
+      section: "A",
       github_id: "9",
-      enrollment_status: "enrolled",
-      enrollment_method: "github",
-      email_hash: "",
-      invite_token: "",
-      invited_at: "",
-      enrolled_at: "",
     }
     const s = toStudent(row)
-    expect(s.enrollment_status).toBe("enrolled")
-    expect(s.enrollment_method).toBe("github")
+    expect(s).toEqual(row)
   })
 
-  it("coerces an off-list enrollment_status/method to empty string", () => {
-    const s = toStudent({
-      username: "x",
-      enrollment_status: "bogus",
-      enrollment_method: "carrier-pigeon",
-    } as unknown as Record<string, string>)
-    expect(s.enrollment_status).toBe("")
-    expect(s.enrollment_method).toBe("")
-    // Missing columns default to "".
+  it("defaults missing columns to empty string", () => {
+    const s = toStudent({ username: "x" } as Record<string, string>)
     expect(s.email).toBe("")
+    expect(s.section).toBe("")
     expect(s.username).toBe("x")
   })
 
-  it('coerces the removed legacy "onboarded" status to empty string', () => {
-    // "onboarded" was dropped from EnrollmentStatus; a legacy CSV row carrying
-    // it must not masquerade as a valid status.
+  it("drops unknown legacy columns (e.g. pruned onboarding columns)", () => {
     const s = toStudent({
       username: "x",
-      enrollment_status: "onboarded",
+      enrollment_status: "enrolled",
+      email_hash: "abc",
+      invite_token: "tok",
     } as unknown as Record<string, string>)
-    expect(s.enrollment_status).toBe("")
+    expect(s).toEqual({
+      username: "x",
+      first_name: "",
+      last_name: "",
+      email: "",
+      section: "",
+      github_id: "",
+    })
+    expect("enrollment_status" in s).toBe(false)
+    expect("email_hash" in s).toBe(false)
   })
 
   it("trims every field via the canonical normalizer (one defaulting rule)", () => {
-    // toStudent now delegates defaulting + trimming to normalizeStudentRow, so
-    // padded CSV cells are trimmed (the old toStudent skipped this).
     const s = toStudent({
       username: "  octocat  ",
       first_name: " Mona ",
       email: " octocat@x.io ",
       github_id: " 42 ",
-      enrollment_status: " enrolled ",
     } as unknown as Record<string, string>)
     expect(s.username).toBe("octocat")
     expect(s.first_name).toBe("Mona")
     expect(s.email).toBe("octocat@x.io")
     expect(s.github_id).toBe("42")
-    expect(s.enrollment_status).toBe("enrolled")
-  })
-})
-
-describe("isRosterReady", () => {
-  it("is false while members/invitations are still loading", () => {
-    expect(
-      isRosterReady({
-        statusLoading: true,
-        statusAvailable: true,
-        reportsLoaded: false,
-        reportsErrored: false,
-      }),
-    ).toBe(false)
-  })
-
-  it("is ready for a non-owner once status settles, without waiting on reports", () => {
-    expect(
-      isRosterReady({
-        statusLoading: false,
-        statusAvailable: false,
-        reportsLoaded: false,
-        reportsErrored: false,
-      }),
-    ).toBe(true)
-  })
-
-  it("is ready for an owner once reports load", () => {
-    expect(
-      isRosterReady({
-        statusLoading: false,
-        statusAvailable: true,
-        reportsLoaded: true,
-        reportsErrored: false,
-      }),
-    ).toBe(true)
-  })
-
-  it("is ready (not stuck) when reports error", () => {
-    expect(
-      isRosterReady({
-        statusLoading: false,
-        statusAvailable: true,
-        reportsLoaded: false,
-        reportsErrored: true,
-      }),
-    ).toBe(true)
-  })
-
-  it("is NOT ready for an owner while reports are still pending (the flash case)", () => {
-    expect(
-      isRosterReady({
-        statusLoading: false,
-        statusAvailable: true,
-        reportsLoaded: false,
-        reportsErrored: false,
-      }),
-    ).toBe(false)
   })
 })
 
@@ -202,197 +130,55 @@ describe("removeFromRoster", () => {
   })
 })
 
-describe("applyReconciledToRoster", () => {
-  it("flips a username-bearing row matched by username", () => {
-    const row = student({
-      username: "alice",
-      github_id: "1",
-      enrollment_status: "invited",
-    })
-    const next = applyReconciledToRoster(
-      [row],
-      [{ username: "Alice", email: "alice@x.io" }],
-    )
-    expect(next[0].enrollment_status).toBe("enrolled")
-  })
-
-  it("flips an email-only row matched by email (production shape: reconciled entry carries the attested username)", () => {
-    const row = student({
-      username: "",
-      github_id: "",
-      email: "bob@x.io",
-      enrollment_status: "invited",
-    })
-    // Reconcile always reports a non-empty github_username, even when the row
-    // was bound via the email path. The email-only cached row still has no
-    // local username, so it must match by email.
-    const next = applyReconciledToRoster(
-      [row],
-      [{ username: "bob-gh", email: "BOB@x.io" }],
-    )
-    expect(next[0].enrollment_status).toBe("enrolled")
-  })
-
-  it("does NOT flip an unrelated email-only row sharing an email with a username-reconciled row", () => {
-    const usernameRow = student({
-      username: "carol",
-      github_id: "5",
-      email: "shared@x.io",
-      enrollment_status: "invited",
-    })
-    const emailOnlyRow = student({
-      username: "",
-      github_id: "",
-      email: "shared@x.io",
-      enrollment_status: "invited",
-    })
-    // Reconcile bound only the username row.
-    const next = applyReconciledToRoster(
-      [usernameRow, emailOnlyRow],
-      [{ username: "carol", email: "shared@x.io" }],
-    )
-    expect(next[0].enrollment_status).toBe("enrolled")
-    expect(next[1].enrollment_status).toBe("invited")
-  })
-
-  it("leaves already-enrolled rows untouched and is a no-op for empty input", () => {
-    const enrolled = student({ enrollment_status: "enrolled" })
-    expect(applyReconciledToRoster([enrolled], [])).toEqual([enrolled])
-    const next = applyReconciledToRoster(
-      [enrolled],
-      [{ username: "octocat", email: "octocat@example.com" }],
-    )
-    expect(next[0].enrollment_status).toBe("enrolled")
-  })
-})
-
-describe("partitionRoster", () => {
-  it("buckets rows by status: ready / member|removed / else", () => {
-    const ready = student({ github_id: "1" })
-    const memberRow = student({ github_id: "2" })
-    const removedRow = student({ github_id: "3" })
-    const awaitingRow = student({ github_id: "4" })
-    const unknownRow = student({ github_id: "5" })
-
-    const statuses: Record<string, InviteStatus> = {
-      "1": "ready",
-      "2": "member",
-      "3": "removed",
-      "4": "pending",
-    }
-    const result = partitionRoster(
-      [ready, memberRow, removedRow, awaitingRow, unknownRow],
-      (s) => statuses[s.github_id],
-    )
-    expect(result.readyToConfirm).toEqual([ready])
-    expect(result.enrolled).toEqual([memberRow, removedRow])
-    // pending and undefined-status both fall through to awaiting.
-    expect(result.awaitingEnrollment).toEqual([awaitingRow, unknownRow])
-  })
-})
-
-const partition = (
-  overrides: Partial<RosterPartition> = {},
-): RosterPartition => ({
-  readyToConfirm: [],
-  awaitingEnrollment: [],
-  enrolled: [],
-  ...overrides,
-})
-
-describe("countEnrolled", () => {
-  it("uses the live partition when status is available and settled", () => {
-    const enrolled = [student({ github_id: "1" }), student({ github_id: "2" })]
-    const count = countEnrolled(
-      {
-        statusAvailable: true,
-        statusLoading: false,
-        partition: partition({ enrolled }),
-      },
-      // CSV column disagrees on purpose: the live partition must win.
-      [student({ enrollment_status: "invited" })],
-    )
-    expect(count).toBe(2)
-  })
-
-  it("falls back to the CSV enrolled column when status is unavailable (non-owner)", () => {
-    const students = [
-      student({ github_id: "1", enrollment_status: "enrolled" }),
-      student({ github_id: "2", enrollment_status: "invited" }),
-      student({ github_id: "3", enrollment_status: "enrolled" }),
-    ]
-    const count = countEnrolled(
-      // Non-owner: partition would be empty, but the CSV fallback is used.
-      { statusAvailable: false, statusLoading: false, partition: partition() },
-      students,
-    )
-    expect(count).toBe(2)
-  })
-
-  it("falls back to the CSV column while live status is still loading", () => {
-    const students = [student({ enrollment_status: "enrolled" })]
-    const count = countEnrolled(
-      { statusAvailable: true, statusLoading: true, partition: partition() },
-      students,
-    )
-    expect(count).toBe(1)
-  })
-})
-
 describe("resolveEmptyRosterWarning", () => {
   const base = {
     studentsLoading: false,
-    statusAvailable: true,
-    statusLoading: false,
+    isLoading: false,
+    isError: false,
     enrolledCount: 0,
-    rosterRowCount: 0,
+    hasRosterRows: false,
   }
 
-  it("shows the warning only once settled with zero enrolled students", () => {
-    expect(resolveEmptyRosterWarning(base)).toMatchObject({
+  it("shows the warning once settled with zero enrolled team members", () => {
+    expect(resolveEmptyRosterWarning({ ...base })).toEqual({
       show: true,
       hasRosterRows: false,
       isLoading: false,
     })
   })
 
-  it("never shows (no flash) while the roster is still loading", () => {
+  it("hides the warning when at least one team member is enrolled", () => {
     expect(
-      resolveEmptyRosterWarning({ ...base, studentsLoading: true }).show,
-    ).toBe(false)
+      resolveEmptyRosterWarning({ ...base, enrolledCount: 3 }),
+    ).toMatchObject({ show: false, isLoading: false })
   })
 
-  it("never shows (no flash) while live status is loading and available", () => {
+  it("suppresses the warning while the roster is still loading", () => {
+    expect(resolveEmptyRosterWarning({ ...base, isLoading: true })).toEqual({
+      show: false,
+      hasRosterRows: false,
+      isLoading: true,
+    })
     expect(
-      resolveEmptyRosterWarning({ ...base, statusLoading: true }).show,
-    ).toBe(false)
+      resolveEmptyRosterWarning({ ...base, studentsLoading: true }),
+    ).toMatchObject({ show: false, isLoading: true })
   })
 
-  it("ignores statusLoading when status is unavailable (non-owner settles on the roster)", () => {
-    // statusLoading=true but statusAvailable=false -> not gated by status.
-    expect(
-      resolveEmptyRosterWarning({
-        ...base,
-        statusAvailable: false,
-        statusLoading: true,
-      }).show,
-    ).toBe(true)
+  it("treats a team-roster read error as loading (never asserts empty on a failure)", () => {
+    // A transient/permission team-members read failure must NOT surface the
+    // "nobody can accept assignments" banner — the view shows error+retry, and
+    // the banner self-heals on recovery.
+    expect(resolveEmptyRosterWarning({ ...base, isError: true })).toEqual({
+      show: false,
+      hasRosterRows: false,
+      isLoading: true,
+    })
   })
 
-  it("hides the warning when at least one student is enrolled", () => {
-    expect(resolveEmptyRosterWarning({ ...base, enrolledCount: 1 }).show).toBe(
-      false,
-    )
-  })
-
-  it("reports hasRosterRows so callers can distinguish empty vs invited-only", () => {
-    // Rows exist but nobody is enrolled -> warn, with the 'invited' copy branch.
+  it("passes hasRosterRows through unchanged (rows exist even when enrolled is 0)", () => {
+    // e.g. zero CSV rows but >0 pending email-only invites -> hasRosterRows true.
     expect(
-      resolveEmptyRosterWarning({
-        ...base,
-        rosterRowCount: 30,
-        enrolledCount: 0,
-      }),
+      resolveEmptyRosterWarning({ ...base, hasRosterRows: true }),
     ).toMatchObject({ show: true, hasRosterRows: true })
   })
 })

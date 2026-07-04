@@ -1,8 +1,11 @@
 package download
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,7 +17,6 @@ import (
 
 	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
-	"github.com/foundation50/gh-teacher/internal/configrepo"
 	"github.com/foundation50/gh-teacher/internal/githubtest"
 	scoresschema "github.com/foundation50/gh-teacher/internal/scores"
 )
@@ -341,10 +343,12 @@ func TestStringifyOverride(t *testing.T) {
 }
 
 func TestWriteScoresCSV(t *testing.T) {
-	roster := []configrepo.RosterRow{
-		{Username: "alice"},
-		{Username: "Bob"}, // mixed case to verify lookup is case-insensitive
-		{Username: "carol"},
+	teamLogins := []string{"alice", "Bob", "carol"} // mixed case to verify lookup is case-insensitive
+	// Best-effort students.csv metadata join (blank when a member is absent
+	// from the CSV — carol here).
+	meta := map[string]RosterMeta{
+		"alice": {FirstName: "Ada", LastName: "Lovelace", Email: "ada@uni.edu", Section: "A"},
+		"bob":   {FirstName: "Bob", LastName: "Jones", Email: "bob@uni.edu", Section: "B"},
 	}
 
 	// scores: alice submitted twice (newest first), bob submitted once with
@@ -414,7 +418,7 @@ func TestWriteScoresCSV(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "scores.csv")
-	if err := writeScoresCSV(path, scores, "hello", roster); err != nil {
+	if err := writeScoresCSV(path, scores, "hello", teamLogins, meta); err != nil {
 		t.Fatalf("writeScoresCSV: %v", err)
 	}
 
@@ -424,11 +428,11 @@ func TestWriteScoresCSV(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"username,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override",
-		"alice,20,30,2026-06-02T09:00:00Z,submit/2026-06-02T08-59-00Z,alice,https://github.com/cs50/cs-principles-hello-alice/commit/ghi,false,",
-		"alice,18,30,2026-06-01T14:33:11Z,submit/2026-06-01T14-32-05Z,,https://github.com/cs50/cs-principles-hello-alice/commit/abc,false,",
-		"Bob,25,30,2026-06-01T15:00:00Z,submit/2026-06-01T14-59-00Z,,https://github.com/cs50/cs-principles-hello-bob/commit/def,true,true",
-		"carol,,,,,,,,",
+		"username,first_name,last_name,email,section,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override",
+		"alice,Ada,Lovelace,ada@uni.edu,A,20,30,2026-06-02T09:00:00Z,submit/2026-06-02T08-59-00Z,alice,https://github.com/cs50/cs-principles-hello-alice/commit/ghi,false,",
+		"alice,Ada,Lovelace,ada@uni.edu,A,18,30,2026-06-01T14:33:11Z,submit/2026-06-01T14-32-05Z,,https://github.com/cs50/cs-principles-hello-alice/commit/abc,false,",
+		"Bob,Bob,Jones,bob@uni.edu,B,25,30,2026-06-01T15:00:00Z,submit/2026-06-01T14-59-00Z,,https://github.com/cs50/cs-principles-hello-bob/commit/def,true,true",
+		"carol,,,,,,,,,,,,",
 		"",
 	}, "\n")
 	if string(got) != want {
@@ -440,11 +444,11 @@ func TestWriteScoresCSV_GroupFanOut(t *testing.T) {
 	// A group submission is one multi-username row. writeScoresCSV must
 	// credit every member with the group's submissions, including a
 	// teammate who owns no derived repo.
-	roster := []configrepo.RosterRow{
-		{Username: "alice"}, // owner
-		{Username: "bob"},   // joined alice's repo
-		{Username: "carol"}, // joined alice's repo
-		{Username: "dan"},   // not in the group — no score
+	teamLogins := []string{
+		"alice", // owner
+		"bob",   // joined alice's repo
+		"carol", // joined alice's repo
+		"dan",   // not in the group — no score
 	}
 	scores := scoresschema.File{
 		Schema: scoresschema.SchemaV1,
@@ -474,7 +478,7 @@ func TestWriteScoresCSV_GroupFanOut(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "scores.csv")
-	if err := writeScoresCSV(path, scores, "project", roster); err != nil {
+	if err := writeScoresCSV(path, scores, "project", teamLogins, map[string]RosterMeta{}); err != nil {
 		t.Fatalf("writeScoresCSV: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -482,13 +486,15 @@ func TestWriteScoresCSV_GroupFanOut(t *testing.T) {
 		t.Fatalf("read file: %v", err)
 	}
 
-	row := "90,100,2026-06-01T14:33:11Z,submit/2026-06-01T14-32-05Z,bob,https://github.com/cs50/cs-principles-project-alice/commit/abc,false,"
+	// No CSV metadata here (blank name/section/email): 4 empty cells after
+	// the username, then the shared submission columns.
+	row := ",,,,,90,100,2026-06-01T14:33:11Z,submit/2026-06-01T14-32-05Z,bob,https://github.com/cs50/cs-principles-project-alice/commit/abc,false,"
 	want := strings.Join([]string{
-		"username,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override",
-		"alice," + row,
-		"bob," + row,
-		"carol," + row,
-		"dan,,,,,,,,", // not a group member → blank
+		"username,first_name,last_name,email,section,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override",
+		"alice" + row,
+		"bob" + row,
+		"carol" + row,
+		"dan,,,,,,,,,,,,", // not a group member → blank
 		"",
 	}, "\n")
 	if string(got) != want {
@@ -497,19 +503,19 @@ func TestWriteScoresCSV_GroupFanOut(t *testing.T) {
 }
 
 func TestWriteScoresCSV_EmptyRoster(t *testing.T) {
-	// An empty roster yields just the header — the file still
+	// No team members yields just the header — the file still
 	// exists so a teacher checking the download root sees the
 	// expected artifact even on a brand-new class.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "scores.csv")
-	if err := writeScoresCSV(path, scoresschema.File{Schema: scoresschema.SchemaV1}, "hello", nil); err != nil {
+	if err := writeScoresCSV(path, scoresschema.File{Schema: scoresschema.SchemaV1}, "hello", nil, nil); err != nil {
 		t.Fatalf("writeScoresCSV: %v", err)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	want := "username,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override\n"
+	want := "username,first_name,last_name,email,section,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override\n"
 	if string(got) != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -567,7 +573,11 @@ func TestWriteScoresCSV_NeutralizesFormulaInjection(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "scores.csv")
-	if err := writeScoresCSV(path, scores, "hello", []configrepo.RosterRow{{Username: "alice"}}); err != nil {
+	// Metadata is teacher/student-controllable free text, so it's guarded too.
+	meta := map[string]RosterMeta{
+		"alice": {FirstName: "=HYPERLINK(1)", Section: "@SUM(B1)"},
+	}
+	if err := writeScoresCSV(path, scores, "hello", []string{"alice"}, meta); err != nil {
 		t.Fatalf("writeScoresCSV: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -576,10 +586,13 @@ func TestWriteScoresCSV_NeutralizesFormulaInjection(t *testing.T) {
 	}
 	// The dangerous cells must be prefixed with a single quote.
 	if !strings.Contains(string(got), "'=HYPERLINK") {
-		t.Errorf("review formula not neutralized:\n%s", got)
+		t.Errorf("review/first_name formula not neutralized:\n%s", got)
 	}
 	if !strings.Contains(string(got), "'@SUM(A1)") {
 		t.Errorf("submitted_by formula not neutralized:\n%s", got)
+	}
+	if !strings.Contains(string(got), "'@SUM(B1)") {
+		t.Errorf("section metadata formula not neutralized:\n%s", got)
 	}
 	if !strings.Contains(string(got), "'=cmd") {
 		t.Errorf("late formula not neutralized:\n%s", got)
@@ -1032,5 +1045,54 @@ func TestRewriteAssetURL(t *testing.T) {
 				t.Fatalf("rewriteAssetURL(%q, %q) = %q, want %q", tc.asset, tc.apiBase, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLoadRosterMetadata_MissingCSVWarnsAndBlanks: students.csv is optional
+// display metadata now — a missing/unreadable file must NOT skip students. The
+// contents read 404s, so LoadRoster errors; loadRosterMetadata warns and
+// returns an empty map so every team member still gets a (blank-metadata) row.
+func TestLoadRosterMetadata_MissingCSVWarnsAndBlanks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // students.csv contents read 404s
+	}))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var errOut bytes.Buffer
+	meta := loadRosterMetadata(client, "o", "cs", "main", &errOut)
+
+	if len(meta) != 0 {
+		t.Fatalf("got %d metadata rows, want 0 (blank on missing CSV)", len(meta))
+	}
+	if !strings.Contains(errOut.String(), "students.csv metadata unavailable") {
+		t.Errorf("expected an 'unavailable' warning, got %q", errOut.String())
+	}
+}
+
+// TestLoadRosterMetadata_IndexesByLogin: a readable students.csv is indexed by
+// lowercased login into RosterMeta for the scores.csv name/section/email join.
+func TestLoadRosterMetadata_IndexesByLogin(t *testing.T) {
+	csv := "username,first_name,last_name,email,section,github_id\n" +
+		"Alice,Ada,Lovelace,ada@uni.edu,A,1\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":  base64.StdEncoding.EncodeToString([]byte(csv)),
+			"encoding": "base64",
+		})
+	}))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	meta := loadRosterMetadata(client, "o", "cs", "main", io.Discard)
+
+	// Indexed by lowercased login even though the CSV cased it "Alice".
+	got, ok := meta["alice"]
+	if !ok {
+		t.Fatalf("login not indexed lowercased; keys = %v", meta)
+	}
+	want := RosterMeta{FirstName: "Ada", LastName: "Lovelace", Email: "ada@uni.edu", Section: "A"}
+	if got != want {
+		t.Errorf("meta[alice] = %+v, want %+v", got, want)
 	}
 }

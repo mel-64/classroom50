@@ -13,7 +13,7 @@ import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
-import type { OnboardingCleanupMode, StaffRole } from "@/types/classroom"
+import type { StaffRole } from "@/types/classroom"
 import { isClassroomArchived, STAFF_ROLES } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
@@ -850,9 +850,9 @@ export async function getOrgMembershipState(
 // membership re-check used across the enroll/reconcile paths. A missing username
 // or any read failure resolves to false (never throws), so callers that just
 // need a yes/no gate don't each re-inline the getOrgMembershipState === "active"
-// + try/catch dance. Callers that must surface a tailored error on a non-member
-// (markStudentEnrolled, matchStudentToAccount) still call getOrgMembershipState
-// directly so they can throw their own message.
+// + try/catch dance. A caller that must surface a tailored error on a
+// non-member (matchStudentToAccount) still calls getOrgMembershipState
+// directly so it can throw its own message.
 export async function isActiveMember(
   client: GitHubClient,
   org: string,
@@ -906,11 +906,13 @@ export async function ensureOrgMembership(
   }
 }
 
-// Resend an org invite without ever leaving the student invite-less: recreate
-// first, then cancel the stale invite only once a replacement exists (the old
-// cancel-then-recreate order stranded a student if the recreate failed). If a
-// still-pending invite blocks the recreate (422), that existing invite is the
-// live one, so leave it in place.
+// Resend an org invite without ever leaving the student invite-less. A fresh
+// `ensureOrgMembership` recreates when the invitee is neither active nor
+// pending. When they ARE still pending and we know the stale invitation id,
+// cancel it and recreate so the invite is genuinely re-sent (previously this
+// short-circuited on the pending precheck and re-sent nothing). If the recreate
+// then hits a 422 (a pending invite still blocks it), that existing invite is
+// the live one, so leave it in place.
 export async function resendOrgInvitation(
   client: GitHubClient,
   input: {
@@ -924,10 +926,24 @@ export async function resendOrgInvitation(
 
   const result = await ensureOrgMembership(client, { org, username, inviteeId })
 
-  // A fresh invite makes the prior one stale; an already active/pending student
-  // means we created nothing, so don't cancel their invite.
-  if (invitationId !== undefined && result.state === "invited") {
+  if (result.state === "invited") {
+    // A fresh invite was created; cancel the prior one if we know it.
+    if (invitationId !== undefined) {
+      await cancelOrgInvitation(client, { org, invitationId })
+    }
+    return result
+  }
+
+  // Still pending with a known stale invite: cancel it and recreate so the
+  // student actually receives a new invitation. Active members are left alone.
+  if (result.state === "pending" && invitationId !== undefined) {
     await cancelOrgInvitation(client, { org, invitationId })
+    const recreated = await ensureOrgMembership(client, {
+      org,
+      username,
+      inviteeId,
+    })
+    return recreated
   }
 
   return result
@@ -1794,9 +1810,12 @@ export async function validateServiceToken(
 
   const scopeHint =
     `Create a fine-grained PAT with Resource owner = ${org}, Repository access = ` +
-    "All repositories, and Repository permissions → Contents: Read and write " +
+    "All repositories, Repository permissions → Contents: Read and write " +
     "AND Actions: Read and write (collecting scores reads; regrading re-runs " +
-    "student autograde workflows and may push submit/* tags, which need write). " +
+    "student autograde workflows and may push submit/* tags, which need write), " +
+    "AND Organization permissions → Members: Read (collection is team-driven and " +
+    "lists the classroom team — a separate section shown once the org is the " +
+    "resource owner; not implied by any repository scope). " +
     "If your org requires PAT approval and you are not an org owner, an owner " +
     "must approve it first (owners' tokens are auto-approved)."
 
@@ -1852,6 +1871,37 @@ export async function validateServiceToken(
     throw new Error(
       `This token can read ${org}/classroom50 but lacks write access — collecting scores needs read, but regrading needs write. ${scopeHint}`,
     )
+  }
+
+  // Contents/Actions are proven, but collection is team-driven: it lists the
+  // classroom team's members, which needs the org-level Members: Read
+  // permission — NOT implied by any repository scope, so a Contents/Actions-only
+  // token passes every check above yet 403s on the first API call collect-scores
+  // makes. Probe GET /orgs/{org}/members (same Members: Read permission the
+  // team-members endpoint needs, but not dependent on a specific team existing).
+  //
+  // FAIL-OPEN on ambiguity: a 403/404 is a definitive scope gap and is
+  // rejected; any other failure (401 after a 200 repo read, 5xx, rate-limit,
+  // network/CORS) is inconclusive and allowed to proceed — the repo read above
+  // already proved the token live, so blocking on this second round-trip's
+  // flakiness would reject a valid token. The probe-token.yaml workflow is the
+  // exhaustive post-provision signal.
+  try {
+    await tokenClient.request(
+      `/orgs/${encodeURIComponent(org)}/members?per_page=1`,
+    )
+  } catch (err) {
+    if (
+      err instanceof GitHubAPIError &&
+      (err.status === 403 || err.status === 404)
+    ) {
+      throw new Error(
+        `This token can read ${org}/classroom50 but can't read the org's members — collecting scores is team-driven and lists the classroom team, which needs Organization permissions → Members: Read. ${scopeHint}`,
+        { cause: err },
+      )
+    }
+    // Inconclusive (401/5xx/network) — proceed; the repo read already
+    // proved the token valid.
   }
 }
 
@@ -2517,7 +2567,6 @@ export type EditClassroomInput = {
   // values (no stale-cache overwrite, no lost-update of a concurrent rename).
   term?: string
   name?: string
-  onboarding_cleanup?: OnboardingCleanupMode
   // Archive lifecycle: false = archive, true = unarchive. Omitted leaves the
   // current value (or its absence) intact. See isClassroomArchived.
   active?: boolean
@@ -2528,25 +2577,22 @@ export type EditClassroomResult = Awaited<ReturnType<typeof editClassroom>>
 // Merge an edit onto the current classroom.json record. Pure (no I/O):
 // - spreads `...current` first so unknown/future fields a sibling binary wrote
 //   ride through verbatim (the strict CLI round-trips this file);
-// - writes name/term/onboarding_cleanup/active ONLY when provided, so a pure
-//   archive toggle preserves the persisted name/term, and a name edit doesn't
-//   disturb the lifecycle flag. `active` is a meaningful boolean (false =
+// - writes name/term/active ONLY when provided, so a pure archive toggle
+//   preserves the persisted name/term. `active` is a meaningful boolean (false =
 //   archived), so unarchive writes `true` rather than deleting the key.
 export function buildClassroomUpdate(
   current: Record<string, unknown>,
   fields: {
     name?: string
     term?: string
-    onboarding_cleanup?: OnboardingCleanupMode
     active?: boolean
   },
 ): Record<string, unknown> {
-  const { name, term, onboarding_cleanup, active } = fields
+  const { name, term, active } = fields
   return {
     ...current,
     ...(name !== undefined ? { name } : {}),
     ...(term !== undefined ? { term } : {}),
-    ...(onboarding_cleanup !== undefined ? { onboarding_cleanup } : {}),
     ...(active !== undefined ? { active } : {}),
   }
 }
@@ -2555,7 +2601,7 @@ export async function editClassroom(
   client: GitHubClient,
   input: EditClassroomInput,
 ) {
-  const { org, slug, term, name, onboarding_cleanup, active } = input
+  const { org, slug, term, name, active } = input
 
   const ref = await getBranchRef(client, org)
 
@@ -2573,14 +2619,13 @@ export async function editClassroom(
     )
   }
 
-  // Archived classrooms are read-only — refuse a settings edit (name / term /
-  // onboarding_cleanup), but let a lifecycle toggle through since unarchiving
-  // re-enables editing. Gate on whether a settings field is actually present
-  // rather than on `active === undefined`, so a payload that bundles a settings
-  // change with `active: false` (a stale tab, a direct API call, or a CLI/agent)
-  // cannot slip an edit past the guard by re-asserting the archived state.
-  const editsSettings =
-    name !== undefined || term !== undefined || onboarding_cleanup !== undefined
+  // Archived classrooms are read-only — refuse a settings edit (name / term),
+  // but let a lifecycle toggle through since unarchiving re-enables editing.
+  // Gate on whether a settings field is actually present rather than on
+  // `active === undefined`, so a payload that bundles a settings change with
+  // `active: false` (a stale tab, a direct API call, or a CLI/agent) cannot slip
+  // an edit past the guard by re-asserting the archived state.
+  const editsSettings = name !== undefined || term !== undefined
   if (editsSettings && active !== true && isClassroomArchived(current)) {
     throw new Error(
       `Classroom "${slug}" is archived — settings are read-only. Unarchive it first to make changes.`,
@@ -2590,7 +2635,6 @@ export async function editClassroom(
   const next = buildClassroomUpdate(current, {
     name,
     term,
-    onboarding_cleanup,
     active,
   })
 

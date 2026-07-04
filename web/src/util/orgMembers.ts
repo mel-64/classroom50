@@ -2,11 +2,10 @@ import type { Student } from "@/types/classroom"
 import type { GitHubUser } from "@/hooks/github/types"
 import { memberIdSet, rosterClaimSet, studentKey } from "@/util/identity"
 
-// One classroom a student appears on, with that classroom's per-row status.
+// One classroom a student appears on.
 export type ClassroomAccess = {
   classroom: string
   archived: boolean
-  enrollment_status: Student["enrollment_status"]
   section: string
 }
 
@@ -80,7 +79,6 @@ export function aggregateOrgMembers(
       const access: ClassroomAccess = {
         classroom: roster.classroom,
         archived: roster.archived,
-        enrollment_status: student.enrollment_status,
         section: student.section?.trim() ?? "",
       }
       const existing = byKey.get(key)
@@ -184,8 +182,16 @@ export type MatchCandidate = {
 // "claimed" when their numeric id or login appears on a roster row (by github_id
 // or username), so a teacher only sees accounts that aren't yet bound to a
 // student here. Pure for unit-testing without react-query.
+//
+// Accepts the minimal member shape it reads (id/login/name/avatar_url) so
+// callers don't have to fabricate a full GitHubUser just to feed it.
+export type MatchMember = Pick<
+  GitHubUser,
+  "id" | "login" | "name" | "avatar_url"
+>
+
 export function unmatchedTeamMembers(
-  members: GitHubUser[],
+  members: MatchMember[],
   students: Student[],
 ): MatchCandidate[] {
   const { ids: claimedIds, logins: claimedLogins } = rosterClaimSet(students)

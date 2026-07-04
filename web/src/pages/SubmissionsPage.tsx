@@ -47,8 +47,12 @@ import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
+import { useTeamRoster } from "@/hooks/useTeamRoster"
+import { rowToStudent } from "@/util/teamRoster"
+import type { Student } from "@/types/classroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
+import { QueryErrorAlert } from "@/components/QueryErrorAlert"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
@@ -132,7 +136,25 @@ const SubmissionsPageContent = () => {
     dataUpdatedAt: scoresUpdatedAt,
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
-  const { students } = useGetStudents(org, classroom)
+  // Team-driven username source (Section 7): the classroom GitHub team is
+  // authoritative for who is enrolled; students.csv is joined by
+  // useTeamRoster only to enrich display (name/section/email). The dashboard
+  // (non-submitters, sections, accepted, gradebook) consumes a Student[], so
+  // map the enrolled team rows into that shape. Non-submitters = team members
+  // minus credited usernames (below).
+  const { students: csvStudents } = useGetStudents(org, classroom)
+  // Surface the team-member fetch's error/loading (useTeamRoster exposes them
+  // deliberately): a transient or permission failure of the enrolled source of
+  // truth must render as an error+retry, not as an authoritative empty roster.
+  const {
+    rows: teamRows,
+    isError: rosterError,
+    refetch: refetchRoster,
+  } = useTeamRoster(org ?? "", classroom ?? "", csvStudents)
+  const students: Student[] = useMemo(
+    () => teamRows.filter((r) => r.state === "enrolled").map(rowToStudent),
+    [teamRows],
+  )
   // Gate Regrade all / Collect now on an empty roster: dispatching a workflow
   // with no students to act on is wasted effort. `show` is loading-aware (won't
   // flash before the roster resolves), matching AssignmentsPage's usage.
@@ -458,24 +480,31 @@ const SubmissionsPageContent = () => {
               className="mt-4"
             />
           )}
+          {rosterError && (
+            <QueryErrorAlert
+              message={
+                <>
+                  {t("submissions.errors.rosterLoad")}{" "}
+                  {t("submissions.errors.rosterLoadHint")}
+                </>
+              }
+              onRetry={() => refetchRoster()}
+            />
+          )}
           {scoresError && (
-            <div className="alert alert-error mt-4">
-              <div>
-                {scoresErrorObj instanceof Error
-                  ? t("submissions.errors.gradebookLoadWithReason", {
-                      reason: scoresErrorObj.message,
-                    })
-                  : t("submissions.errors.gradebookLoad")}{" "}
-                {t("submissions.errors.gradebookLoadHint")}
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost ml-2"
-                  onClick={() => refetchScores()}
-                >
-                  {t("submissions.errors.retry")}
-                </button>
-              </div>
-            </div>
+            <QueryErrorAlert
+              message={
+                <>
+                  {scoresErrorObj instanceof Error
+                    ? t("submissions.errors.gradebookLoadWithReason", {
+                        reason: scoresErrorObj.message,
+                      })
+                    : t("submissions.errors.gradebookLoad")}{" "}
+                  {t("submissions.errors.gradebookLoadHint")}
+                </>
+              }
+              onRetry={() => refetchScores()}
+            />
           )}
           <div className="flex justify-between">
             <div>
