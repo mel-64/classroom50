@@ -44,6 +44,56 @@ The agent should then:
    silently break a pack. It mirrors the installer's own validation, so a
    passing pack also installs cleanly.
 
+### Writing translatable strings
+
+Every user-facing string goes through `t()` so a language pack can translate
+it. The CI audit below is a gate, but it can only see a key when the reference
+is statically analyzable, so keep to these conventions:
+
+- **Reference keys with a literal**, not a fully dynamic variable. The audit
+  sees `t("a.b")`, `t('a.b')`, ``t(`a.b`)``, and literal-prefixed dynamic
+  keys (``t(`a.${x}`)`` or `t("a." + x)`). A fully dynamic `t(someVar)` is
+  **invisible** to the gate — a key referenced only that way can go missing and
+  ship silently. If you must build a key dynamically, keep a literal prefix.
+- **Key segments use `[A-Za-z0-9_.:-]`** (dotted paths, optionally an i18next
+  `ns:` namespace). A key with any other character in a segment won't be seen.
+- **Don't hardcode prose** in `aria-label`/`alt`/`title`/`placeholder` or in
+  `setError`/`toast` calls — those bypass i18n and no pack can translate them.
+
+### Auditing coverage in our own code
+
+[`verify_locale.py`](./verify_locale.py) checks a _pack_ against `en.json`.
+The complementary direction — checking that **our source code and `en.json`
+agree** — is [`audit_i18n.py`](./audit_i18n.py). Run it to sweep the whole web
+app for coverage problems:
+
+```bash
+python web/src/locales/audit_i18n.py            # report
+python web/src/locales/audit_i18n.py --strict   # also fail on dead/hardcoded
+```
+
+It reports three things:
+
+- **MISSING keys** — a `t("...")` in code whose key isn't in `en.json` (renders
+  the raw key; always a bug). Fails the run. Recognizes double/single-quoted and
+  no-interpolation backtick (``t(`foo.bar`)``) keys, hyphenated segments, and
+  `ns:key` namespaces (the namespace is stripped before comparing); a
+  concatenated `t("prefix." + x)` is treated as a dynamic prefix, not a miss.
+  Runs over `.ts`/`.tsx`/`.mts`/`.cts` files. The tool has a pytest suite
+  ([`test_audit_i18n.py`](./test_audit_i18n.py)) that pins this detection logic.
+- **DEAD keys** — keys in `en.json` no code references, directly or via a bare
+  string constant (`labelKey`/`titleKey`/`what`/`why`/…) or a dynamic
+  ``t(`prefix.${x}`)`` prefix. These waste translator effort — every pack
+  translates a string that never renders. Warning; fails only under `--strict`.
+- **HARDCODED strings** — user-facing literals that bypass i18n entirely
+  (prose in `aria-label`/`alt`/`title`/`placeholder`, or `setError`/`toast`
+  calls), so **no pack can ever translate them.** Heuristic; warning, fails
+  only under `--strict`.
+
+The dead/hardcoded checks are heuristic (indirect references and prose
+detection aren't exact), so they're warnings by default — skim them rather than
+treating every line as a defect.
+
 ### Automated packs (CI)
 
 The target languages in [`targets.json`](./targets.json) are also produced
