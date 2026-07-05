@@ -3,34 +3,26 @@ import { useTranslation } from "react-i18next"
 
 import type { GitHubUser } from "@/hooks/github/types"
 
-function previewToken(token: string | null) {
-  if (!token) return ""
-  return `${token.slice(0, 8)}${"·".repeat(18)}${token.slice(-4)}`
-}
-
 export function GitHubAuthedPanel({
   user,
-  isLoadingUser,
-  token,
-  tokenScope,
   onSignOut,
 }: {
   user: GitHubUser | null
-  isLoadingUser: boolean
-  token: string | null
-  tokenScope: string
   onSignOut: () => void
 }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-5">
-      <div className="alert alert-success items-start text-sm">
-        <CheckCircle aria-hidden="true" className="size-4 shrink-0" />
-        <span>
-          {t("auth.signedInTokenStored")}{" "}
-          <code className="font-mono">localStorage</code>
-        </span>
-      </div>
+      {/* "Signed in" only once /user confirms the token is live; a stale token
+          would otherwise read as valid here (#stale-token). The card renders a
+          spinner instead while the profile is still loading, so this panel only
+          sees a resolved user or a genuine failure. */}
+      {user ? (
+        <div className="alert alert-success items-start text-sm">
+          <CheckCircle aria-hidden="true" className="size-4 shrink-0" />
+          <span>{t("auth.signedInConfirmed")}</span>
+        </div>
+      ) : null}
 
       <div className="flex flex-col items-center gap-3 text-center">
         {user?.avatar_url ? (
@@ -45,11 +37,7 @@ export function GitHubAuthedPanel({
           </div>
         )}
 
-        {isLoadingUser && !user ? (
-          <div className="text-sm text-base-content/70">
-            {t("auth.fetchingProfile")}
-          </div>
-        ) : user ? (
+        {user ? (
           <div>
             <div className="text-xl font-bold tracking-tight">
               {user.name || user.login}
@@ -64,18 +52,6 @@ export function GitHubAuthedPanel({
             {t("auth.profileUnavailable")}
           </div>
         )}
-
-        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/70">
-          <strong className="text-base-content">gh_access_token</strong> →{" "}
-          {previewToken(token)}
-        </div>
-
-        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/70">
-          <strong className="text-base-content">
-            {t("auth.grantedScopesLabel")}
-          </strong>{" "}
-          → {tokenScope || t("auth.noScopesReported")}
-        </div>
       </div>
 
       <div className="divider" />

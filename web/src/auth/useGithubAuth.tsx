@@ -46,6 +46,24 @@ function formatError(err: unknown) {
   return message
 }
 
+// Cold-reload teardown gate: a stored token is only torn down when /user
+// validation returns a definitive 401 (revoked/expired). A 403 is usually
+// rate-limiting and a 5xx/network blip is transient — expiring on either would
+// wipe a valid token (GitHubUserFetchError carries no headers to tell them
+// apart), so both are preserved.
+export function shouldExpireOnUserError(error: unknown): boolean {
+  return error instanceof GitHubUserFetchError && error.status === 401
+}
+
+// Recover a stranded "exchanging" screen: with no ?code to exchange (fresh
+// reload or a bfcache Back from GitHub's consent screen), the card would spin
+// forever, so reset it to "config". Every other screen is left as-is.
+export function recoverStrandedExchange(
+  current: GithubAuthScreen,
+): GithubAuthScreen {
+  return current === "exchanging" ? "config" : current
+}
+
 function sleep(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     const timer = window.setTimeout(resolve, ms)
@@ -66,7 +84,6 @@ function sleep(ms: number, signal: AbortSignal) {
 function useGithubAuthState() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
-  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Deep link (#71) stashed at code-exchange, consumed by the status-driven
   // effect below so navigation runs against an authenticated router context.
   const pendingReturnToRef = useRef<string | null>(null)
@@ -113,9 +130,10 @@ function useGithubAuthState() {
     mutationFn: requestDeviceCode,
   })
 
-  // Shared landing for both web and device flows. Shows the success screen; once
-  // the profile loads, the /login guard redirects to "/". The timeout below
-  // settles the screen state if that doesn't happen (e.g. profile fetch fails).
+  // Shared landing for both web and device flows. Goes straight to the authed
+  // screen and prefetches the profile; once it resolves, status flips to
+  // authenticated and the /login guard redirects into the app. Until then the
+  // card shows a spinner (no interstitial success splash).
   const completeSignIn = useCallback(
     (data: { access_token: string; scope?: string }) => {
       persistGithubToken(data.access_token, data.scope || "")
@@ -123,27 +141,21 @@ function useGithubAuthState() {
       setTokenScope(data.scope || "")
       setSessionExpired(false)
       setDevice(null)
-      setScreen("success")
+      setScreen("authed")
 
       queryClient.prefetchQuery({
         queryKey: ["github", "user", data.access_token],
         queryFn: () => fetchGithubUser(data.access_token),
       })
-
-      if (successTimerRef.current) clearTimeout(successTimerRef.current)
-      successTimerRef.current = setTimeout(() => {
-        setScreen("authed")
-      }, 3500)
     },
     [queryClient],
   )
 
-  // On unmount mid-flow, abort the device poll loop and clear the pending
-  // success-screen timer so neither runs after teardown.
+  // On unmount mid-flow, abort the device poll loop so it doesn't run after
+  // teardown.
   useEffect(
     () => () => {
       abortRef.current?.abort()
-      if (successTimerRef.current) clearTimeout(successTimerRef.current)
     },
     [],
   )
@@ -182,7 +194,13 @@ function useGithubAuthState() {
     const code = params.get("code")
     const returnedState = params.get("state")
 
-    if (!code) return
+    // No code: recover a stranded "exchanging" screen — e.g. bfcache restored
+    // this page after Back on GitHub's consent screen, leaving startWebFlow's
+    // state with no code to exchange. Else the card spins forever (#oauth-hang).
+    if (!code) {
+      setScreen(recoverStrandedExchange)
+      return
+    }
 
     window.history.replaceState({}, "", window.location.pathname)
 
@@ -233,6 +251,19 @@ function useGithubAuthState() {
         },
       },
     )
+  }, [])
+
+  // A bfcache restore freezes React state as-is with no effect re-run, so the
+  // mount effect above can't catch a stranded "exchanging" screen — pageshow
+  // (persisted only) is the one hook that fires here (#oauth-hang).
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return
+      if (new URLSearchParams(window.location.search).has("code")) return
+      setScreen(recoverStrandedExchange)
+    }
+    window.addEventListener("pageshow", onPageShow)
+    return () => window.removeEventListener("pageshow", onPageShow)
   }, [])
 
   const validateConfig = useCallback(() => {
@@ -492,11 +523,11 @@ function useGithubAuthState() {
     clearSession(true)
   }, [clearSession, token])
 
-  // Cold-reload path: a stored-but-revoked token fails /user validation with a
-  // 401. Tear down so the token doesn't linger and the guard redirects to /login.
+  // Cold-reload teardown for a revoked token, gated by shouldExpireOnUserError
+  // (401-only, matching GitHubProvider.onResponse) so a 403/transient error
+  // can't wipe a valid token.
   useEffect(() => {
-    const error = githubUserQuery.error
-    if (error instanceof GitHubUserFetchError && error.status === 401) {
+    if (shouldExpireOnUserError(githubUserQuery.error)) {
       expireSession()
     }
   }, [githubUserQuery.error, expireSession])
