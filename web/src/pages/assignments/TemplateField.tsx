@@ -23,6 +23,10 @@ import {
   type StringField,
 } from "./formFieldHelpers"
 import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
+import {
+  templateForkNoteView,
+  templateRestrictedNoteView,
+} from "./templateNoteView"
 
 // Advisory, non-blocking pre-flight for the Template Repository field: checks
 // the OAuth token can reach the typed repo and annotates the field without
@@ -225,6 +229,29 @@ const TemplateVerificationNote = ({
         </Note>
       )
 
+    case "private-fork": {
+      const view = templateForkNoteView(verification)
+      // labelKey/tone/suffixKey all come from templateForkNoteView (single
+      // source of truth, tested). All three label keys take the same
+      // interpolation set; t() ignores `parent` for the no-parent key.
+      const label = t(view.labelKey, {
+        owner: verification.owner,
+        repo: verification.repo,
+        parent: verification.parent,
+      })
+      // In-org parent is usually reachable (advisory, amber); a cross-org or
+      // unknown parent is likely to fail at generate (error, red).
+      return (
+        <Note
+          tone={view.tone}
+          icon={view.tone === "warning" ? Info : AlertTriangle}
+        >
+          {label} <Code>{verification.branch}</Code>
+          {t(view.suffixKey)}
+        </Note>
+      )
+    }
+
     case "invalid":
       return (
         <Note tone="error" icon={AlertTriangle}>
@@ -260,10 +287,16 @@ const TemplateVerificationNote = ({
           icon={AlertTriangle}
           policy={{ owner: verification.owner, href: verification.policyUrl }}
         >
-          {t("assignments.template.restricted", {
+          {t(templateRestrictedNoteView(verification).messageKey, {
             owner: verification.owner,
             repo: verification.repo,
           })}
+          <span className="mt-1 block text-xs text-base-content/70">
+            {t("assignments.template.githubSaid", {
+              status: verification.httpStatus,
+            })}{" "}
+            <span className="break-words italic">{verification.message}</span>
+          </span>
         </Note>
       )
 
