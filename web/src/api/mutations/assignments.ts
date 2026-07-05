@@ -17,7 +17,21 @@ import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import { classroomPagesSegment } from "@/util/secret"
 import { prefixCommit } from "@/util/commit"
-import { parseRunnerLabels } from "@/util/runners"
+import {
+  parseRunnerLabels,
+  isRunnerLabelShapeValid,
+  MAX_RUNNER_LABELS,
+} from "@/util/runners"
+import {
+  RUNTIME_LANGUAGES,
+  type RuntimeLanguage,
+  isNonUbuntuHostedLabel,
+  parseAptPackages,
+  validateAptPackages,
+  validateContainerImage,
+  validateContainerUser,
+  validateLanguageVersion,
+} from "@/util/runtime"
 import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
   addRepositoryToTeam,
@@ -752,16 +766,83 @@ async function buildAssignmentEntry(
   const containerImage = input.container_image?.trim()
   const containerUser = input.container_user?.trim()
   const runtime: NonNullable<Assignment["runtime"]> = {}
+  // Shape-gate each runs-on label and cap the count, matching the CLI's
+  // ValidateRunsOn — the RunnerField UI check is advisory only, so this is the
+  // authoritative anti-injection gate before the label flows into `runs-on:`.
+  if (runnerLabels.length > MAX_RUNNER_LABELS) {
+    throw new Error(
+      `runtime.runs-on has ${runnerLabels.length} labels (max ${MAX_RUNNER_LABELS}).`,
+    )
+  }
+  const badRunnerLabel = runnerLabels.find(
+    (label) => !isRunnerLabelShapeValid(label),
+  )
+  if (badRunnerLabel) {
+    throw new Error(
+      `runtime.runs-on ${JSON.stringify(badRunnerLabel)} must be a GitHub runner label — letters, numbers, and . - _ only, no whitespace or metacharacters.`,
+    )
+  }
   if (runnerLabels.length === 1) {
     runtime["runs-on"] = runnerLabels[0]
   } else if (runnerLabels.length > 1) {
     runtime["runs-on"] = runnerLabels
   }
   if (containerImage) {
+    // Containers run on Ubuntu hosts only — reject a macOS/Windows runs-on
+    // label, matching the CLI's ValidateRuntime (a custom/self-hosted or Ubuntu
+    // label is fine, so a container can still target a specific runner).
+    const badLabel = runnerLabels.find(isNonUbuntuHostedLabel)
+    if (badLabel) {
+      throw new Error(
+        `runtime.runs-on ${JSON.stringify(badLabel)} can't be combined with a Docker image — GitHub Actions runs containers on Ubuntu hosts only.`,
+      )
+    }
+    // Image/user flow into Actions' `container:` / `--user` — shape-gate them
+    // against the CLI's ValidateContainer so a bad value can't reach the file.
+    const imageError = validateContainerImage(containerImage)
+    if (imageError) {
+      throw new Error(`runtime.container.image: ${imageError}`)
+    }
     runtime.container = { image: containerImage }
     if (containerUser) {
+      const userError = validateContainerUser(containerUser)
+      if (userError) {
+        throw new Error(`runtime.container.user: ${userError}`)
+      }
       runtime.container.user = containerUser
     }
+  }
+  // Language toolchains (setup-X versions) and apt packages, validated against
+  // the same patterns the CLI enforces so a bad value can't reach the file.
+  const languageInputs: Record<RuntimeLanguage, string | undefined> = {
+    python: input.runtime_python,
+    node: input.runtime_node,
+    java: input.runtime_java,
+    go: input.runtime_go,
+  }
+  for (const language of RUNTIME_LANGUAGES) {
+    const version = languageInputs[language]?.trim()
+    if (!version) continue
+    const error = validateLanguageVersion(version)
+    if (error) {
+      throw new Error(`runtime.${language}: ${error}`)
+    }
+    runtime[language] = version
+  }
+  const aptPackages = parseAptPackages(input.runtime_apt ?? "")
+  if (aptPackages.length > 0) {
+    // The image owns its packages, so the schema/CLI forbid apt with a
+    // container — reject here rather than write a file the CLI won't parse.
+    if (containerImage) {
+      throw new Error(
+        "runtime.apt: extra apt packages can't be combined with a Docker image — install them in the image instead.",
+      )
+    }
+    const aptError = validateAptPackages(aptPackages)
+    if (aptError) {
+      throw new Error(`runtime.apt: ${aptError}`)
+    }
+    runtime.apt = aptPackages
   }
   if (Object.keys(runtime).length > 0) {
     entry.runtime = runtime
@@ -1129,6 +1210,12 @@ export type CreateAssignmentInput = {
   runs_on?: string
   container_image?: string
   container_user?: string
+  runtime_python?: string
+  runtime_node?: string
+  runtime_java?: string
+  runtime_go?: string
+  // Raw comma/space-separated apt packages; parsed to string[] on save.
+  runtime_apt?: string
   setup_command?: string
   allowed_files?: string
   pass_threshold?: number
@@ -1213,6 +1300,7 @@ export function buildReusedEntry(
           container: source.runtime.container
             ? { ...source.runtime.container }
             : undefined,
+          apt: source.runtime.apt ? [...source.runtime.apt] : undefined,
         }
       : undefined,
     allowed_files: source.allowed_files ? [...source.allowed_files] : undefined,
@@ -1221,6 +1309,11 @@ export function buildReusedEntry(
   if (!entry.template) delete entry.template
   if (!entry.due_meta) delete entry.due_meta
   if (entry.runtime && !entry.runtime.container) delete entry.runtime.container
+  // apt can't coexist with a container (the image owns its packages — the CLI
+  // rejects the pair), so a container source self-heals by dropping apt on
+  // reuse, matching the edit path rather than laundering an invalid combo.
+  if (entry.runtime?.container) delete entry.runtime.apt
+  if (entry.runtime && !entry.runtime.apt) delete entry.runtime.apt
   if (!entry.runtime) delete entry.runtime
   if (!entry.allowed_files) delete entry.allowed_files
   if (!entry.tests) delete entry.tests
@@ -1250,6 +1343,10 @@ const ASSIGNMENT_KEY_OWNERSHIP: Record<
   autograder: "managed",
   max_group_size: "managed",
   feedback_pr: "managed",
+  // Fully managed AND a closed object: the CLI decodes runtime strictly
+  // (RuntimeRef has no Extra, DisallowUnknownFields; schema additionalProperties
+  // false), so the rebuilt runtime must win and any unknown sub-key drops rather
+  // than round-tripping into a file the CLI would reject.
   runtime: "managed",
   allowed_files: "managed",
   pass_threshold: "managed",
@@ -1270,6 +1367,13 @@ const EDIT_MANAGED_ASSIGNMENT_KEYS = new Set<string>(
 // Copy forward entry-level keys the edit form doesn't manage (e.g.
 // `migrated_from`, unknown future keys) onto the rebuilt edit, without
 // overwriting managed keys. Mirrors the CLI's AssignmentEntry.Extra round-trip.
+//
+// `runtime` is deliberately NOT preserved this way: it's a managed key, and the
+// CLI decodes it as a CLOSED object (RuntimeRef has no Extra, decoded with
+// DisallowUnknownFields; the schema sets additionalProperties:false). Carrying
+// an unknown runtime sub-key forward would write an assignments.json the CLI
+// refuses to parse. So an edit rebuilds runtime from the known sub-keys and any
+// foreign key self-heals away — matching the CLI's own strictness.
 export function preserveUnmanagedAssignmentKeys(
   existing: Assignment,
   edited: Assignment,

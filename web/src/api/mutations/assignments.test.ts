@@ -170,6 +170,52 @@ describe("buildReusedEntry", () => {
     const entry = buildReusedEntry(source, { slug: "c2", name: "Container 2" })
     expect(entry.runtime).toEqual({ container: { image: "node:22" } })
   })
+
+  it("copies language toolchains + apt, deep-copying the apt array", () => {
+    const source: Assignment = {
+      slug: "lang",
+      name: "Languages",
+      mode: "individual",
+      autograder: "default",
+      runtime: {
+        python: "3.12",
+        node: "20",
+        java: "21",
+        go: "1.23",
+        apt: ["cmake", "valgrind"],
+      },
+    }
+    const entry = buildReusedEntry(source, {
+      slug: "lang2",
+      name: "Languages 2",
+    })
+    expect(entry.runtime).toEqual({
+      python: "3.12",
+      node: "20",
+      java: "21",
+      go: "1.23",
+      apt: ["cmake", "valgrind"],
+    })
+    // apt is re-cloned, not shared, so mutating the copy can't leak back.
+    expect(entry.runtime?.apt).not.toBe(source.runtime?.apt)
+    entry.runtime?.apt?.push("extra")
+    expect(source.runtime?.apt).toHaveLength(2)
+  })
+
+  it("self-heals a container+apt source by dropping apt (mirrors the edit path)", () => {
+    // A legacy source illegally carrying both container and apt would produce an
+    // assignments.json the CLI rejects; reuse drops apt so the copy is valid.
+    const source = {
+      slug: "c",
+      name: "Container + apt",
+      mode: "individual",
+      autograder: "default",
+      runtime: { container: { image: "ubuntu:24.04" }, apt: ["cmake"] },
+    } as unknown as Assignment
+    const entry = buildReusedEntry(source, { slug: "c2", name: "Copy" })
+    expect(entry.runtime).toEqual({ container: { image: "ubuntu:24.04" } })
+    expect("apt" in (entry.runtime ?? {})).toBe(false)
+  })
 })
 
 describe("preserveUnmanagedAssignmentKeys", () => {
@@ -398,6 +444,156 @@ describe("editAssignment (preserved-entry integration)", () => {
     expect(edited.name).toBe("Homework 1 (edited)")
     // Cleared managed key is not resurrected from the stale existing entry.
     expect(edited.due).toBeUndefined()
+  })
+
+  it("writes language runtimes and drops an unknown runtime sub-key on edit", async () => {
+    // Existing entry with language toolchains + apt AND a foreign runtime
+    // sub-key (`rust`). `runtime` is a CLOSED contract object — the CLI decodes
+    // it with DisallowUnknownFields (RuntimeRef has no Extra) and the schema
+    // sets additionalProperties:false — so a GUI edit must rebuild runtime from
+    // the known sub-keys and drop the foreign key, self-healing rather than
+    // round-tripping a file the CLI would refuse to parse.
+    const runtimeEntry = {
+      slug: SLUG,
+      name: "Homework 1",
+      mode: "individual",
+      autograder: "default",
+      feedback_pr: true,
+      runtime: {
+        python: "3.11",
+        node: "20",
+        apt: ["cmake"],
+        rust: "1.80",
+      },
+    } as unknown as Assignment
+    const assignmentsFile = {
+      schema: "classroom50/assignments/v1",
+      assignments: [runtimeEntry],
+    }
+    const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64")
+    let capturedContent = ""
+    const request = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method ?? "GET"
+      if (method === "GET" && url.includes("/git/ref/heads/main")) {
+        return { object: { sha: "refsha" } }
+      }
+      if (method === "GET" && url.includes("/git/commits/refsha")) {
+        return { tree: { sha: "basetree" } }
+      }
+      if (method === "GET" && url.includes("/contents/cs50/assignments.json")) {
+        return {
+          type: "file",
+          encoding: "base64",
+          content: b64(JSON.stringify(assignmentsFile)),
+        }
+      }
+      if (method === "POST" && url.endsWith("/git/trees")) {
+        const body = (init as { body?: { tree: { content: string }[] } }).body
+        capturedContent = body!.tree[0].content
+        return { sha: "newtree" }
+      }
+      if (method === "POST" && url.endsWith("/git/commits")) {
+        return { sha: "newcommit" }
+      }
+      if (method === "PATCH" && url.includes("/git/refs/heads/main")) {
+        return { object: { sha: "newcommit" } }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+    const requestRaw = vi.fn(async () => {
+      throw new GitHubAPIError({
+        status: 404,
+        url: "classroom.json",
+        message: "Not Found",
+        body: null,
+        rateLimit: {
+          limit: null,
+          remaining: null,
+          used: null,
+          reset: null,
+          resource: null,
+          retryAfter: null,
+        },
+      })
+    })
+    const client = { request, requestRaw } as unknown as GitHubClient
+
+    // The edit form round-trips the language fields (python bumped to 3.12,
+    // node/apt kept). `rust` is not a schema sub-key, so it must be dropped.
+    await editAssignment(
+      client,
+      editInput({
+        runtime_python: "3.12",
+        runtime_node: "20",
+        runtime_apt: "cmake",
+      }),
+    )
+
+    const written = JSON.parse(capturedContent) as {
+      assignments: Assignment[]
+    }
+    const edited = written.assignments.find((a) => a.slug === SLUG)!
+    expect(edited.runtime).toEqual({
+      python: "3.12",
+      node: "20",
+      apt: ["cmake"],
+    })
+    // The foreign runtime sub-key self-heals away (closed contract object).
+    expect("rust" in (edited.runtime ?? {})).toBe(false)
+  })
+
+  it("rejects apt packages combined with a container image", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(
+        client,
+        editInput({ container_image: "gcc:13", runtime_apt: "cmake" }),
+      ),
+    ).rejects.toThrow(/can't be combined with a Docker image/i)
+  })
+
+  it("rejects a container image paired with a macOS/Windows runner label", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(
+        client,
+        editInput({ container_image: "gcc:13", runs_on: "macos-15" }),
+      ),
+    ).rejects.toThrow(/Ubuntu hosts only/i)
+  })
+
+  it("rejects an invalid language version before any write", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(client, editInput({ runtime_python: "3.12 bad" })),
+    ).rejects.toThrow(/runtime\.python/i)
+  })
+
+  it("rejects a container image with shell metacharacters before any write", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(
+        client,
+        editInput({ container_image: "ubuntu:24.04;rm -rf /" }),
+      ),
+    ).rejects.toThrow(/runtime\.container\.image/i)
+  })
+
+  it("rejects a container user with a dangling colon before any write", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(
+        client,
+        editInput({ container_image: "ubuntu:24.04", container_user: "1000:" }),
+      ),
+    ).rejects.toThrow(/runtime\.container\.user/i)
+  })
+
+  it("rejects an injection-shaped runs-on label before any write", async () => {
+    const { client } = makeClient()
+    await expect(
+      editAssignment(client, editInput({ runs_on: "a;b" })),
+    ).rejects.toThrow(/runtime\.runs-on/i)
   })
 
   it("re-validates an unchanged stored ref and blocks a now-cross-org private fork", async () => {

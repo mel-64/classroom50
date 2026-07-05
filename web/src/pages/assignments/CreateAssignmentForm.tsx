@@ -1,16 +1,9 @@
 import { useForm } from "@tanstack/react-form"
-import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import { slugify } from "@/util/slug"
-import {
-  AlertTriangle,
-  CheckCircle2,
-  HelpCircle,
-  Loader2,
-  ServerCog,
-} from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import {
@@ -23,23 +16,32 @@ import {
   allowedFilesToText,
   validateAllowedFiles,
 } from "@/util/allowedFiles"
+import { parseRunnerLabels } from "@/util/runners"
 import {
-  containerRunnerWarning,
-  isRunnerLabelShapeValid,
-  verifyRunnerLabels,
-  parseRunnerLabels,
-  isKnownHostedRunnerLabel,
-  isStandardSelfHostedLabel,
-  type OrgRunnersResult,
-  type RunnerVerification,
-} from "@/util/runners"
-import { orgRunnersQuery } from "@/hooks/github/queries"
-import { useOptionalGitHubClient } from "@/context/github/GitHubProvider"
+  RUNTIME_LANGUAGES,
+  type RuntimeLanguage,
+  aptPackagesToText,
+  isNonUbuntuHostedLabel,
+  parseAptPackages,
+  validateAptPackages,
+  validateContainerImage,
+  validateContainerUser,
+  validateLanguageVersion,
+} from "@/util/runtime"
 import { TemplateField } from "./TemplateField"
 import {
-  useDebouncedValue,
+  FieldLabel,
+  HelpTooltip,
+  RunnerField,
+  LanguageVersionField,
+  ContainerFields,
+  AptField,
+} from "./AdvancedRuntimeFields"
+import {
   normalizeOnBlur,
-  type StringField,
+  toDatetimeLocalValue,
+  sevenDaysFromNow,
+  utcIsoToDatetimeLocalValue,
 } from "./formFieldHelpers"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
@@ -48,6 +50,14 @@ import {
   PASS_THRESHOLD_MAX,
   PASS_THRESHOLD_MIN,
 } from "@/types/classroom"
+
+// Which runtime environment the Advanced Settings form is configuring. A UI-
+// only discriminator (not a wire field): "hosted" = a GitHub Actions runner
+// (runs-on + apt packages), "container" = a Docker image (image + user). The
+// two are mutually exclusive on the wire, so the form picks one and clears the
+// other's fields, making the runner's container-vs-(runs-on/apt) conflicts
+// unrepresentable rather than merely validated-against.
+export type RuntimeEnv = "hosted" | "container"
 
 export type CreateAssignmentFormValues = {
   name: string
@@ -59,9 +69,21 @@ export type CreateAssignmentFormValues = {
   due_date: string
   max_group_size: number
   feedback_pr: boolean
+  // UI-only: which runtime environment the teacher is configuring. Selects
+  // which fields render and get written; never sent to the wire. "hosted" uses
+  // a GitHub Actions runner (runs-on + apt); "container" grades inside a Docker
+  // image (image + user). Deriving the two apart in the UI structurally
+  // prevents the container-vs-(runs-on/apt) conflicts the runner rejects.
+  runtime_env: RuntimeEnv
   runs_on: string
   container_image: string
   container_user: string
+  runtime_python: string
+  runtime_node: string
+  runtime_java: string
+  runtime_go: string
+  // Raw text (comma/space-separated); parsed to string[] on save.
+  runtime_apt: string
   setup_command: string
   // Raw textarea text; parsed to string[] on save, joined back on read.
   allowed_files: string
@@ -96,9 +118,15 @@ const useAssignmentForm = (
         toDatetimeLocalValue(sevenDaysFromNow()),
       max_group_size: defaultValues?.max_group_size || 2,
       feedback_pr: defaultValues?.feedback_pr ?? true,
+      runtime_env: defaultValues?.runtime_env || "hosted",
       runs_on: defaultValues?.runs_on || "",
       container_image: defaultValues?.container_image || "",
       container_user: defaultValues?.container_user || "",
+      runtime_python: defaultValues?.runtime_python || "",
+      runtime_node: defaultValues?.runtime_node || "",
+      runtime_java: defaultValues?.runtime_java || "",
+      runtime_go: defaultValues?.runtime_go || "",
+      runtime_apt: defaultValues?.runtime_apt || "",
       setup_command: defaultValues?.setup_command || "",
       allowed_files: defaultValues?.allowed_files || "",
       pass_threshold_enabled: defaultValues?.pass_threshold_enabled ?? false,
@@ -172,10 +200,76 @@ const useAssignmentForm = (
           }
         }
 
+        // Language toolchain versions + apt packages, mirroring the CLI's
+        // ValidateRuntime patterns so a bad value is caught before the commit.
+        const languageFields: Record<RuntimeLanguage, string> = {
+          python: value.runtime_python,
+          node: value.runtime_node,
+          java: value.runtime_java,
+          go: value.runtime_go,
+        }
+        for (const language of RUNTIME_LANGUAGES) {
+          const error = validateLanguageVersion(languageFields[language])
+          if (error) {
+            errors[`runtime_${language}`] = error
+          }
+        }
+        // apt only applies to the hosted runtime; container mode clears it on
+        // submit and hides the input, so only validate it there. The
+        // container-vs-apt conflict is now structurally impossible (the two
+        // live in different, mutually exclusive modes), so no cross-check.
+        if (value.runtime_env !== "container") {
+          const aptError = validateAptPackages(
+            parseAptPackages(value.runtime_apt),
+          )
+          if (aptError) {
+            errors.runtime_apt = aptError
+          }
+        }
+
+        // A container runs on Ubuntu hosts only, so a macOS/Windows runner
+        // label can't be combined with a Docker image (mirrors the CLI). A
+        // custom/self-hosted or Ubuntu label is fine.
+        if (value.runtime_env === "container" && value.container_image.trim()) {
+          const badLabel = parseRunnerLabels(value.runs_on).find(
+            isNonUbuntuHostedLabel,
+          )
+          if (badLabel) {
+            errors.runs_on = t(
+              "assignments.form.runtime.runnerContainerError",
+              {
+                label: badLabel,
+              },
+            )
+          }
+        }
+
+        // Container image/user shape, mirroring the CLI's ValidateContainer, so
+        // an injection-shaped value is caught inline before the write path
+        // (which enforces the same gate) rejects it.
+        if (value.runtime_env === "container") {
+          const imageError = validateContainerImage(value.container_image)
+          if (imageError) {
+            errors.container_image = imageError
+          }
+          const userError = validateContainerUser(value.container_user)
+          if (userError) {
+            errors.container_user = userError
+          }
+        }
+
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
       },
     },
     onSubmit: async ({ value }) => {
+      // Clear the fields that don't belong to the selected runtime environment
+      // so a hidden, stale value from the other mode can't reach the wire.
+      // apt is hosted-only (a container image owns its packages — the CLI
+      // forbids container+apt), and container image/user apply only in
+      // container mode. runs-on and the language versions apply to BOTH modes
+      // (a container job can target a specific runner; setup-* runs inside a
+      // container), so they always pass through.
+      const isContainer = value.runtime_env === "container"
       await onSubmit({
         name: value.name.trim(),
         slug: slugify(value.slug),
@@ -185,9 +279,15 @@ const useAssignmentForm = (
         due_date: value.due_date.trim(),
         max_group_size: value.max_group_size,
         feedback_pr: value.feedback_pr,
+        runtime_env: value.runtime_env,
         runs_on: value.runs_on.trim(),
-        container_image: value.container_image.trim(),
-        container_user: value.container_user.trim(),
+        container_image: isContainer ? value.container_image.trim() : "",
+        container_user: isContainer ? value.container_user.trim() : "",
+        runtime_python: value.runtime_python.trim(),
+        runtime_node: value.runtime_node.trim(),
+        runtime_java: value.runtime_java.trim(),
+        runtime_go: value.runtime_go.trim(),
+        runtime_apt: isContainer ? "" : value.runtime_apt.trim(),
         setup_command: value.setup_command.trim(),
         allowed_files: value.allowed_files,
         pass_threshold_enabled: value.pass_threshold_enabled,
@@ -229,224 +329,6 @@ const FormErrors = ({ form }: { form: AssignmentForm }) => (
   </form.Subscribe>
 )
 
-// Free-form runner input with advisory, non-blocking verification: annotates
-// the value but never rewrites or clears what the teacher typed.
-const RunnerField = ({ field, org }: { field: StringField; org?: string }) => {
-  const { t } = useTranslation()
-  const client = useOptionalGitHubClient()
-  const rawValue = field.state.value
-  const debouncedValue = useDebouncedValue(rawValue.trim(), 400)
-
-  // Hit the org runners API only for a well-shaped label not already recognized
-  // client-side; everything else needs no network call.
-  const needsOrgLookup = Boolean(
-    client &&
-    org &&
-    parseRunnerLabels(debouncedValue).some(
-      (label) =>
-        isRunnerLabelShapeValid(label) &&
-        !isKnownHostedRunnerLabel(label) &&
-        !isStandardSelfHostedLabel(label),
-    ),
-  )
-
-  const orgRunnersResultQuery = useQuery({
-    ...orgRunnersQuery(client!, org ?? ""),
-    enabled: needsOrgLookup,
-  })
-
-  const orgRunners: OrgRunnersResult = needsOrgLookup
-    ? (orgRunnersResultQuery.data ?? { available: false, reason: "error" })
-    : { available: false, reason: "no-access" }
-
-  // Hold off on the "not found" verdict while the lookup is in flight.
-  const isVerifying = needsOrgLookup && orgRunnersResultQuery.isLoading
-
-  const pending = rawValue.trim() !== debouncedValue
-  const verification = verifyRunnerLabels(debouncedValue, orgRunners)
-
-  return (
-    <div>
-      <label htmlFor={field.name} className="label block font-bold mb-1.5">
-        {t("assignments.form.runner.label")}
-      </label>
-      <input
-        id={field.name}
-        name={field.name}
-        type="text"
-        autoComplete="off"
-        spellCheck={false}
-        className="input w-full max-w-xs"
-        placeholder="ubuntu-latest"
-        value={rawValue}
-        onBlur={normalizeOnBlur(field, (value) =>
-          parseRunnerLabels(value).join(", "),
-        )}
-        onChange={(e) => field.handleChange(e.target.value)}
-      />
-
-      <RunnerVerificationNote
-        verification={verification}
-        pending={pending || isVerifying}
-        hasValue={verification.kind !== "empty"}
-      />
-
-      {verification.kind === "self-hosted" && (
-        <p className="mt-1.5 text-xs text-base-content/70">
-          {t("assignments.form.runner.selfHostedHint_prefix")}{" "}
-          <code>self-hosted, linux, x64</code>
-          {t("assignments.form.runner.selfHostedHint_suffix")}
-        </p>
-      )}
-    </div>
-  )
-}
-
-const RunnerVerificationNote = ({
-  verification,
-  pending,
-  hasValue,
-}: {
-  verification: RunnerVerification
-  pending: boolean
-  hasValue: boolean
-}) => {
-  const { t } = useTranslation()
-  if (pending && hasValue) {
-    return (
-      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
-        <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
-        {t("assignments.form.runner.checking")}
-      </p>
-    )
-  }
-
-  switch (verification.kind) {
-    case "empty":
-      return (
-        <p className="mt-1.5 text-sm text-base-content/70">
-          {t("assignments.form.runner.emptyHint_prefix")}{" "}
-          <code>ubuntu-latest</code>
-          {t("assignments.form.runner.emptyHint_suffix")}
-        </p>
-      )
-
-    case "hosted":
-      return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
-          <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
-          {t("assignments.form.runner.hosted")}
-        </p>
-      )
-
-    case "self-hosted": {
-      const matched = verification.labels.filter(
-        (l) => l.kind === "self-hosted-match",
-      )
-      const matchNames = matched.flatMap((l) =>
-        l.kind === "self-hosted-match" ? l.runnerNames : [],
-      )
-      const uniqueNames = Array.from(new Set(matchNames))
-      return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-success">
-          <ServerCog aria-hidden="true" className="size-4 shrink-0" />
-          {verification.confirmed && uniqueNames.length > 0
-            ? t("assignments.form.runner.selfHostedMatch", {
-                count: uniqueNames.length,
-                names: `${uniqueNames.slice(0, 3).join(", ")}${
-                  uniqueNames.length > 3 ? "…" : ""
-                }`,
-              })
-            : t("assignments.form.runner.selfHostedLabels")}
-        </p>
-      )
-    }
-
-    case "problem": {
-      const badShape = verification.labels
-        .filter((l) => l.kind === "invalid-shape")
-        .map((l) => l.label)
-      const unverified = verification.labels
-        .filter((l) => l.kind === "unverified")
-        .map((l) => l.label)
-      const parts: string[] = []
-      if (badShape.length > 0) {
-        parts.push(
-          t("assignments.form.runner.invalidLabel", {
-            labels: badShape.map((l) => `"${l}"`).join(", "),
-          }),
-        )
-      }
-      if (unverified.length > 0) {
-        parts.push(
-          t("assignments.form.runner.noRunnerMatch", {
-            labels: unverified.map((l) => `"${l}"`).join(", "),
-          }),
-        )
-      }
-      return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
-          <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
-          {parts.join(" ")}
-        </p>
-      )
-    }
-
-    case "too-many":
-      return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
-          <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
-          {t("assignments.form.runner.tooMany", {
-            count: verification.count,
-          })}
-        </p>
-      )
-
-    case "unknown":
-      return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
-          <HelpCircle aria-hidden="true" className="size-4 shrink-0" />
-          {t("assignments.form.runner.cannotVerify")}
-        </p>
-      )
-
-    default:
-      return null
-  }
-}
-
-const toDatetimeLocalValue = (date: Date) => {
-  const pad = (value: number) => String(value).padStart(2, "0")
-
-  const year = date.getFullYear()
-  const month = pad(date.getMonth() + 1)
-  const day = pad(date.getDate())
-  const hours = pad(date.getHours())
-  const minutes = pad(date.getMinutes())
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`
-}
-
-// Create-mode default: a week out gives students a sensible runway and avoids
-// the form defaulting to an already-overdue "now".
-const sevenDaysFromNow = () => {
-  const date = new Date()
-  date.setDate(date.getDate() + 7)
-  return date
-}
-
-const utcIsoToDatetimeLocalValue = (value?: string) => {
-  if (!value) return ""
-
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return ""
-  }
-
-  return toDatetimeLocalValue(date)
-}
-
 // Map a stored classroom50/assignments/v1 entry back into form values:
 // template as `owner/repo`, due as datetime-local, runtime split into
 // runner/container fields, and the leading 0-point "setup" test lifted back
@@ -473,11 +355,24 @@ export const assignmentToFormValues = (
     due_date: utcIsoToDatetimeLocalValue(assignment.due),
     max_group_size: assignment.max_group_size ?? 2,
     feedback_pr: assignment.feedback_pr ?? true,
+    // A stored container block means the assignment was configured in container
+    // mode; otherwise it's the hosted runner (the default).
+    runtime_env: assignment.runtime?.container ? "container" : "hosted",
     runs_on: parseRunnerLabels(assignment.runtime?.["runs-on"] ?? "").join(
       ", ",
     ),
     container_image: assignment.runtime?.container?.image ?? "",
     container_user: assignment.runtime?.container?.user ?? "",
+    runtime_python: assignment.runtime?.python ?? "",
+    runtime_node: assignment.runtime?.node ?? "",
+    runtime_java: assignment.runtime?.java ?? "",
+    runtime_go: assignment.runtime?.go ?? "",
+    // apt is hosted-only; a stored container block hides the apt field and the
+    // submit path clears it, so blank it on read too — otherwise a legacy
+    // container+apt entry would hold apt live-but-hidden and silently drop it.
+    runtime_apt: assignment.runtime?.container
+      ? ""
+      : aptPackagesToText(assignment.runtime?.apt),
     setup_command: setupCommand,
     pass_threshold_enabled: typeof assignment.pass_threshold === "number",
     pass_threshold: assignment.pass_threshold ?? DEFAULT_PASS_THRESHOLD,
@@ -818,112 +713,97 @@ const CreateAssignmentForm = ({
                 {t("assignments.form.advancedHelp")}
               </p>
 
+              <form.Field name="runtime_env">
+                {(field) => (
+                  <fieldset className="mb-4">
+                    <legend className="label font-bold mb-2">
+                      {t("assignments.form.runtime.envLegend")}
+                    </legend>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2">
+                      <label
+                        htmlFor={`${field.name}-hosted`}
+                        className="label cursor-pointer gap-2 p-0"
+                      >
+                        <input
+                          id={`${field.name}-hosted`}
+                          type="radio"
+                          className="radio"
+                          name={field.name}
+                          value="hosted"
+                          checked={field.state.value === "hosted"}
+                          onChange={() => field.handleChange("hosted")}
+                        />
+                        {t("assignments.form.runtime.envHosted")}
+                      </label>
+                      <label
+                        htmlFor={`${field.name}-container`}
+                        className="label cursor-pointer gap-2 p-0"
+                      >
+                        <input
+                          id={`${field.name}-container`}
+                          type="radio"
+                          className="radio"
+                          name={field.name}
+                          value="container"
+                          checked={field.state.value === "container"}
+                          onChange={() => field.handleChange("container")}
+                        />
+                        {t("assignments.form.runtime.envContainer")}
+                      </label>
+                    </div>
+                    <p className="mt-1.5 text-sm text-base-content/70">
+                      {field.state.value === "container"
+                        ? t("assignments.form.runtime.envContainerHelp")
+                        : t("assignments.form.runtime.envHostedHelp")}
+                    </p>
+                  </fieldset>
+                )}
+              </form.Field>
+
               <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
                 <form.Field name="runs_on">
                   {(field) => <RunnerField field={field} org={org} />}
                 </form.Field>
-
-                <form.Field name="container_image">
-                  {(field) => (
-                    <div>
-                      <label
-                        htmlFor={field.name}
-                        className="label block font-bold mb-1.5"
-                      >
-                        {t("assignments.form.dockerImage")}
-                      </label>
-                      <input
-                        id={field.name}
-                        name={field.name}
-                        type="text"
-                        className="input w-full max-w-xs"
-                        placeholder={t(
-                          "assignments.form.dockerImagePlaceholder",
-                        )}
-                        value={field.state.value}
-                        onBlur={normalizeOnBlur(field)}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                      />
-                      <p className="mt-1.5 text-sm text-base-content/70">
-                        {t("assignments.form.dockerImageHelp")}
-                      </p>
-                    </div>
-                  )}
-                </form.Field>
-
-                <form.Subscribe
-                  selector={(state) => state.values.container_image}
-                >
-                  {(containerImage) =>
-                    containerImage.trim() ? (
-                      <form.Field name="container_user">
-                        {(field) => (
-                          <div>
-                            <label
-                              htmlFor={field.name}
-                              className="block font-bold mb-1.5"
-                            >
-                              {t("assignments.form.containerUser")}
-                            </label>
-                            <input
-                              id={field.name}
-                              name={field.name}
-                              type="text"
-                              className="input w-full max-w-xs"
-                              placeholder={t(
-                                "assignments.form.containerUserPlaceholder",
-                              )}
-                              value={field.state.value}
-                              onBlur={normalizeOnBlur(field)}
-                              onChange={(e) =>
-                                field.handleChange(e.target.value)
-                              }
-                            />
-                            <p className="mt-1.5 text-sm text-base-content/70">
-                              {t("assignments.form.containerUserHelp_prefix")}{" "}
-                              <code>root</code>
-                              {t("assignments.form.containerUserHelp_suffix")}
-                            </p>
-                          </div>
-                        )}
-                      </form.Field>
-                    ) : null
-                  }
-                </form.Subscribe>
               </div>
 
-              <form.Subscribe
-                selector={(state) => [
-                  state.values.runs_on,
-                  state.values.container_image,
-                ]}
-              >
-                {([runsOn, containerImage]) => {
-                  const warning = containerRunnerWarning(runsOn, containerImage)
-                  return warning ? (
-                    <p
-                      role="alert"
-                      className="mt-3 flex items-center gap-1.5 text-sm text-error"
-                    >
-                      <AlertTriangle
-                        aria-hidden="true"
-                        className="size-4 shrink-0"
-                      />
-                      {warning}
-                    </p>
+              <form.Subscribe selector={(state) => state.values.runtime_env}>
+                {(runtimeEnv) =>
+                  runtimeEnv === "container" ? (
+                    <ContainerFields form={form} />
                   ) : null
-                }}
+                }
+              </form.Subscribe>
+
+              <div className="mt-4">
+                <FieldLabel
+                  label={t("assignments.form.runtime.languagesHeading")}
+                  help={t("assignments.form.runtime.languagesTip")}
+                />
+                <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                  {RUNTIME_LANGUAGES.map((language) => (
+                    <LanguageVersionField
+                      key={language}
+                      form={form}
+                      language={language}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <form.Subscribe selector={(state) => state.values.runtime_env}>
+                {(runtimeEnv) =>
+                  runtimeEnv === "container" ? null : <AptField form={form} />
+                }
               </form.Subscribe>
 
               <form.Field name="setup_command">
                 {(field) => (
                   <div className="mt-4">
-                    <label
+                    <FieldLabel
                       htmlFor={field.name}
-                      className="label block font-bold mb-1.5"
-                    >
-                      {t("assignments.form.setupCommand")}
-                    </label>
+                      label={t("assignments.form.setupCommand")}
+                      help={t("assignments.form.setupCommandTip")}
+                    />
                     <input
                       id={field.name}
                       name={field.name}
@@ -936,9 +816,6 @@ const CreateAssignmentForm = ({
                       onBlur={normalizeOnBlur(field)}
                       onChange={(e) => field.handleChange(e.target.value)}
                     />
-                    <p className="mt-1.5 text-sm text-base-content/70">
-                      {t("assignments.form.setupCommandHelp")}
-                    </p>
                   </div>
                 )}
               </form.Field>
@@ -949,12 +826,17 @@ const CreateAssignmentForm = ({
                   const error = field.state.meta.errors[0] as string | undefined
                   return (
                     <div className="mt-4">
-                      <label
+                      <FieldLabel
                         htmlFor={field.name}
-                        className="label block font-bold mb-1.5"
-                      >
-                        {t("assignments.form.allowedFiles")}
-                      </label>
+                        label={t("assignments.form.allowedFiles")}
+                        help={t("assignments.form.allowedFilesTip", {
+                          gitignore: ".gitignore",
+                          bang: "!",
+                          star: "*",
+                          example: "!hello.py",
+                          result: "hello.py",
+                        })}
+                      />
                       <textarea
                         id={field.name}
                         name={field.name}
@@ -966,15 +848,6 @@ const CreateAssignmentForm = ({
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
                       />
-                      <p className="mt-1.5 text-sm text-base-content/70">
-                        {t("assignments.form.allowedFilesHelp", {
-                          gitignore: ".gitignore",
-                          bang: "!",
-                          star: "*",
-                          example: "!hello.py",
-                          result: "hello.py",
-                        })}
-                      </p>
                       {error ? (
                         <p
                           role="alert"
@@ -1003,18 +876,22 @@ const CreateAssignmentForm = ({
               <form.Field name="pass_threshold_enabled">
                 {(toggle) => (
                   <div className="mt-4">
-                    <label className="label cursor-pointer justify-start gap-3 p-0 font-bold">
-                      <input
-                        type="checkbox"
-                        className="toggle toggle-sm"
-                        checked={toggle.state.value}
-                        onChange={(e) => toggle.handleChange(e.target.checked)}
+                    <div className="flex items-center gap-1.5">
+                      <label className="label cursor-pointer justify-start gap-3 p-0 font-bold">
+                        <input
+                          type="checkbox"
+                          className="toggle toggle-sm"
+                          checked={toggle.state.value}
+                          onChange={(e) =>
+                            toggle.handleChange(e.target.checked)
+                          }
+                        />
+                        {t("assignments.form.passThresholdToggle")}
+                      </label>
+                      <HelpTooltip
+                        help={t("assignments.form.passThresholdTip")}
                       />
-                      {t("assignments.form.passThresholdToggle")}
-                    </label>
-                    <p className="mt-1.5 text-sm text-base-content/70">
-                      {t("assignments.form.passThresholdHelp")}
-                    </p>
+                    </div>
 
                     {toggle.state.value && (
                       <form.Field name="pass_threshold">
