@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildTeamRoster,
   countByState,
+  notInOrgUsernames,
   rowToStudent,
   teamMembersMissingFromCsv,
 } from "./teamRoster"
@@ -146,7 +147,7 @@ describe("buildTeamRoster", () => {
     expect(rows[0].invitation_id).toBe(3)
   })
 
-  it("marks CSV-only rows with no member/invite as unprovisioned", () => {
+  it("marks CSV rows (with a username) not on the team/invite as not_in_org", () => {
     const rows = buildTeamRoster({
       members: [member(101, "ada")],
       invitations: [],
@@ -156,11 +157,11 @@ describe("buildTeamRoster", () => {
       ],
     })
     const ghost = rows.find((r) => r.username === "ghost")
-    expect(ghost?.state).toBe("unprovisioned")
+    expect(ghost?.state).toBe("not_in_org")
     expect(rows.filter((r) => r.state === "enrolled")).toHaveLength(1)
   })
 
-  it("does not emit a member as both enrolled and unprovisioned", () => {
+  it("does not emit a member as both enrolled and not_in_org", () => {
     const rows = buildTeamRoster({
       members: [member(101, "ada")],
       students: [csvRow({ github_id: "101", username: "ada" })],
@@ -168,19 +169,46 @@ describe("buildTeamRoster", () => {
     expect(rows.filter((r) => r.username === "ada")).toHaveLength(1)
   })
 
-  it("dedupes duplicate CSV-only rows for the same person", () => {
+  it("ignores legacy username-less CSV rows (no row emitted)", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ email: "legacy@uni.edu", first_name: "Legacy" })],
+    })
+    expect(rows).toHaveLength(0)
+  })
+
+  it("merges a legacy email-only row's metadata into a username row sharing its email", () => {
+    // The username row carries no name; the legacy email-only row (ignored on
+    // its own) lends its name/section by matching email.
     const rows = buildTeamRoster({
       members: [],
       students: [
-        csvRow({ email: "dup@uni.edu", first_name: "Dup" }),
-        csvRow({ email: "dup@uni.edu", last_name: "Licate" }),
+        csvRow({ username: "sam", email: "sam@uni.edu" }),
+        csvRow({ email: "sam@uni.edu", first_name: "Sam", section: "C" }),
       ],
     })
     expect(rows).toHaveLength(1)
-    expect(rows[0].state).toBe("unprovisioned")
+    expect(rows[0]).toMatchObject({
+      state: "not_in_org",
+      username: "sam",
+      first_name: "Sam",
+      section: "C",
+    })
   })
 
-  it("sorts enrolled, then pending, then unprovisioned", () => {
+  it("dedupes duplicate CSV rows for the same username", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [
+        csvRow({ username: "dup", first_name: "Dup" }),
+        csvRow({ username: "dup", last_name: "Licate" }),
+      ],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].state).toBe("not_in_org")
+  })
+
+  it("sorts enrolled, then pending, then not_in_org", () => {
     const rows = buildTeamRoster({
       members: [member(2, "zed")],
       invitations: [invite({ id: 9, login: "pat" })],
@@ -189,7 +217,7 @@ describe("buildTeamRoster", () => {
     expect(rows.map((r) => r.state)).toEqual([
       "enrolled",
       "pending",
-      "unprovisioned",
+      "not_in_org",
     ])
   })
 
@@ -202,7 +230,7 @@ describe("buildTeamRoster", () => {
     expect(countByState(rows)).toEqual({
       enrolled: 2,
       pending: 1,
-      unprovisioned: 2,
+      not_in_org: 2,
     })
   })
 
@@ -267,7 +295,7 @@ describe("teamMembersMissingFromCsv", () => {
     expect(missing.map((m) => m.login)).toEqual(["ada", "grace"])
   })
 
-  it("does not count a CSV-only row (unprovisioned) as missing — wrong direction", () => {
+  it("does not count a CSV row not on the team as missing — wrong direction", () => {
     // grace is on the CSV but not the team — the opposite drift, NOT what this
     // helper (or Sync) addresses.
     const missing = teamMembersMissingFromCsv(
@@ -275,5 +303,44 @@ describe("teamMembersMissingFromCsv", () => {
       [csvRow({ github_id: "101" }), csvRow({ username: "grace" })],
     )
     expect(missing).toEqual([])
+  })
+})
+
+describe("notInOrgUsernames", () => {
+  // The rostered usernames that are `not_in_org` — what auto-reconcile tries to
+  // team-add. Enrolled team members and pending invites are excluded; only
+  // rows the roster classified as on-CSV-but-not-in-org contribute.
+  const roster = (students: Student[], members: GitHubUser[]) =>
+    buildTeamRoster({ members, students })
+
+  it("returns the username of a not_in_org row", () => {
+    const rows = roster(
+      [
+        csvRow({ github_id: "101", username: "ada" }),
+        csvRow({ github_id: "202", username: "bob" }),
+      ],
+      [member(101, "ada")], // only ada is on the team; bob is not_in_org
+    )
+    expect(notInOrgUsernames(rows)).toEqual(["bob"])
+  })
+
+  it("returns the username of an id-less not_in_org row verbatim", () => {
+    const rows = roster([csvRow({ username: "Bob" })], [])
+    // No reverse match against the org list: the CSV username is authoritative,
+    // returned as written (reconcile lowercases/verifies membership itself).
+    expect(notInOrgUsernames(rows)).toEqual(["Bob"])
+  })
+
+  it("excludes already-enrolled team members", () => {
+    const rows = roster(
+      [csvRow({ github_id: "101", username: "ada" })],
+      [member(101, "ada")],
+    )
+    expect(notInOrgUsernames(rows)).toEqual([])
+  })
+
+  it("is empty when there are no not_in_org rows", () => {
+    const rows = roster([], [member(101, "ada")])
+    expect(notInOrgUsernames(rows)).toEqual([])
   })
 })

@@ -8,6 +8,7 @@ import { classroomTeamSlugHeuristic } from "@/util/orgMembership"
 import {
   buildTeamRoster,
   countByState,
+  notInOrgUsernames,
   teamMembersMissingFromCsv,
   type TeamRosterRow,
   type TeamRosterRowState,
@@ -36,9 +37,15 @@ export type UseTeamRosterResult = {
   teamSlug: string
   // Count of team members with no students.csv row — the exact set "Sync roster"
   // appends. 0 = in sync (button disabled, "In sync"); >0 = drift the teacher
-  // can sync (auto-synced on open). Opposite direction from `unprovisioned` (on
+  // can sync (auto-synced on open). Opposite direction from `not_in_org` (on
   // CSV, not on team), which sync can't fix.
   csvMissingCount: number
+  // Rostered students who are `not_in_org` (on students.csv with a username but
+  // not a team/org member and not a pending invite) — the usernames
+  // auto-reconcile feeds to reconcileTeamFromOrgMembers. It team-adds the ones
+  // that are in fact active org members (native invite / SSO) and skips the
+  // rest, which stay `not_in_org` and are highlighted for invite/removal.
+  notInOrgUsernames: string[]
   // Re-run the team-member fetch so an error surface can offer a retry without a
   // full page reload.
   refetch: () => void
@@ -93,6 +100,11 @@ export function useTeamRoster(
     [members, students],
   )
 
+  // Rostered `not_in_org` usernames — what auto-reconcile tries to team-add
+  // (reconcile skips any that aren't active org members). Memoized so the join
+  // key stays a stable string list rather than a fresh array every render.
+  const notInOrg = useMemo(() => notInOrgUsernames(rows), [rows])
+
   // Enrolled rows come from team membership (readable by non-owners), so the
   // roster is usable even when invites are forbidden. Wait on the invite fetch
   // only when it's readable.
@@ -107,6 +119,7 @@ export function useTeamRoster(
     pendingHidden: invitesForbidden,
     teamSlug,
     csvMissingCount,
+    notInOrgUsernames: notInOrg,
     refetch: () => {
       void refetchMembers()
     },
@@ -144,7 +157,7 @@ export type OptimisticMember = {
 // Optimistically add a just-enrolled member to the team-members cache, then
 // invalidate to reconcile. Enrolling an already-active org member team-adds them
 // with no pending invite, so without the seed buildTeamRoster flashes the row as
-// "unprovisioned" until the refetch lands. Dedup by id; the refetch replaces the
+// "not_in_org" until the refetch lands. Dedup by id; the refetch replaces the
 // stub (or drops it if the add didn't land). No-ops a blank/invalid id.
 export function useSeedTeamMember(
   org: string,

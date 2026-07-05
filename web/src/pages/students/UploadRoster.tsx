@@ -8,12 +8,19 @@ import type { GitHubClient } from "@/hooks/github/client"
 import {
   isLikelyGithubUsername,
   normalizeGithubUsername,
+  splitName,
   type BulkImportResult,
+  type ImportRosterRow,
 } from "@/api/mutations/students"
 
-const parseUsernameImportFile = (text: string): string[] => {
+// Parse an uploaded roster into metadata rows. A CSV with a `username` header
+// column also honors first_name/last_name/name/email/section columns (case- and
+// order-insensitive); anything without a header falls back to one-username-per
+// -line. github_id in the file is ignored — it's re-derived from GitHub on
+// import so the stored id is authoritative. Rows are deduped by username.
+// Exported for unit testing.
+export const parseRosterImportFile = (text: string): ImportRosterRow[] => {
   const trimmed = text.trim()
-
   if (!trimmed) return []
 
   const parsed = Papa.parse<Record<string, string>>(trimmed, {
@@ -23,36 +30,41 @@ const parseUsernameImportFile = (text: string): string[] => {
     transformHeader: (header) => header.trim().toLowerCase(),
   })
 
-  let candidates: string[]
-
-  if (
-    parsed.errors.length === 0 &&
-    parsed.meta.fields?.some((field) => field.toLowerCase() === "username")
-  ) {
-    candidates = parsed.data.map((row) => row.username ?? "")
-  } else {
-    candidates = trimmed.split(/\r?\n/)
-  }
+  const fields = parsed.meta.fields ?? []
+  const hasUsernameColumn =
+    parsed.errors.length === 0 && fields.includes("username")
 
   const seen = new Set<string>()
-  const usernames: string[] = []
+  const rows: ImportRosterRow[] = []
 
-  for (const candidate of candidates) {
-    const username = normalizeGithubUsername(candidate)
-
-    if (!username || !isLikelyGithubUsername(username)) {
-      continue
-    }
-
+  const push = (row: ImportRosterRow) => {
+    const username = normalizeGithubUsername(row.username)
+    if (!username || !isLikelyGithubUsername(username)) return
     const key = username.toLowerCase()
-
-    if (seen.has(key)) continue
-
+    if (seen.has(key)) return
     seen.add(key)
-    usernames.push(username)
+    rows.push({ ...row, username })
   }
 
-  return usernames
+  if (hasUsernameColumn) {
+    for (const raw of parsed.data) {
+      // Support either split first/last name columns or a single "name".
+      const fromName = splitName(raw.name ?? null)
+      push({
+        username: raw.username ?? "",
+        first_name: (raw.first_name ?? fromName.first_name).trim(),
+        last_name: (raw.last_name ?? fromName.last_name).trim(),
+        email: (raw.email ?? "").trim(),
+        section: (raw.section ?? "").trim(),
+      })
+    }
+  } else {
+    for (const line of trimmed.split(/\r?\n/)) {
+      push({ username: line })
+    }
+  }
+
+  return rows
 }
 
 type UploadRosterProps = {
@@ -114,7 +126,7 @@ const UploadRoster = ({
 
   const [phase, setPhase] = useState<ImportPhase>("idle")
   const [fileName, setFileName] = useState("")
-  const [usernames, setUsernames] = useState<string[]>([])
+  const [rows, setRows] = useState<ImportRosterRow[]>([])
   const [progress, setProgress] = useState<ImportProgress>({
     processed: 0,
     total: 0,
@@ -137,7 +149,7 @@ const UploadRoster = ({
   const reset = () => {
     setPhase("idle")
     setFileName("")
-    setUsernames([])
+    setRows([])
     setProgress({
       processed: 0,
       total: 0,
@@ -161,15 +173,15 @@ const UploadRoster = ({
 
     try {
       const text = await file.text()
-      const parsedUsernames = parseUsernameImportFile(text)
+      const parsedRows = parseRosterImportFile(text)
 
       setFileName(file.name)
-      setUsernames(parsedUsernames)
+      setRows(parsedRows)
       setResult(null)
       setError(null)
       setProgress({
         processed: 0,
-        total: parsedUsernames.length,
+        total: parsedRows.length,
         message: "",
       })
       setPhase("preview")
@@ -189,7 +201,7 @@ const UploadRoster = ({
     setResult(null)
     setProgress({
       processed: 0,
-      total: usernames.length,
+      total: rows.length,
       message: t("students.startingImport"),
     })
 
@@ -197,7 +209,7 @@ const UploadRoster = ({
       const importResult = await bulkEnrollStudentsInClassroom(client, {
         org,
         classroom,
-        usernames,
+        rows,
         onProgress: setProgress,
       })
 
@@ -285,11 +297,11 @@ const UploadRoster = ({
             <div className="mt-6">
               <div className="alert mb-4">
                 <span>
-                  {t("students.usernamesFound", { count: usernames.length })}
+                  {t("students.usernamesFound", { count: rows.length })}
                 </span>
               </div>
 
-              {usernames.length > 0 ? (
+              {rows.length > 0 ? (
                 <div className="max-h-80 overflow-auto rounded-box border border-base-300">
                   <table className="table table-sm">
                     <thead>
@@ -298,15 +310,25 @@ const UploadRoster = ({
                         <th scope="col">
                           {t("students.githubUsernameColumn")}
                         </th>
+                        <th scope="col">{t("students.nameColumn")}</th>
+                        <th scope="col">{t("students.emailColumn")}</th>
+                        <th scope="col">{t("students.sectionColumn")}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {usernames.map((username, index) => (
-                        <tr key={username.toLowerCase()}>
+                      {rows.map((row, index) => (
+                        <tr key={row.username.toLowerCase()}>
                           <td>{index + 1}</td>
                           <td>
-                            <code>{username}</code>
+                            <code>{row.username}</code>
                           </td>
+                          <td className="opacity-70">
+                            {[row.first_name, row.last_name]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </td>
+                          <td className="opacity-70">{row.email}</td>
+                          <td className="opacity-70">{row.section}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -326,10 +348,10 @@ const UploadRoster = ({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={usernames.length === 0}
+                  disabled={rows.length === 0}
                   onClick={startImport}
                 >
-                  {t("students.importCount", { count: usernames.length })}
+                  {t("students.importCount", { count: rows.length })}
                 </button>
               </div>
             </div>
@@ -410,6 +432,17 @@ const UploadRoster = ({
                       detail:
                         teamResult.message ?? t("students.couldNotAddToTeam"),
                     }))}
+                />
+              )}
+
+              {result.notInOrg && result.notInOrg.length > 0 && (
+                <ImportResultSection
+                  title={t("students.resultNotInOrg")}
+                  rows={result.notInOrg.map((username) => ({
+                    key: username,
+                    label: username,
+                    detail: t("students.notInOrgDetail"),
+                  }))}
                 />
               )}
 
