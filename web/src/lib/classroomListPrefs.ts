@@ -8,7 +8,10 @@ import { createListPrefs } from "@/lib/listPrefs"
 export type ClassroomViewMode = "grid" | "list"
 export type ClassroomSortKey = "name-asc" | "term" | "student-count"
 
-const prefs = createListPrefs<ClassroomViewMode, ClassroomSortKey>({
+export const classroomListPrefs = createListPrefs<
+  ClassroomViewMode,
+  ClassroomSortKey
+>({
   viewKey: "classrooms_view_mode",
   sortKey: "classrooms_sort_key",
   viewValues: ["grid", "list"],
@@ -16,8 +19,3 @@ const prefs = createListPrefs<ClassroomViewMode, ClassroomSortKey>({
   defaultView: "grid",
   defaultSort: "name-asc",
 })
-
-export const getStoredViewMode = prefs.getStoredViewMode
-export const persistViewMode = prefs.persistViewMode
-export const getStoredSortKey = prefs.getStoredSortKey
-export const persistSortKey = prefs.persistSortKey
