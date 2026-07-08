@@ -9,6 +9,7 @@ import {
   useState,
   type PropsWithChildren,
 } from "react"
+import { useTranslation } from "react-i18next"
 import { DEFAULT_GITHUB_SCOPE, GITHUB_OAUTH_CLIENT_ID } from "./constants"
 import {
   buildGithubAuthorizeUrl,
@@ -16,10 +17,15 @@ import {
   pollDeviceToken,
   requestDeviceCode,
 } from "./github-oauth-api"
-import { fetchGithubUser, GitHubUserFetchError } from "./github-user-api"
+import {
+  fetchGithubUser,
+  fetchGithubUserWithScopes,
+  GitHubUserFetchError,
+} from "./github-user-api"
 import { isDefinitiveGitHubStatus } from "@/hooks/github/errors"
 import router from "@/router"
 import { deriveChallenge, generateVerifier, randomBase64Url } from "./pkce"
+import { missingScopes } from "./scopes"
 import {
   clearGithubToken,
   consumeOAuthSession,
@@ -33,16 +39,30 @@ import {
 import type { DeviceAuthState, GithubAuthScreen } from "./types"
 import type { AuthStatus } from "@/types/router"
 
-function formatError(err: unknown) {
+// Translator shape used for the auth error strings. Matches the subset of
+// react-i18next's `t` we rely on (key + optional interpolation values).
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+function formatError(
+  t: Translate,
+  err: unknown,
+  // The subsystem a network failure most likely implicates. The web/device
+  // flows go through the Worker OAuth proxy; the PAT flow hits api.github.com
+  // directly, so it passes its own label instead of blaming a proxy it never
+  // touches. Defaults to the proxy target for the OAuth/device callers.
+  networkTarget: string = t("auth.errorNetworkProxyTarget"),
+) {
   const message = err instanceof Error ? err.message : String(err)
 
   if (
     message.toLowerCase().includes("failed to fetch") ||
     message.toLowerCase().includes("networkerror")
   ) {
-    return "Network error reaching the Cloudflare Worker proxy; it may be down or unreachable."
+    return t("auth.errorNetwork", { target: networkTarget })
   }
 
+  // A server-provided message (e.g. an OAuth error_description) is already a
+  // formed string we can't pre-translate; pass it through unchanged.
   return message
 }
 
@@ -64,6 +84,26 @@ export function recoverStrandedExchange(
   return current === "exchanging" ? "config" : current
 }
 
+// Decision for a validated PAT's X-OAuth-Scopes header, split out so every
+// branch is unit-testable. A null header means the scopes are unverifiable —
+// a fine-grained PAT — which we block at entry rather than sign in on a token
+// we can't vet. An empty string is a classic token with no boxes ticked, which
+// falls through to the missing-scopes check (missingScopes("") reports every
+// required scope). "ok" carries the scope string forward to completeSignIn.
+export type PatResult =
+  | { kind: "fine-grained" }
+  | { kind: "missing"; missing: string[] }
+  | { kind: "ok"; scopes: string }
+
+export function classifyPatResult(scopes: string | null): PatResult {
+  if (scopes === null) return { kind: "fine-grained" }
+
+  const missing = missingScopes(scopes)
+  if (missing.length > 0) return { kind: "missing", missing }
+
+  return { kind: "ok", scopes }
+}
+
 function sleep(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     const timer = window.setTimeout(resolve, ms)
@@ -83,6 +123,7 @@ function sleep(ms: number, signal: AbortSignal) {
 // consumers use the useGithubAuth() context hook below.
 function useGithubAuthState() {
   const queryClient = useQueryClient()
+  const { t } = useTranslation()
   const abortRef = useRef<AbortController | null>(null)
   // Deep link (#71) stashed at code-exchange, consumed by the status-driven
   // effect below so navigation runs against an authenticated router context.
@@ -93,6 +134,9 @@ function useGithubAuthState() {
   const [token, setToken] = useState<string | null>(null)
   const [tokenScope, setTokenScope] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // Scoped to the PAT prompt so a token-entry failure surfaces on that screen
+  // without disturbing the config screen's `error`.
+  const [patError, setPatError] = useState<string | null>(null)
   const [device, setDevice] = useState<DeviceAuthState | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [hasLoadedStoredAuth, setHasLoadedStoredAuth] = useState(false)
@@ -128,6 +172,10 @@ function useGithubAuthState() {
 
   const requestDeviceCodeMutation = useMutation({
     mutationFn: requestDeviceCode,
+  })
+
+  const validatePatMutation = useMutation({
+    mutationFn: fetchGithubUserWithScopes,
   })
 
   // Shared landing for both web and device flows. Goes straight to the authed
@@ -212,15 +260,13 @@ function useGithubAuthState() {
     } = consumeOAuthSession()
 
     if (!returnedState || returnedState !== expectedState) {
-      setError("State mismatch -- possible CSRF. Please try signing in again.")
+      setError(t("auth.errorStateMismatch"))
       setScreen("config")
       return
     }
 
     if (!verifier || !callbackClientId) {
-      setError(
-        "Missing PKCE verifier or client ID. Please try signing in again.",
-      )
+      setError(t("auth.errorMissingPkce"))
       setScreen("config")
       return
     }
@@ -246,7 +292,7 @@ function useGithubAuthState() {
           pendingReturnToRef.current = returnTo
         },
         onError: (err) => {
-          setError(formatError(err))
+          setError(formatError(t, err))
           setScreen("config")
         },
       },
@@ -270,9 +316,7 @@ function useGithubAuthState() {
     const trimmedClientId = clientId.trim()
 
     if (!trimmedClientId) {
-      setError(
-        "GitHub OAuth client ID is not configured (VITE_GITHUB_CLIENT_ID).",
-      )
+      setError(t("auth.errorClientIdMissing"))
       return null
     }
 
@@ -283,7 +327,7 @@ function useGithubAuthState() {
       clientId: trimmedClientId,
       scope: DEFAULT_GITHUB_SCOPE,
     }
-  }, [clientId])
+  }, [clientId, t])
 
   const startWebFlow = useCallback(async () => {
     const config = validateConfig()
@@ -340,7 +384,7 @@ function useGithubAuthState() {
 
       while (!controller.signal.aborted) {
         if (Date.now() > input.expiresAt) {
-          failDeviceFlow("Device code expired. Please try again.")
+          failDeviceFlow(t("auth.errorDeviceExpired"))
           return
         }
 
@@ -379,7 +423,7 @@ function useGithubAuthState() {
           })
         } catch (err) {
           if (controller.signal.aborted) return
-          failDeviceFlow(formatError(err))
+          failDeviceFlow(formatError(t, err))
           return
         }
 
@@ -391,12 +435,12 @@ function useGithubAuthState() {
         }
 
         if (data.error === "access_denied") {
-          failDeviceFlow("You declined the authorization request.")
+          failDeviceFlow(t("auth.errorDeviceDeclined"))
           return
         }
 
         if (data.error === "expired_token") {
-          failDeviceFlow("Device code expired. Please try again.")
+          failDeviceFlow(t("auth.errorDeviceExpired"))
           return
         }
 
@@ -406,9 +450,7 @@ function useGithubAuthState() {
         }
 
         if (!data.access_token) {
-          failDeviceFlow(
-            "Token endpoint returned no access_token and no error.",
-          )
+          failDeviceFlow(t("auth.errorDeviceNoToken"))
           return
         }
 
@@ -417,7 +459,7 @@ function useGithubAuthState() {
         return
       }
     },
-    [completeSignIn, failDeviceFlow],
+    [completeSignIn, failDeviceFlow, t],
   )
 
   const startDeviceFlow = useCallback(async () => {
@@ -452,7 +494,7 @@ function useGithubAuthState() {
         })
       },
       onError: (err) => {
-        failDeviceFlow(formatError(err))
+        failDeviceFlow(formatError(t, err))
       },
     })
   }, [
@@ -460,6 +502,7 @@ function useGithubAuthState() {
     requestDeviceCodeMutation,
     startDevicePolling,
     validateConfig,
+    t,
   ])
 
   const cancelDeviceFlow = useCallback(() => {
@@ -491,6 +534,59 @@ function useGithubAuthState() {
         : current,
     )
   }, [])
+
+  const startPatFlow = useCallback(() => {
+    setPatError(null)
+    setScreen("pat-prompt")
+  }, [])
+
+  const cancelPatFlow = useCallback(() => {
+    setPatError(null)
+    setScreen("config")
+  }, [])
+
+  const submitPat = useCallback(
+    (rawToken: string) => {
+      const token = rawToken.trim()
+      if (!token) return
+
+      setPatError(null)
+
+      validatePatMutation.mutate(token, {
+        onSuccess: ({ scopes }) => {
+          const result = classifyPatResult(scopes)
+
+          // A fine-grained PAT (null header) carries no verifiable scopes; its
+          // per-resource permissions can't be checked here and typically fail
+          // mid-operation, so block it at entry rather than sign in on a token
+          // we can't vet.
+          if (result.kind === "fine-grained") {
+            setPatError(t("auth.errorPatFineGrained"))
+            return
+          }
+
+          if (result.kind === "missing") {
+            setPatError(
+              t("auth.errorPatMissingScopes", {
+                scopes: result.missing.join(", "),
+              }),
+            )
+            return
+          }
+
+          completeSignIn({ access_token: token, scope: result.scopes })
+        },
+        onError: (err) => {
+          if (err instanceof GitHubUserFetchError && err.status === 401) {
+            setPatError(t("auth.errorPatRejected401"))
+            return
+          }
+          setPatError(formatError(t, err, "api.github.com"))
+        },
+      })
+    },
+    [completeSignIn, validatePatMutation, t],
+  )
 
   // Shared teardown for both a deliberate sign-out and an involuntary expiry.
   // `expired` flags the involuntary case so /login can explain the redirect.
@@ -614,6 +710,11 @@ function useGithubAuthState() {
     cancelDeviceFlow,
     markDeviceCodeCopied,
     markVerificationOpened,
+    startPatFlow,
+    cancelPatFlow,
+    submitPat,
+    patError,
+    isValidatingPat: validatePatMutation.isPending,
     signOut,
     expireSession,
     sessionExpired,
