@@ -1,9 +1,11 @@
 import {
   ChevronRight,
   GitCommitHorizontal,
+  Inbox,
   MessageCircle,
   RefreshCw,
   ScrollText,
+  SearchX,
   UsersRound,
 } from "lucide-react"
 import { Fragment, useId, useRef, useState } from "react"
@@ -19,7 +21,8 @@ import {
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
-import { Button, Modal } from "@/components/ui"
+import { Badge, Button, Modal } from "@/components/ui"
+import { nonSubmitterStatus, scoreTone } from "@/pages/submissions/dashboard"
 import { ConfirmModal } from "@/components/modals"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
@@ -45,22 +48,81 @@ const identitySubtitle = (name?: string, login?: string, section?: string) => {
   return [showLogin, section?.trim()].filter(Boolean).join(" · ") || undefined
 }
 
-// Badge color from the assignment's pass threshold: green at/above the bar, red
-// below, neutral when ungraded (max 0) or no threshold (`null`).
-const scoreToBadgeType = (
-  score: number,
-  max: number,
-  thresholdFraction: number | null,
-) => {
-  if (thresholdFraction == null || !max) return "badge-ghost"
-  return score / max >= thresholdFraction ? "badge-success" : "badge-error"
+// Score chip via the shared scoreTone recipe (one mapping for table + history):
+// success/error tone for graded rows, neutral ghost for ungraded.
+const ScoreBadge = ({
+  score,
+  max,
+  thresholdFraction,
+  size,
+}: {
+  score: number
+  max: number
+  thresholdFraction: number | null
+  size?: "xs" | "sm" | "md"
+}) => {
+  const t = scoreTone(score, max, thresholdFraction)
+  return (
+    <Badge
+      size={size}
+      ghost={"ghost" in t && t.ghost}
+      tone={"tone" in t ? t.tone : "neutral"}
+    >
+      {score}/{max}
+    </Badge>
+  )
+}
+
+// Per-row status chip for a roster student with no submission: distinguishes
+// accepted-but-not-submitted, never-accepted, and (group) no-group from a flat
+// "Not submitted", so a teacher can nudge accepters vs chase non-accepters.
+const NonSubmitterStatusBadge = ({
+  username,
+  isGroup,
+  acceptedUsernames,
+}: {
+  username: string
+  isGroup: boolean
+  acceptedUsernames?: Set<string>
+}) => {
+  const { t } = useTranslation()
+  const status = nonSubmitterStatus(username, { isGroup, acceptedUsernames })
+  switch (status) {
+    case "accepted-not-submitted":
+      return (
+        <Badge tone="warning" className="whitespace-nowrap">
+          {t("submissions.table.acceptedAwaiting")}
+        </Badge>
+      )
+    case "not-accepted":
+      return (
+        <Badge ghost className="whitespace-nowrap">
+          {t("submissions.table.notAccepted")}
+        </Badge>
+      )
+    case "no-group":
+      return (
+        <Badge
+          ghost
+          className="whitespace-nowrap"
+          title={t("submissions.table.noGroupTitle")}
+        >
+          {t("submissions.table.noGroup")}
+        </Badge>
+      )
+    default:
+      return (
+        <Badge ghost className="whitespace-nowrap">
+          {t("submissions.table.notSubmitted")}
+        </Badge>
+      )
+  }
 }
 
 // Icon action in the Actions cell: an external link when a URL is present, else
-// a dimmed non-clickable span (with a "no … yet" label) to keep the row aligned.
+// a dimmed non-clickable button (with a "no … yet" label) to keep the row
+// aligned. Both render through the shared ghost-square Button recipe.
 type IconComponent = React.ComponentType<{ className?: string }>
-
-const ACTION_BTN = "btn btn-ghost btn-sm btn-square"
 
 const ActionIconLink = ({
   href,
@@ -78,8 +140,12 @@ const ActionIconLink = ({
   emptyTitle: string
 }) =>
   href ? (
-    <a
-      className={`${ACTION_BTN} text-base-content/70`}
+    <Button
+      as="a"
+      variant="ghost"
+      size="sm"
+      shape="square"
+      className="text-base-content/70"
       href={href}
       target="_blank"
       rel="noreferrer"
@@ -87,15 +153,19 @@ const ActionIconLink = ({
       title={title}
     >
       <Icon className="size-4" />
-    </a>
+    </Button>
   ) : (
-    <span
-      className={`${ACTION_BTN} text-base-content/30`}
+    <Button
+      variant="ghost"
+      size="sm"
+      shape="square"
+      className="text-base-content/30"
+      disabled
       aria-label={emptyLabel}
       title={emptyTitle}
     >
       <Icon className="size-4" />
-    </span>
+    </Button>
   )
 
 // Inline commit/details link in the expanded history row: external link when a
@@ -432,11 +502,12 @@ const SubmissionHistory = ({
             #{submissions.length - i}
           </span>
           <span className="w-44 shrink-0">{formatDateTime(s.datetime)}</span>
-          <span
-            className={`badge badge-soft badge-sm ${scoreToBadgeType(s.score, s["max-score"], thresholdFraction)}`}
-          >
-            {s.score}/{s["max-score"]}
-          </span>
+          <ScoreBadge
+            score={s.score}
+            max={s["max-score"]}
+            thresholdFraction={thresholdFraction}
+            size="sm"
+          />
           {s.late ? (
             <span
               className="badge badge-sm badge-error badge-soft"
@@ -489,6 +560,8 @@ const SubmissionsTable = ({
   maxGroupSize,
   acceptedUsernames,
   thresholdFraction,
+  filtered = false,
+  onClearFilters,
 }: {
   scores: SubmissionRow[]
   students: Student[]
@@ -506,6 +579,13 @@ const SubmissionsTable = ({
   // Passing bar as a fraction of max (e.g. 1.0 = full marks); drives score badge
   // color. `null`/omitted means no passing threshold (badges render neutral).
   thresholdFraction?: number | null
+  // Whether a search/filter is currently narrowing the set. Distinguishes the
+  // empty state's "filters hide everything" case (offer Clear) from "nothing
+  // collected yet" (guide to Collect now) — the table only receives already
+  // filtered rows, so it can't infer this itself.
+  filtered?: boolean
+  // Clears the active search + filters (wired to the controls' clearAll).
+  onClearFilters?: () => void
 }) => {
   const { t } = useTranslation()
   const passBar = thresholdFraction ?? null
@@ -560,8 +640,46 @@ const SubmissionsTable = ({
           <tbody>
             {!scores?.length && !nonSubmitters.length && (
               <tr>
-                <td colSpan={5} className="text-center text-base-content/70">
-                  {t("submissions.table.emptyState")}
+                <td colSpan={5} className="py-10 text-center">
+                  <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                    {filtered ? (
+                      <>
+                        <SearchX
+                          aria-hidden="true"
+                          className="size-8 text-base-content/40"
+                        />
+                        <p className="font-medium">
+                          {t("submissions.table.emptyFilteredTitle")}
+                        </p>
+                        <p className="text-sm text-base-content/70">
+                          {t("submissions.table.emptyFilteredBody")}
+                        </p>
+                        {onClearFilters && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-1"
+                            onClick={onClearFilters}
+                          >
+                            {t("submissions.table.emptyClearFilters")}
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Inbox
+                          aria-hidden="true"
+                          className="size-8 text-base-content/40"
+                        />
+                        <p className="font-medium">
+                          {t("submissions.table.emptyNoDataTitle")}
+                        </p>
+                        <p className="text-sm text-base-content/70">
+                          {t("submissions.table.emptyNoDataBody")}
+                        </p>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             )}
@@ -640,11 +758,11 @@ const SubmissionsTable = ({
                         )}
                       </td>
                       <td>
-                        <label
-                          className={`badge badge-soft ${scoreToBadgeType(score, rest["max-score"], passBar)}`}
-                        >
-                          {score}/{rest["max-score"]}
-                        </label>
+                        <ScoreBadge
+                          score={score}
+                          max={rest["max-score"]}
+                          thresholdFraction={passBar}
+                        />
                       </td>
                       <td>
                         <div className="flex flex-col gap-0.5">
@@ -774,9 +892,11 @@ const SubmissionsTable = ({
                   />
                 </td>
                 <td>
-                  <span className="badge badge-ghost whitespace-nowrap">
-                    {t("submissions.table.notSubmitted")}
-                  </span>
+                  <NonSubmitterStatusBadge
+                    username={student.username}
+                    isGroup={isGroup}
+                    acceptedUsernames={acceptedUsernames}
+                  />
                 </td>
                 <td>—</td>
                 <td>—</td>

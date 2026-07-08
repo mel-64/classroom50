@@ -33,6 +33,15 @@ export type { ModalProps, ModalSize } from "./Modal"
 export { Alert, alertToneClass } from "./Alert"
 export type { AlertProps, AlertTone } from "./Alert"
 
+export { CopyableCode } from "./CopyableCode"
+export type { CopyableCodeProps } from "./CopyableCode"
+
+export { StatCard } from "./StatCard"
+export type { StatCardProps } from "./StatCard"
+
+export { LabeledControl } from "./LabeledControl"
+export type { LabeledControlProps } from "./LabeledControl"
+
 export { Spinner } from "@/components/Spinner"
 
 export { cx } from "./cx"

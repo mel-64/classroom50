@@ -7,15 +7,21 @@ import {
   DEFAULT_FILTERS,
   acceptedRosterCount,
   acceptedUsernames,
+  applyStatusSelection,
+  buildScoresCsvRows,
   buildSectionLookup,
   computeStats,
   distinctSections,
   filterAndSortRows,
   filterNonSubmitters,
   hasAccepted,
+  nonSubmitterStatus,
   rowMatchesQuery,
   rowPassState,
+  scoreTone,
+  selectActiveWorkflowAction,
   showsNonSubmitters,
+  statusSelectValue,
   type SubmissionFilters,
 } from "./dashboard"
 
@@ -445,5 +451,206 @@ describe("filterNonSubmitters", () => {
       accepted,
     )
     expect(out.map((s) => s.username)).toEqual(["carol"])
+  })
+})
+
+describe("scoreTone", () => {
+  it("is ghost (ungraded) when there is no threshold", () => {
+    expect(scoreTone(8, 10, null)).toEqual({ ghost: true })
+  })
+
+  it("is ghost when max is zero or non-finite (ungraded)", () => {
+    expect(scoreTone(0, 0, 0.7)).toEqual({ ghost: true })
+    expect(scoreTone(5, NaN, 0.7)).toEqual({ ghost: true })
+  })
+
+  it("is success at or above the threshold, error below", () => {
+    expect(scoreTone(7, 10, 0.7)).toEqual({ tone: "success" })
+    expect(scoreTone(10, 10, 1)).toEqual({ tone: "success" })
+    expect(scoreTone(6, 10, 0.7)).toEqual({ tone: "error" })
+  })
+})
+
+describe("buildScoresCsvRows", () => {
+  it("orders submitters newest-first, then non-submitters, preserving the column contract", () => {
+    const older = row({
+      usernames: ["alice"],
+      datetime: "2026-06-20T10:00:00Z",
+      score: 8,
+      "max-score": 10,
+      submissionCount: 2,
+      late: true,
+      commit: "c1",
+      review: "r1",
+      release: "rel1",
+    })
+    const newer = row({
+      usernames: ["bob", "carol"],
+      datetime: "2026-06-21T10:00:00Z",
+      score: 9,
+      "max-score": 10,
+      submissionCount: 1,
+      late: false,
+      commit: "c2",
+      review: "r2",
+      release: "rel2",
+    })
+    const out = buildScoresCsvRows(
+      [older, newer],
+      [student({ username: "dave" })],
+    )
+
+    expect(out).toHaveLength(3)
+    // Newest submission first.
+    expect(out[0]).toEqual({
+      usernames: "bob, carol",
+      score: 9,
+      max_score: 10,
+      submissions: 1,
+      submitted_at: new Date("2026-06-21T10:00:00Z").toISOString(),
+      late: "no",
+      commit: "c2",
+      review: "r2",
+      release: "rel2",
+    })
+    expect(out[1].usernames).toBe("alice")
+    expect(out[1].late).toBe("yes")
+    // Non-submitter pinned last with a 0 score and blank fields.
+    expect(out[2]).toEqual({
+      usernames: "dave",
+      score: 0,
+      max_score: "",
+      submissions: 0,
+      submitted_at: "",
+      late: "",
+      commit: "",
+      review: "",
+      release: "",
+    })
+  })
+})
+
+describe("selectActiveWorkflowAction", () => {
+  const idle = { running: false, idle: true }
+  it("returns null when both actions are idle", () => {
+    expect(selectActiveWorkflowAction(idle, idle)).toBeNull()
+  })
+  it("prefers a running action, collect over regrade", () => {
+    expect(
+      selectActiveWorkflowAction(
+        { running: true, idle: false },
+        { running: true, idle: false },
+      ),
+    ).toBe("collect")
+    expect(
+      selectActiveWorkflowAction(idle, { running: true, idle: false }),
+    ).toBe("regrade")
+  })
+  it("falls back to the most recently non-idle action when neither runs", () => {
+    expect(
+      selectActiveWorkflowAction({ running: false, idle: false }, idle),
+    ).toBe("collect")
+    expect(
+      selectActiveWorkflowAction(idle, { running: false, idle: false }),
+    ).toBe("regrade")
+  })
+})
+
+describe("nonSubmitterStatus", () => {
+  it("is no-group for group assignments", () => {
+    expect(nonSubmitterStatus("alice", { isGroup: true })).toBe("no-group")
+    // Group ignores acceptance data entirely.
+    expect(
+      nonSubmitterStatus("alice", {
+        isGroup: true,
+        acceptedUsernames: new Set(["alice"]),
+      }),
+    ).toBe("no-group")
+  })
+
+  it("is not-submitted when acceptance data is unavailable (individual)", () => {
+    expect(nonSubmitterStatus("alice", { isGroup: false })).toBe(
+      "not-submitted",
+    )
+  })
+
+  it("distinguishes accepted-not-submitted from not-accepted", () => {
+    const accepted = new Set(["alice"])
+    expect(
+      nonSubmitterStatus("alice", {
+        isGroup: false,
+        acceptedUsernames: accepted,
+      }),
+    ).toBe("accepted-not-submitted")
+    expect(
+      nonSubmitterStatus("bob", {
+        isGroup: false,
+        acceptedUsernames: accepted,
+      }),
+    ).toBe("not-accepted")
+  })
+})
+
+describe("statusSelectValue / applyStatusSelection", () => {
+  it("maps filters to the combined value, submission taking precedence", () => {
+    expect(statusSelectValue(filters())).toBe("all")
+    expect(statusSelectValue(filters({ submission: "late" }))).toBe("late")
+    expect(statusSelectValue(filters({ accepted: "not-accepted" }))).toBe(
+      "not-accepted",
+    )
+    // Submission wins when both axes are set (a submitted row is accepted).
+    expect(
+      statusSelectValue(
+        filters({ submission: "submitted", accepted: "accepted" }),
+      ),
+    ).toBe("submitted")
+  })
+
+  it("round-trips every option through apply then read", () => {
+    for (const value of [
+      "all",
+      "submitted",
+      "on-time",
+      "late",
+      "not-submitted",
+      "accepted",
+      "not-accepted",
+    ] as const) {
+      expect(statusSelectValue(applyStatusSelection(filters(), value))).toBe(
+        value,
+      )
+    }
+  })
+
+  it("resets the other axis so the two stay mutually exclusive", () => {
+    const afterSubmission = applyStatusSelection(
+      filters({ accepted: "accepted" }),
+      "late",
+    )
+    expect(afterSubmission.submission).toBe("late")
+    expect(afterSubmission.accepted).toBe("all")
+
+    const afterAccepted = applyStatusSelection(
+      filters({ submission: "late" }),
+      "not-accepted",
+    )
+    expect(afterAccepted.accepted).toBe("not-accepted")
+    expect(afterAccepted.submission).toBe("all")
+
+    const cleared = applyStatusSelection(
+      filters({ submission: "late", accepted: "accepted" }),
+      "all",
+    )
+    expect(cleared.submission).toBe("all")
+    expect(cleared.accepted).toBe("all")
+  })
+
+  it("preserves the section and passing axes it doesn't own", () => {
+    const out = applyStatusSelection(
+      filters({ section: "P3", passing: "failing" }),
+      "submitted",
+    )
+    expect(out.section).toBe("P3")
+    expect(out.passing).toBe("failing")
   })
 })
