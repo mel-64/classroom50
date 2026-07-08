@@ -16,6 +16,7 @@ import type {
   GitHubWorkflowRun,
 } from "./types"
 import type { Assignment } from "@/types/classroom"
+import { CONFIG_REPO_MARKER_REL, ORG_GITHUB_DIR } from "@/skeleton/skeleton"
 import { GitHubAPIError } from "./errors"
 import {
   COLLECT_SCORES_WORKFLOW,
@@ -884,6 +885,31 @@ export type Classroom50OrgSummary = {
 
 type Classroom50Status =
   "ready" | "needs_setup" | "no_access" | "not_classroom50" | "unknown"
+
+const CONFIG_REPO_MARKER_PATH = `${ORG_GITHUB_DIR}/${CONFIG_REPO_MARKER_REL}`
+
+// True when a readable `classroom50` repo is a real config repo, not a name
+// collision (an org owning an unrelated repo named `classroom50`, e.g. this
+// project's own source). A clean 404 on the marker means collision; any other
+// error is transient/permission, so fail open — hiding a real teacher's org
+// behind a read blip is worse than briefly showing one extra.
+export async function verifyClassroom50ConfigRepo(
+  client: { request: (path: string) => Promise<unknown> },
+  org: string,
+): Promise<boolean> {
+  try {
+    await client.request(
+      `/repos/${org}/classroom50/contents/${CONFIG_REPO_MARKER_PATH}`,
+    )
+    return true
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
+      return false
+    }
+    return true
+  }
+}
+
 export async function getClassroom50OrgSummary(
   client: GitHubClient,
   membership: GitHubOrgMembership,
@@ -896,7 +922,9 @@ export async function getClassroom50OrgSummary(
   try {
     await client.request(`/repos/${org.login}/classroom50`)
     canAccessRepo = true
-    status = "ready"
+
+    const isConfigRepo = await verifyClassroom50ConfigRepo(client, org.login)
+    status = isConfigRepo ? "ready" : "not_classroom50"
 
     // The service-token read is deliberately NOT done here: this summary runs
     // for every org the user can see, so reading the token per org fans out an
