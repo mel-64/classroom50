@@ -26,6 +26,11 @@ import type {
 import { REPAIRABLE_CONCERNS, repairConcern } from "@/orgPolicy/repair"
 import type { CheckState } from "@/hooks/github/orgChecks"
 import SettingsSection from "./SettingsSection"
+import { UnenforcedDefaultsList } from "./UnenforcedDefaultsList"
+import {
+  toUnenforcedItems,
+  type UnenforcedDefaultItem,
+} from "./orgDefaultsStepData"
 import { CalloutDiv } from "@/lib/motionComponents"
 
 // Org policy audit pane: surfaces every policy concern with its live drift
@@ -80,12 +85,7 @@ function ConcernRow({
   canFix: boolean
   fixing: boolean
   onFix: (id: ConcernId) => void
-  driftedDetails?: {
-    field: string
-    desc: string
-    manualFix: string
-    pinned: boolean
-  }[]
+  driftedDetails?: UnenforcedDefaultItem[]
 }) {
   const { t } = useTranslation()
   const isDrifted = concern.verdict.state === "unenforced"
@@ -164,30 +164,7 @@ function ConcernRow({
             </a>
             {showFix ? t("orgSettings.audit.orUseFixIt") : ""}:
           </p>
-          <ul className="mt-1 space-y-1">
-            {driftedDetails.map((d) => (
-              <li key={d.field} className="flex items-start gap-2 text-xs">
-                <TriangleAlert
-                  aria-hidden="true"
-                  className="mt-0.5 size-3.5 shrink-0 text-error"
-                />
-                <span className="text-base-content/70">
-                  {d.desc}
-                  {d.manualFix && (
-                    <span className="text-base-content/70">
-                      {" "}
-                      — {d.manualFix}
-                    </span>
-                  )}
-                  {d.pinned && (
-                    <span className="ml-1 badge badge-ghost badge-xs align-middle">
-                      {t("orgSettings.audit.managedByEnterprise")}
-                    </span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <UnenforcedDefaultsList items={driftedDetails} />
         </div>
       )}
     </div>
@@ -250,12 +227,7 @@ function AuditBody({
             onFix={onFix}
             driftedDetails={
               c.id === "orgDefaults"
-                ? report.unenforcedDefaults.map((s) => ({
-                    field: s.field,
-                    desc: s.desc,
-                    manualFix: s.manualFix,
-                    pinned: enterprisePinned.has(s.field),
-                  }))
+                ? toUnenforcedItems(report.unenforcedDefaults, enterprisePinned)
                 : undefined
             }
           />
@@ -365,10 +337,8 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
   const { data: membership } = useGetOrgMembership(org)
   const isOwner = membership?.role === "admin"
 
-  // Member-default fields a Fix it / re-run wrote but that didn't stick on
-  // read-back — silently overridden by an enterprise policy (GitHub returns 200
-  // but ignores the change). Surfaced as "Managed by enterprise" so we stop
-  // offering a Fix it that can't work.
+  // Fields a Fix it / re-run wrote that didn't stick on read-back; we stop
+  // offering a Fix it for them since it can't work. (See OrgDefaultsStepData.)
   const [enterprisePinned, setEnterprisePinned] = useState<Set<string>>(
     new Set(),
   )
