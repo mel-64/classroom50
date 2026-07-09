@@ -13,6 +13,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import Breadcrumb from "@/components/breadcrumb"
 import PageHeader from "@/components/PageHeader"
 import MissingParams from "@/components/MissingParams"
+import { logger } from "@/lib/logger"
 import RequireTeacher from "@/components/RequireTeacher"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
@@ -20,6 +21,8 @@ import type {
   CreateClassroomInput,
   CreateClassroomResult,
 } from "@/api/mutations/classrooms"
+
+const log = logger.scope("CreateClassroomPage")
 
 const CreateClassroomPage = () => {
   const { t } = useTranslation()
@@ -40,18 +43,13 @@ const CreateClassroomPage = () => {
     mutationFn: (input) => createClassroomFilesWithConflictRetry(client, input),
     onError: (err) => {
       if (err instanceof GitHubAPIError) {
-        switch (err.status) {
-          case 409:
-            break
-          case 404:
-            break
-          case 422:
-            break
-          default:
-            break
-        }
+        // Console-only trace (MutationCache already recorded this failure).
+        log.error("create classroom failed", {
+          status: err.status,
+          requestId: err.requestId,
+        })
       } else {
-        console.error("non-GitHub API error:", err)
+        log.error("non-GitHub API error", { err, record: true })
       }
       notify({
         tone: "error",

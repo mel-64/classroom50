@@ -1,4 +1,9 @@
 import { GitHubAPIError, readGitHubRateLimitHeaders } from "./errors"
+import { logger } from "@/lib/logger"
+import { LOG_SCOPE_GITHUB_CLIENT } from "@/lib/logScopes"
+import { countApiCall, publishRateLimit } from "@/lib/diagnostics/rateLimit"
+
+const log = logger.scope(LOG_SCOPE_GITHUB_CLIENT)
 
 // Bound every request so a half-open GitHub connection can't pin a poll or
 // mutation forever (React Query imposes no request timeout; the banner uses
@@ -45,6 +50,10 @@ export function createGitHubClient(args: {
     path: string,
     options: GitHubRequestOptions = { method: "GET" },
   ): Promise<Response> {
+    // Count every outbound call at the single choke point (covers request +
+    // requestRaw) — before the fetch, so a thrown/timed-out call still counts.
+    countApiCall()
+
     const url = path.startsWith("http")
       ? path
       : `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`
@@ -70,14 +79,31 @@ export function createGitHubClient(args: {
         ? AbortSignal.any([options.signal, timeoutSignal])
         : (options.signal ?? timeoutSignal)
 
-    const res = await fetch(url, {
-      method: options.method ?? "GET",
-      headers,
-      body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal,
-      cache: options.method === "GET" ? "no-store" : undefined,
-    })
+    const method = options.method ?? "GET"
+    log.debug("request", { method, path })
+
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal,
+        cache: options.method === "GET" ? "no-store" : undefined,
+      })
+    } catch (err) {
+      // A rejected fetch is an abort (caller cancel or our timeout) or a network
+      // failure. Distinguish so a timeout doesn't read as a mystery error; never
+      // log the token/headers/body — just method + path.
+      const aborted = err instanceof DOMException && err.name === "AbortError"
+      if (aborted) {
+        log.debug("request aborted", { method, path })
+      } else {
+        log.warn("request network error", { method, path })
+      }
+      throw err
+    }
 
     // Report the token's live state to the provider before any throw, so the
     // 401/403 revocation path still surfaces. `scopes` is the X-OAuth-Scopes
@@ -90,9 +116,9 @@ export function createGitHubClient(args: {
     })
 
     const rateLimit = readGitHubRateLimitHeaders(res)
-    if (import.meta.env.DEV) {
-      console.warn("rate limit headers", rateLimit)
-    }
+    // Publish to the dev rate-limit overlay instead of logging per-response
+    // (that flooded the console). No-op in prod (nothing subscribes).
+    publishRateLimit(rateLimit)
 
     if (!res.ok) {
       let body: unknown
@@ -104,10 +130,6 @@ export function createGitHubClient(args: {
         body = text
       }
 
-      if (import.meta.env.DEV) {
-        console.warn("body when request fail", body)
-      }
-
       const message =
         typeof body === "object" &&
         body !== null &&
@@ -115,6 +137,15 @@ export function createGitHubClient(args: {
         typeof body.message === "string"
           ? body.message
           : `GitHub API request failed with ${res.status}`
+
+      // Trace the failure with non-sensitive fields only (never the body): the
+      // status, the endpoint, and GitHub's request id for support correlation.
+      log.debug("api error", {
+        method,
+        path,
+        status: res.status,
+        requestId: res.headers.get("x-github-request-id"),
+      })
 
       throw new GitHubAPIError({
         status: res.status,
@@ -129,6 +160,7 @@ export function createGitHubClient(args: {
       })
     }
 
+    log.debug("response", { method, path, status: res.status })
     return res
   }
 

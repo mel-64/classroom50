@@ -20,6 +20,7 @@ import App from "./App"
 import { appVersion, formatAppVersion } from "./version"
 import { installDiagnosticsHandlers } from "./lib/diagnostics/globalHandlers"
 import { recordError } from "./lib/activity/activityStore"
+import { RateLimitOverlay } from "./components/dev/RateLimitOverlay"
 
 // Record every failed mutation as session activity. Mutations are the app's
 // real write operations (create/delete/dispatch/enroll), so a rejection here is
@@ -40,8 +41,9 @@ installDiagnosticsHandlers()
 
 // Make the deployed release identifiable from the browser console (a static SPA
 // has no version in the URL or a server header). Deliberate release diagnostic,
-// not stray debug logging — hence the no-console exception.
-// eslint-disable-next-line no-console
+// not stray debug logging — it must print even in prod, so it stays a direct
+// console call (allowed for main.tsx in eslint.config.js) rather than going
+// through the DEV-gated logger.
 console.info(
   `Classroom 50 — ${formatAppVersion()} — built ${appVersion.buildDate}`,
 )
@@ -60,7 +62,10 @@ createRoot(document.getElementById("root")!).render(
               </NotificationProvider>
             </ActionActivityProvider>
             {import.meta.env.DEV && (
-              <ReactQueryDevtools initialIsOpen={false} />
+              <>
+                <ReactQueryDevtools initialIsOpen={false} />
+                <RateLimitOverlay />
+              </>
             )}
           </GitHubClientProviderFromAuth>
         </GitHubAuthProvider>

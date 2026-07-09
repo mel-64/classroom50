@@ -13,6 +13,9 @@ import { AnimatePresence, motion } from "motion/react"
 import { toastVariants } from "@/lib/motion"
 import { Button, alertToneClass } from "@/components/ui"
 import { recordErrorToast } from "@/lib/activity/activityStore"
+import { logger } from "@/lib/logger"
+
+const log = logger.scope("context:notifications")
 
 export type ToastTone = "info" | "success" | "warning" | "error"
 
@@ -84,6 +87,13 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       // double-listed.
       if (tone === "error" && typeof message === "string") {
         recordErrorToast(message)
+      } else {
+        // Non-error toasts: trace at debug so a shown notification is visible
+        // in the log.
+        log.debug("toast shown", {
+          tone,
+          message: typeof message === "string" ? message : undefined,
+        })
       }
 
       // A keyed toast reuses its id so a replace updates in place; otherwise a

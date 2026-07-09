@@ -1,3 +1,14 @@
+import { logger } from "@/lib/logger"
+import { LOG_SCOPE_GITHUB_CLIENT } from "@/lib/logScopes"
+
+// Lazy so this module can be imported by logger.ts's dependency graph without a
+// top-level circular-init hazard: logger.ts -> activityStore.ts -> errors.ts,
+// so at errors.ts eval time the `logger` export is still undefined. Verified:
+// an eager `logger.scope(...)` here throws "Cannot read properties of undefined
+// (reading 'scope')" on import. Keep lazy.
+let logInstance: ReturnType<typeof logger.scope> | null = null
+const log = () => (logInstance ??= logger.scope(LOG_SCOPE_GITHUB_CLIENT))
+
 export type GitHubRateLimit = {
   limit: number | null
   remaining: number | null
@@ -6,7 +17,6 @@ export type GitHubRateLimit = {
   resource: string | null
   retryAfter: number | null
 }
-
 export class GitHubAPIError extends Error {
   status: number
   url: string
@@ -140,6 +150,7 @@ export function parseSsoAuthorizationUrl(
     if (url.hostname !== "github.com") return null
     return url.toString()
   } catch {
+    log().debug("unparseable SSO authorization URL")
     return null
   }
 }
@@ -156,9 +167,16 @@ export function retryTransientGitHubError(
     error instanceof GitHubAPIError &&
     isDefinitiveGitHubStatus(error.status)
   ) {
+    log().debug("retry suppressed (definitive status)", {
+      status: error.status,
+    })
     return false
   }
-  return failureCount < 2
+  const willRetry = failureCount < 2
+  if (willRetry) {
+    log().debug("retrying transient error", { failureCount })
+  }
+  return willRetry
 }
 
 // Statuses that are DEFINITIVE for a GitHub read — retrying can't change the

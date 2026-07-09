@@ -18,12 +18,15 @@ import { useActionActivityRegistry } from "@/context/actions/ActionActivityProvi
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { githubKeys } from "@/hooks/github/queries"
+import { logger } from "@/lib/logger"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import type {
   CreateAssignmentInput,
   CreateAssignmentResult,
 } from "@/api/mutations/assignments"
+
+const log = logger.scope("CreateAssignmentPage")
 
 const CreateAssignmentPage = () => {
   const { t } = useTranslation()
@@ -50,18 +53,13 @@ const CreateAssignmentPage = () => {
     mutationFn: (input) => createAssignment(client, input),
     onError: (err) => {
       if (err instanceof GitHubAPIError) {
-        switch (err.status) {
-          case 409:
-            break
-          case 404:
-            break
-          case 422:
-            break
-          default:
-            break
-        }
+        // Console-only trace (MutationCache already recorded this failure).
+        log.error("create assignment failed", {
+          status: err.status,
+          requestId: err.requestId,
+        })
       } else {
-        console.error("non-GitHub API error:", err)
+        log.error("non-GitHub API error", { err, record: true })
       }
       setErrorMessage(err.message)
       window.scrollTo({ top: 0, behavior: "smooth" })

@@ -12,6 +12,9 @@ import {
   type ClassifyResult,
   type MemberDefaultSetting,
 } from "@/orgPolicy/desiredState"
+import { logger } from "@/lib/logger"
+
+const log = logger.scope("github:orgChecks")
 
 export const CONFIG_REPO = "classroom50"
 
@@ -219,6 +222,7 @@ export async function checkWorkflowPermissions(
         }
       }
     } catch {
+      log.warn("org workflow-permissions policy unreadable, treating as drift")
       // Org policy unreadable — treat the repo "read" as drift.
     }
 
@@ -275,7 +279,7 @@ async function verifyOrgDefaults(
     }
   } catch (err) {
     // Read-back failed — don't manufacture success; report unverified.
-    console.warn(`${org}: org member-default read-back failed`, err)
+    log.warn("org member-default read-back failed", { org, err })
     return { ok: false, verified: false, unenforced: [] }
   }
 }

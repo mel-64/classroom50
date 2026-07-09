@@ -2,6 +2,10 @@ import { useQuery } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { jsonFileQuery } from "./github/queries"
+import { logger } from "@/lib/logger"
+import { LOG_SCOPE_QUERIES } from "@/lib/logScopes"
+
+const log = logger.scope(LOG_SCOPE_QUERIES)
 
 // Canonical <classroom>/scores.json shape (classroom50/scores/v1), written by
 // the CLI's collect_scores.py — the GUI is a pure consumer. Keyed by slug →
@@ -93,6 +97,9 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
   // A hand-edited or partial scores.json bucket can lack `entries`; degrade to
   // no rows instead of throwing in the react-query select (which would blank
   // the whole submissions view).
+  if (bucket && !Array.isArray(bucket.entries)) {
+    log.warn("scores.json bucket has no entries array; degrading to no rows")
+  }
   const entries = Array.isArray(bucket?.entries) ? bucket.entries : []
   return entries
     .filter(

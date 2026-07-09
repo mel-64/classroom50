@@ -34,6 +34,9 @@ import { mapWithConcurrency } from "@/util/concurrency"
 import { escapeCsvFormulaInjection } from "@/util/csv"
 import { prefixCommit } from "@/util/commit"
 import { type Student } from "@/types/classroom"
+import { logger } from "@/lib/logger"
+
+const log = logger.scope("mutations:students")
 
 // Slug is authoritative in classroom.json: GitHub may assign a non-derived slug
 // on name collision. Only derive on 404/missing team block; propagate transient
@@ -123,7 +126,7 @@ async function tryAddUserToTeam(
     })
     return { ok: true }
   } catch (err) {
-    console.error(`team add failed (${context}):`, err)
+    log.error(`team add failed (${context})`, { err })
     return { ok: false, detail: getErrorMessage(err) }
   }
 }
@@ -444,7 +447,7 @@ export async function inviteByEmail(
           `If they should be on this classroom, add them by GitHub username.`,
       }
     }
-    console.error("org email invite failed:", err)
+    log.error("org email invite failed", { err })
     return {
       inviteWarning:
         `Sending the organization invite to ${normalizedEmail} failed ` +
@@ -473,6 +476,7 @@ export async function enrollStudentInClassroom(
   input: AddStudentToClassroomInput,
 ) {
   const { org, classroom } = input
+  log.info("enroll student: started", { org, classroom })
   await assertClassroomNotArchived(client, org, classroom)
   // Resolve the classroom team (slug + id) once, concurrently with the commit.
   // Can reject on a transient read; attach a catch to avoid an unhandled
@@ -488,6 +492,11 @@ export async function enrollStudentInClassroom(
 
   const result = await addStudentToClassroomWithConflictRetry(client, {
     ...input,
+    enrolled: alreadyMember,
+  })
+  log.info("enroll student: roster row committed", {
+    org,
+    classroom,
     enrolled: alreadyMember,
   })
 
@@ -511,7 +520,7 @@ export async function enrollStudentInClassroom(
         teamIds: teamId ? [teamId] : undefined,
       })
     } catch (err) {
-      console.error("org invite failed (student enrolled):", err)
+      log.error("org invite failed (student enrolled)", { err })
       const detail = getErrorMessage(err)
       warnings.push(
         `${result.student.username} was added to the roster, but sending their ` +
@@ -533,7 +542,7 @@ export async function enrollStudentInClassroom(
     if (!added.ok) enrollTeamFailed = added.detail
   } catch (err) {
     // Slug resolution failed (not the add itself).
-    console.error("team resolve failed (student enrolled):", err)
+    log.error("team resolve failed (student enrolled)", { err })
     enrollTeamFailed = getErrorMessage(err)
   }
   if (enrollTeamFailed) {
@@ -544,6 +553,11 @@ export async function enrollStudentInClassroom(
     )
   }
 
+  log.info("enroll student: completed", {
+    org,
+    classroom,
+    warnings: warnings.length,
+  })
   return {
     ...result,
     // Whether the student is now an active org member (team-added directly, no
@@ -622,6 +636,12 @@ export async function addStudentsToClassroom(
   if (normalizedRows.length === 0) {
     throw new Error("At least one GitHub username is required")
   }
+
+  log.info("bulk add students: started", {
+    org: input.org,
+    classroom: input.classroom,
+    total: normalizedRows.length,
+  })
 
   await assertClassroomNotArchived(client, input.org, input.classroom)
 
@@ -722,6 +742,10 @@ export async function addStudentsToClassroom(
       existingGithubIds.add(student.github_id)
       addedStudents.push(student)
     } catch (err) {
+      log.debug("bulk add: user lookup failed, skipping row", {
+        username,
+        err,
+      })
       skippedStudents.push({
         username,
         reason: "not_found",
@@ -784,6 +808,13 @@ export async function addStudentsToClassroom(
     message: "students.csv updated.",
   })
 
+  log.info("bulk add students: completed", {
+    org: input.org,
+    classroom: input.classroom,
+    added: addedStudents.length,
+    skipped: skippedStudents.length,
+  })
+
   return {
     previousCommitSha: ref.object.sha,
     baseTreeSha: commit.tree.sha,
@@ -826,6 +857,7 @@ export async function syncRosterFromTeam(
   input: { org: string; classroom: string },
 ): Promise<SyncRosterFromTeamResult> {
   const { org, classroom } = input
+  log.info("sync roster from team: started", { org, classroom })
   await assertClassroomNotArchived(client, org, classroom)
 
   const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
@@ -870,6 +902,10 @@ export async function syncRosterFromTeam(
     )
 
     if (missing.length === 0) {
+      log.info("sync roster from team: completed (up to date)", {
+        org,
+        classroom,
+      })
       return { addedUsernames: [], noop: true }
     }
 
@@ -916,6 +952,11 @@ export async function syncRosterFromTeam(
 
     await updateRef(client, org, newCommit.sha)
 
+    log.info("sync roster from team: completed", {
+      org,
+      classroom,
+      added: addedRows.length,
+    })
     return {
       addedUsernames: addedRows.map((r) => r.username),
       noop: false,
@@ -959,6 +1000,11 @@ export async function reconcileTeamFromOrgMembers(
   input: ReconcileTeamInput,
 ): Promise<ReconcileTeamResult> {
   const { org, classroom, usernames } = input
+  log.info("reconcile team from org members: started", {
+    org,
+    classroom,
+    candidates: usernames.length,
+  })
   await assertClassroomNotArchived(client, org, classroom)
 
   const added: string[] = []
@@ -1000,6 +1046,13 @@ export async function reconcileTeamFromOrgMembers(
     else failed.push({ login, message: result.detail })
   }
 
+  log.info("reconcile team from org members: completed", {
+    org,
+    classroom,
+    added: added.length,
+    skipped: skipped.length,
+    failed: failed.length,
+  })
   return { added, skipped, failed }
 }
 
@@ -1152,6 +1205,12 @@ export async function bulkEnrollStudentsInClassroom(
 
   const total = (bulkInput.rows ?? bulkInput.usernames ?? []).length
 
+  log.info("bulk enroll: started", {
+    org: bulkInput.org,
+    classroom: bulkInput.classroom,
+    total,
+  })
+
   onProgress?.({
     processed: 0,
     total,
@@ -1176,6 +1235,11 @@ export async function bulkEnrollStudentsInClassroom(
       bulkInput.classroom,
     )
   } catch (err) {
+    log.warn("bulk enroll: classroom team read failed, team adds will defer", {
+      org: bulkInput.org,
+      classroom: bulkInput.classroom,
+      err,
+    })
     teamSlugError = getErrorMessage(err)
   }
 
@@ -1251,6 +1315,15 @@ export async function bulkEnrollStudentsInClassroom(
     message: "Import complete",
   })
 
+  log.info("bulk enroll: completed", {
+    org: bulkInput.org,
+    classroom: bulkInput.classroom,
+    added: addResult.addedStudents.length,
+    skipped: addResult.skippedStudents.length,
+    notInOrg: notInOrg.length,
+    teamFailed: teamResults.filter((r) => r.status === "failed").length,
+  })
+
   return {
     ...addResult,
     teamResults,
@@ -1285,6 +1358,7 @@ export async function unenrollStudent(
   input: UnenrollStudentInput,
 ) {
   const { org, classroom, student: toRemoveStudent } = input
+  log.info("unenroll student: started", { org, classroom })
   await assertClassroomNotArchived(client, org, classroom)
   const normalizedUsername = toRemoveStudent?.username.trim()
   const normalizedEmail = toRemoveStudent?.email?.trim()
@@ -1376,7 +1450,7 @@ export async function unenrollStudent(
         username: normalizedUsername,
       })
     } catch (err) {
-      console.error("team removal failed (student unenrolled):", err)
+      log.error("team removal failed (student unenrolled)", { err })
       const detail = getErrorMessage(err)
       warnings.push(
         `${toRemoveStudent.username} was removed from the roster, but removing ` +
@@ -1409,7 +1483,7 @@ export async function unenrollStudent(
     try {
       await removeOrgMembership(client, { org, username: normalizedUsername })
     } catch (err) {
-      console.error("org invite cancellation failed (student unenrolled):", err)
+      log.error("org invite cancellation failed (student unenrolled)", { err })
       const detail = getErrorMessage(err)
       warnings.push(
         `${toRemoveStudent.username} was removed from the roster, but ` +
@@ -1419,6 +1493,11 @@ export async function unenrollStudent(
     }
   }
 
+  log.info("unenroll student: completed", {
+    org,
+    classroom,
+    warnings: warnings.length,
+  })
   return {
     previousCommitSha: ref.object.sha,
     baseTreeSha: commit.tree.sha,
@@ -1478,6 +1557,8 @@ export async function bulkUnenrollStudents(
   if (targets.length === 0) {
     return { removed: [], notFound: [], warnings: [] }
   }
+
+  log.info("bulk unenroll: started", { org, classroom, total: targets.length })
 
   // Same per-row match predicate as unenrollStudent (shared matchesRosterRow):
   // username/github_id.
@@ -1560,7 +1641,12 @@ export async function bulkUnenrollStudents(
   let teamSlug: string | undefined
   try {
     teamSlug = await teamSlugPromise
-  } catch {
+  } catch (err) {
+    log.warn("bulk unenroll: classroom team read failed, skipping team drops", {
+      org,
+      classroom,
+      err,
+    })
     teamSlug = undefined
   }
 
@@ -1579,6 +1665,7 @@ export async function bulkUnenrollStudents(
       try {
         await removeUserFromTeam(client, { org, teamSlug, username })
       } catch (err) {
+        log.error("team removal failed (student bulk-unenrolled)", { err })
         warnings.push(
           `${username} was removed from the roster, but removing them from the ` +
             `classroom team failed (${getErrorMessage(err)}); they may keep read ` +
@@ -1596,6 +1683,12 @@ export async function bulkUnenrollStudents(
         try {
           await removeOrgMembership(client, { org, username })
         } catch (err) {
+          log.error(
+            "org invite cancellation failed (student bulk-unenrolled)",
+            {
+              err,
+            },
+          )
           warnings.push(
             `${username} was removed from the roster, but cancelling their ` +
               `pending org invite failed (${getErrorMessage(err)}); retry from ` +
@@ -1615,6 +1708,14 @@ export async function bulkUnenrollStudents(
     processed: removed.length,
     total: removed.length,
     message: "Done",
+  })
+
+  log.info("bulk unenroll: completed", {
+    org,
+    classroom,
+    removed: removed.length,
+    notFound: notFound.length,
+    warnings: warnings.length,
   })
 
   return { removed, notFound, warnings, newCommitSha }

@@ -29,6 +29,10 @@ import { decodeBase64Utf8 } from "@/util/github"
 import { classroomPagesSegment } from "@/util/secret"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
+import { logger } from "@/lib/logger"
+import { LOG_SCOPE_QUERIES } from "@/lib/logScopes"
+
+const log = logger.scope(LOG_SCOPE_QUERIES)
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -326,6 +330,7 @@ export async function withFreshRepoRetry<T>(
       if (!shouldRetry(err) || attempt === attempts) {
         throw err
       }
+      log.debug("fresh-repo lag, retrying read", { attempt })
       await sleep(baseDelayMs * backoffFactor ** (attempt - 1))
     }
   }
@@ -701,6 +706,12 @@ export async function paginateAll<T>(
     page++
   }
 
+  if (page > MAX_PAGES) {
+    log.warn("pagination hit MAX_PAGES cap, results may be truncated", {
+      maxPages: MAX_PAGES,
+    })
+  }
+
   return all
 }
 
@@ -841,7 +852,8 @@ export async function orgPublishesClassroom50Pages(
     // page served with 200).
     const data = (await res.json()) as { classrooms?: unknown }
     return Array.isArray(data?.classrooms) ? "yes" : "no"
-  } catch {
+  } catch (err) {
+    log.warn("org Pages probe failed (indeterminate)", { org, err })
     // Network failure, timeout, DNS, CORS -> transient; never collapse to a
     // definitive "no" (that would hide a genuinely-enrolled student's org).
     return "indeterminate"
@@ -943,6 +955,7 @@ export async function verifyClassroom50ConfigRepo(
     if (error instanceof GitHubAPIError && error.status === 404) {
       return false
     }
+    log.warn("config-repo marker read failed, failing open", { org, error })
     return true
   }
 }
