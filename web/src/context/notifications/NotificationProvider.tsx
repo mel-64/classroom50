@@ -12,6 +12,7 @@ import { X } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { toastVariants } from "@/lib/motion"
 import { Button, alertToneClass } from "@/components/ui"
+import { recordErrorToast } from "@/lib/activity/activityStore"
 
 export type ToastTone = "info" | "success" | "warning" | "error"
 
@@ -75,6 +76,16 @@ export function NotificationProvider({ children }: PropsWithChildren) {
 
   const notify = useCallback(
     ({ tone = "info", message, key, durationMs }: NotifyInput): string => {
+      // Record error toasts as session activity — a deliberate error toast is,
+      // by construction, a real failure the app chose to show. Only string
+      // messages are recorded (JSX carries no clean label). recordErrorToast
+      // suppresses the toast when a structural error (MutationCache/global
+      // handler) for the same failure was just recorded, so one error isn't
+      // double-listed.
+      if (tone === "error" && typeof message === "string") {
+        recordErrorToast(message)
+      }
+
       // A keyed toast reuses its id so a replace updates in place; otherwise a
       // fresh id stacks a new toast.
       const id = key ?? nextId()

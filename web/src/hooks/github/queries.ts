@@ -5,6 +5,7 @@ import Papa from "papaparse"
 import type { GitHubClient } from "./client"
 import type {
   GitHubBranchRef,
+  GitHubCommit,
   GitHubCommitRef,
   GitHubFileListing,
   GitHubOrgInvitation,
@@ -74,6 +75,9 @@ export const githubKeys = {
   branchRef: (org: string) => [...githubKeys.all, "branchRef", org] as const,
   commitTree: (org: string, branchSha: string) =>
     [...githubKeys.all, "commitRef", org, branchSha] as const,
+
+  configCommits: (org: string, perPage: number) =>
+    [...githubKeys.all, "config-commits", org, perPage] as const,
 
   rawFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "raw-file", owner, repo, path, ref ?? null] as const,
@@ -493,6 +497,39 @@ export function releasesQuery(
     },
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+// The most-recent `perPage` commits of the classroom50 config-repo history,
+// newest-first — the audit log behind the org Activity view. Each GUI write is a
+// structured "[Classroom 50] <verb> <target>" commit (see util/commit.ts), so
+// the messages read as an audit trail as-is. A window (not page) model so the
+// Activity view's "Load older" just grows perPage and the single query holds the
+// whole accumulated list. A missing/uninitialized repo 404s -> [] so a fresh org
+// degrades to an empty section rather than an error.
+export function configCommitsQuery(
+  client: GitHubClient,
+  org: string | undefined,
+  perPage = 30,
+) {
+  return queryOptions({
+    queryKey: githubKeys.configCommits(org ?? "", perPage),
+    queryFn: async ({ signal }): Promise<GitHubCommit[]> => {
+      try {
+        return await client.request<GitHubCommit[]>(
+          `/repos/${encodeURIComponent(
+            org ?? "",
+          )}/classroom50/commits?per_page=${perPage}`,
+          { method: "GET", signal },
+        )
+      } catch (err) {
+        if (err instanceof GitHubAPIError && err.status === 404) return []
+        throw err
+      }
+    },
+    enabled: Boolean(org),
+    staleTime: 60 * 1000,
     retry: false,
   })
 }

@@ -66,6 +66,7 @@
     "myAssignments": "My Assignments",
     "published": "Published",
     "members": "Members",
+    "activity": "Activity",
     "organizations": "Organizations",
     "untitledCourse": "Untitled Course",
     "userFallback": "User",
@@ -97,7 +98,12 @@
     "aboutReportIssue": "Report an issue",
     "aboutReportIssueHint": "Found a bug or have a feature request?",
     "aboutAskQuestion": "Ask a question",
-    "aboutAskQuestionHint": "Get help from the community."
+    "aboutAskQuestionHint": "Get help from the community.",
+    "aboutDiagnosticsTitle": "Diagnostics",
+    "aboutDiagnosticsHint": "Copy technical details to include in a bug report or support thread. No data is sent anywhere; it only fills your clipboard.",
+    "aboutDiagnosticsShow": "Show diagnostics",
+    "aboutDiagnosticsCopy": "Copy diagnostics",
+    "aboutDiagnosticsCopied": "Copied"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -170,7 +176,8 @@
     "newClassroom": "New Classroom",
     "classes": "Classrooms",
     "mySubmission": "My Submission",
-    "submissions": "Submissions"
+    "submissions": "Submissions",
+    "activity": "Activity"
   },
   "students": {
     "addTitle": "Add Student",
@@ -1570,6 +1577,64 @@
       "releasesIntro": "Each submission opens its graded release on GitHub, with your score and per-test results.",
       "fallbackTitle": "Submission",
       "missingParams": "Missing course or assignment information."
+    }
+  },
+  "orgActivity": {
+    "heading": "Activity",
+    "subtitle": "Config changes, workflow runs, and this session's errors for the organization, newest first.",
+    "showDiagnostics": "Show diagnostics",
+    "diagnostics": {
+      "title": "Diagnostics",
+      "description": "Technical details you can paste into a bug report or support thread. Nothing is sent anywhere — this only fills your clipboard.",
+      "copy": "Copy to clipboard",
+      "copied": "Copied"
+    },
+    "clear": "Clear",
+    "exportCsv": "Export CSV",
+    "searchPlaceholder": "Search activity...",
+    "searchLabel": "Search activity",
+    "loading": "Loading activity...",
+    "loadOlder": "Load older",
+    "partialError": "Some activity couldn't be loaded. Showing what's available.",
+    "filters": {
+      "source": "Source:",
+      "type": "Type:",
+      "allSources": "All sources",
+      "allTypes": "All types"
+    },
+    "clearFilters": "Clear",
+    "source": {
+      "commit": "Config changes",
+      "run": "Workflow runs",
+      "session": "This session"
+    },
+    "type": {
+      "assignment": "Assignment",
+      "classroom": "Classroom",
+      "student": "Student",
+      "scores": "Scores",
+      "config": "Config",
+      "run": "Workflow run",
+      "error": "Error",
+      "action": "Action"
+    },
+    "status": {
+      "ok": "Completed",
+      "error": "Failed",
+      "running": "Running",
+      "info": ""
+    },
+    "detail": {
+      "source": "at {{location}}",
+      "status": "HTTP {{code}}"
+    },
+    "empty": {
+      "title": "No activity yet",
+      "body": "Config changes, workflow runs, and this session's errors will appear here."
+    },
+    "noMatch": {
+      "title": "No matching activity",
+      "body": "Try a different search or clear the filters."
     }
   },
   "orgMembers": {

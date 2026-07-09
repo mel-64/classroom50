@@ -18,6 +18,7 @@ import {
   Languages,
   Info,
   BookOpen,
+  Activity,
 } from "lucide-react"
 import {
   Link,
@@ -46,6 +47,7 @@ import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import { studentRepoName } from "@/util/studentRepo"
 import { githubOrgUrl } from "@/util/orgUrl"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
+import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import { useTheme } from "@/hooks/useTheme"
 import { LanguageDialog } from "@/components/LanguageDialog"
 import { AboutDialog } from "@/components/AboutDialog"
@@ -621,6 +623,10 @@ export const SidebarFooter = () => {
     shouldThrow: false,
   })
   const { isStudent, isLoading: roleLoading } = useCourseTeacherAccess(org)
+  // Org plan for the About-dialog diagnostics snapshot. Cached and shared with
+  // the setup/audit panes; `plan` is only visible to org owners, so this is
+  // often undefined (the snapshot then reports "unknown" with a reason).
+  const { data: orgPlanDetails } = useGetOrgPlanDetails(org)
   // Precise classroom role (Instructor vs TA); respects the "view as" preview.
   // `actualRole` is the real (preview-independent) role.
   const {
@@ -960,7 +966,12 @@ export const SidebarFooter = () => {
       )}
 
       {createPortal(
-        <AboutDialog ref={aboutDialogRef} titleId={aboutDialogTitleId} />,
+        <AboutDialog
+          ref={aboutDialogRef}
+          titleId={aboutDialogTitleId}
+          org={org}
+          planName={orgPlanDetails?.plan?.name}
+        />,
         document.body,
       )}
     </>
@@ -1017,6 +1028,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
   const onSettings = settings || selected === "settings"
   const onPublished = selected === "published"
   const onMembers = selected === "members"
+  const onActivity = selected === "activity"
   if (!org) return null
 
   const classesLabel = showTeacherUi
@@ -1036,7 +1048,9 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
               <SidebarItemBody
                 label={classesLabel}
                 icon={<BookText aria-hidden="true" />}
-                active={!onSettings && !onPublished && !onMembers}
+                active={
+                  !onSettings && !onPublished && !onMembers && !onActivity
+                }
               />
             </Link>
           </Tip>
@@ -1059,6 +1073,17 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
                 label={t("nav.members")}
                 icon={<UsersRound aria-hidden="true" />}
                 active={onMembers}
+              />
+            </Link>
+          </Tip>
+        )}
+        {showTeacherUi && isOwner && (
+          <Tip label={t("nav.activity")}>
+            <Link to="/$org/activity" params={{ org }}>
+              <SidebarItemBody
+                label={t("nav.activity")}
+                icon={<Activity aria-hidden="true" />}
+                active={onActivity}
               />
             </Link>
           </Tip>
