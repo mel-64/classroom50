@@ -16,6 +16,7 @@ import {
   setOrgMembershipRole,
   staffTeamName,
   updateRef,
+  type GitTreeEntry,
 } from "@/hooks/github/mutations"
 import {
   withGitConflictRetry,
@@ -24,7 +25,7 @@ import {
 } from "./classrooms"
 import {
   getRawFile,
-  getRawFileWithFallback,
+  getRawFileWithFallbackSource,
   getUser,
   listAllOrgMembers,
   listTeamInvitations,
@@ -62,6 +63,29 @@ import { STAFF_ROLES, type StaffRole, type Student } from "@/types/classroom"
 import { logger } from "@/lib/logger"
 
 const log = logger.scope("mutations:students")
+
+// Git-tree entries for a roster write: the roster.csv blob, plus — when
+// `fromLegacy` (from getRawFileWithFallbackSource) — a delete of the legacy
+// path, so a first edit of an un-migrated classroom converges it in one commit
+// (matching `gh teacher roster migrate`) instead of leaving a stale copy.
+function rosterWriteTree(
+  classroom: string,
+  csv: string,
+  fromLegacy: boolean,
+): GitTreeEntry[] {
+  const tree: GitTreeEntry[] = [
+    { path: rosterPath(classroom), mode: "100644", type: "blob", content: csv },
+  ]
+  if (fromLegacy) {
+    tree.push({
+      path: legacyRosterPath(classroom),
+      mode: "100644",
+      type: "blob",
+      sha: null,
+    })
+  }
+  return tree
+}
 
 // Slug is authoritative in classroom.json: GitHub may assign a non-derived slug
 // on name collision. Only derive on 404/missing team block; propagate transient
@@ -191,7 +215,7 @@ export async function addStudentToClassroom(
 
   const studentsFilePath = rosterPath(input.classroom)
 
-  const currentCsv = await getRawFileWithFallback(client, {
+  const currentCsv = await getRawFileWithFallbackSource(client, {
     org: input.org,
     path: studentsFilePath,
     fallbackPath: legacyRosterPath(input.classroom),
@@ -199,7 +223,7 @@ export async function addStudentToClassroom(
   })
 
   const githubUser = await getUser(client, normalizedUsername)
-  const currentStudents = parseStudentsCsv(currentCsv)
+  const currentStudents = parseStudentsCsv(currentCsv.content)
 
   const alreadyExists = currentStudents.some(
     (student) =>
@@ -230,14 +254,7 @@ export async function addStudentToClassroom(
   const tree = await createGitTree(client, {
     org: input.org,
     base_tree: commit.tree.sha,
-    tree: [
-      {
-        path: studentsFilePath,
-        mode: "100644",
-        type: "blob",
-        content: nextCsv,
-      },
-    ],
+    tree: rosterWriteTree(input.classroom, nextCsv, currentCsv.fromLegacy),
   })
 
   const newCommit = await createGitCommit(client, {
@@ -561,14 +578,14 @@ export async function addStudentsToClassroom(
 
   const studentsFilePath = rosterPath(input.classroom)
 
-  const currentCsv = await getRawFileWithFallback(client, {
+  const currentCsv = await getRawFileWithFallbackSource(client, {
     org: input.org,
     path: studentsFilePath,
     fallbackPath: legacyRosterPath(input.classroom),
     ref: ref.object.sha,
   })
 
-  const currentStudents = parseStudentsCsv(currentCsv)
+  const currentStudents = parseStudentsCsv(currentCsv.content)
 
   const existingUsernameKeys = new Set(
     currentStudents.map((student) => student.username.toLowerCase()),
@@ -685,14 +702,7 @@ export async function addStudentsToClassroom(
   const tree = await createGitTree(client, {
     org: input.org,
     base_tree: commit.tree.sha,
-    tree: [
-      {
-        path: studentsFilePath,
-        mode: "100644",
-        type: "blob",
-        content: nextCsv,
-      },
-    ],
+    tree: rosterWriteTree(input.classroom, nextCsv, currentCsv.fromLegacy),
   })
 
   const newCommit = await createGitCommit(client, {
@@ -908,13 +918,13 @@ export async function syncRosterFromTeam(
     const commit = await getCommit(client, org, ref.object.sha)
 
     const studentsFilePath = rosterPath(classroom)
-    const currentCsv = await getRawFileWithFallback(client, {
+    const currentCsv = await getRawFileWithFallbackSource(client, {
       org,
       path: studentsFilePath,
       fallbackPath: legacyRosterPath(classroom),
       ref: ref.object.sha,
     })
-    const currentStudents = parseStudentsCsv(currentCsv)
+    const currentStudents = parseStudentsCsv(currentCsv.content)
 
     const { ids, logins } = rosterClaimSet(currentStudents)
     // Email set mirrors buildTeamRoster's indexCsv.byEmail fold: a member whose
@@ -1034,14 +1044,7 @@ export async function syncRosterFromTeam(
     const tree = await createGitTree(client, {
       org,
       base_tree: commit.tree.sha,
-      tree: [
-        {
-          path: studentsFilePath,
-          mode: "100644",
-          type: "blob",
-          content: nextCsv,
-        },
-      ],
+      tree: rosterWriteTree(classroom, nextCsv, currentCsv.fromLegacy),
     })
 
     const newCommit = await createGitCommit(client, {
@@ -1116,7 +1119,7 @@ export async function writeRosterRoles(
     const ref = await getBranchRef(client, org)
     const commit = await getCommit(client, org, ref.object.sha)
     const studentsFilePath = rosterPath(classroom)
-    const currentCsv = await getRawFileWithFallback(client, {
+    const currentCsv = await getRawFileWithFallbackSource(client, {
       org,
       path: studentsFilePath,
       fallbackPath: legacyRosterPath(classroom),
@@ -1128,7 +1131,9 @@ export async function writeRosterRoles(
     // positionally would corrupt the malformed row — so raise a TYPED error the
     // caller can surface as "fix roster.csv, then re-check" instead of silently
     // dropping the role. The role still converges on the next clean sync.
-    const { rows: currentStudents, problems } = parseRosterCsv(currentCsv)
+    const { rows: currentStudents, problems } = parseRosterCsv(
+      currentCsv.content,
+    )
     if (problems.length > 0) {
       throw new RosterCsvMalformedError(formatRosterProblems(problems))
     }
@@ -1149,14 +1154,7 @@ export async function writeRosterRoles(
     const tree = await createGitTree(client, {
       org,
       base_tree: commit.tree.sha,
-      tree: [
-        {
-          path: studentsFilePath,
-          mode: "100644",
-          type: "blob",
-          content: nextCsv,
-        },
-      ],
+      tree: rosterWriteTree(classroom, nextCsv, currentCsv.fromLegacy),
     })
     const newCommit = await createGitCommit(client, {
       org,
@@ -1193,14 +1191,14 @@ async function readFileOrNull(
   }
 }
 
-// Converge a classroom bootstrapped before the students.csv -> roster.csv
-// rename onto roster.csv, so the file always physically exists. Mirrors the CLI
-// `gh teacher roster migrate`: if only the legacy students.csv is present, write
-// roster.csv with its bytes verbatim and delete students.csv in ONE tree commit.
-// Idempotent: a no-op when roster.csv already exists, and nothing-to-do when
-// neither file is present (a brand-new classroom's roster.csv is created by the
-// team sync instead). Runs inside the conflict-retry loop so a concurrent write
-// (e.g. an interleaved roster edit) is re-read rather than clobbered.
+// Converge a classroom bootstrapped before the roster rename onto roster.csv,
+// so the file always physically exists. Mirrors the CLI `gh teacher roster
+// migrate`: if only the legacy students.csv is present, write roster.csv with
+// its bytes verbatim and delete the legacy file in ONE tree commit. Idempotent:
+// a no-op when roster.csv already exists, and nothing-to-do when neither file
+// is present (a brand-new classroom's roster.csv is created by the team sync
+// instead). Runs inside the conflict-retry loop so a concurrent write (e.g. an
+// interleaved roster edit) is re-read rather than clobbered.
 export async function migrateRosterFile(
   client: GitHubClient,
   input: { org: string; classroom: string },
@@ -1227,19 +1225,11 @@ export async function migrateRosterFile(
     }
 
     // Only the legacy file exists: write roster.csv with its bytes verbatim and
-    // delete students.csv in a single commit (mode 100644; sha:null deletes).
+    // delete the legacy file in a single commit (mode 100644; sha:null deletes).
     const tree = await createGitTree(client, {
       org,
       base_tree: commit.tree.sha,
-      tree: [
-        {
-          path: rosterFilePath,
-          mode: "100644",
-          type: "blob",
-          content: legacyBytes,
-        },
-        { path: legacyPath, mode: "100644", type: "blob", sha: null },
-      ],
+      tree: rosterWriteTree(classroom, legacyBytes, true),
     })
 
     const newCommit = await createGitCommit(client, {
@@ -1877,14 +1867,14 @@ export async function unenrollStudent(
 
   const studentsFilePath = rosterPath(classroom)
 
-  const currentCsv = await getRawFileWithFallback(client, {
+  const currentCsv = await getRawFileWithFallbackSource(client, {
     org,
     path: studentsFilePath,
     fallbackPath: legacyRosterPath(classroom),
     ref: ref.object.sha,
   })
 
-  const currentStudents = parseStudentsCsv(currentCsv)
+  const currentStudents = parseStudentsCsv(currentCsv.content)
 
   // Match the target row via the shared roster-row matcher (username/github_id).
   const sameRow = (student: StudentCsvRow) =>
@@ -1904,14 +1894,7 @@ export async function unenrollStudent(
   const tree = await createGitTree(client, {
     org,
     base_tree: commit.tree.sha,
-    tree: [
-      {
-        path: studentsFilePath,
-        mode: "100644",
-        type: "blob",
-        content: nextCsv,
-      },
-    ],
+    tree: rosterWriteTree(classroom, nextCsv, currentCsv.fromLegacy),
   })
 
   const newCommit = await createGitCommit(client, {
@@ -2077,13 +2060,13 @@ export async function bulkUnenrollStudents(
   await withGitConflictRetry(async () => {
     const ref = await getBranchRef(client, org)
     const commit = await getCommit(client, org, ref.object.sha)
-    const currentCsv = await getRawFileWithFallback(client, {
+    const currentCsv = await getRawFileWithFallbackSource(client, {
       org,
       path: studentsFilePath,
       fallbackPath: legacyRosterPath(classroom),
       ref: ref.object.sha,
     })
-    const currentStudents = parseStudentsCsv(currentCsv)
+    const currentStudents = parseStudentsCsv(currentCsv.content)
 
     removed = targets.filter((target) =>
       currentStudents.some((row) => matchesTarget(row, target)),
@@ -2104,14 +2087,7 @@ export async function bulkUnenrollStudents(
     const tree = await createGitTree(client, {
       org,
       base_tree: commit.tree.sha,
-      tree: [
-        {
-          path: studentsFilePath,
-          mode: "100644",
-          type: "blob",
-          content: nextCsv,
-        },
-      ],
+      tree: rosterWriteTree(classroom, nextCsv, currentCsv.fromLegacy),
     })
     const newCommit = await createGitCommit(client, {
       org,
@@ -2255,14 +2231,14 @@ export async function updateStudent(
 
   const studentsFilePath = rosterPath(classroom)
 
-  const currentCsv = await getRawFileWithFallback(client, {
+  const currentCsv = await getRawFileWithFallbackSource(client, {
     org,
     path: studentsFilePath,
     fallbackPath: legacyRosterPath(classroom),
     ref: ref.object.sha,
   })
 
-  const currentStudents = parseStudentsCsv(currentCsv)
+  const currentStudents = parseStudentsCsv(currentCsv.content)
 
   // Stable per-row identity via the shared studentKey (github_id -> username ->
   // email), the same precedence the UI and reconcile use.
@@ -2311,14 +2287,7 @@ export async function updateStudent(
   const tree = await createGitTree(client, {
     org,
     base_tree: commit.tree.sha,
-    tree: [
-      {
-        path: studentsFilePath,
-        mode: "100644",
-        type: "blob",
-        content: nextCsv,
-      },
-    ],
+    tree: rosterWriteTree(classroom, nextCsv, currentCsv.fromLegacy),
   })
 
   const newCommit = await createGitCommit(client, {

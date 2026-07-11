@@ -24,8 +24,10 @@ import {
   REGRADE_WORKFLOW,
   createTeam,
   getErrorMessage,
+  type GitHubTreeResponse,
 } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
+import { getCommit } from "@/api/github/queries"
 import { classroomPagesSegment } from "@/util/secret"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
@@ -90,8 +92,8 @@ export const githubKeys = {
     [...githubKeys.all, "raw-file", owner, repo, path, ref ?? null] as const,
 
   // Distinct from `rawFile`: the roster raw read uses a different queryFn (with
-  // a legacy roster.csv -> students.csv 404 fallback), so it must not share a
-  // cache entry with rawFileQuery for the same path.
+  // a 404 fallback from the current roster name to the legacy one), so it must
+  // not share a cache entry with rawFileQuery for the same path.
   rosterRawFile: (owner: string, repo: string, path: string, ref?: string) =>
     [
       ...githubKeys.all,
@@ -566,9 +568,10 @@ export function csvFileQuery<T>(
   repo: string,
   path: string,
   ref?: string,
-  // Legacy path tried only when `path` 404s (roster.csv -> students.csv). The
-  // query key stays on `path`, so a post-migration read converges on roster.csv
-  // and optimistic writes never have to know which name served the bytes.
+  // Legacy path tried only when `path` 404s (current roster name -> legacy).
+  // The query key stays on `path`, so a post-migration read converges on the
+  // current name and optimistic writes never have to know which name served the
+  // bytes.
   fallbackPath?: string,
 ) {
   return queryOptions({
@@ -630,13 +633,13 @@ function readContents(
   )
 }
 
-// Raw roster.csv bytes with a legacy fallback (roster.csv -> students.csv on a
-// 404), returning the unparsed text so the caller can run the strict parser and
-// surface per-line problems. Keyed on `rosterRawFile` — a namespace of its own,
-// distinct from both `rawFile` (rawFileQuery, no fallback, different queryFn)
-// and csvFileQuery's parsed-rows key — so this additive problem-detection read
-// can never collide with another raw or parsed read of the same path. The
-// parsed-rows read (csvFileQuery) still drives display.
+// Raw roster.csv bytes with a legacy fallback (current roster name -> legacy on
+// a 404), returning the unparsed text so the caller can run the strict parser
+// and surface per-line problems. Keyed on `rosterRawFile` — a namespace of its
+// own, distinct from both `rawFile` (rawFileQuery, no fallback, different
+// queryFn) and csvFileQuery's parsed-rows key — so this additive
+// problem-detection read can never collide with another raw or parsed read of
+// the same path. The parsed-rows read (csvFileQuery) still drives display.
 export function rosterRawFileQuery(
   client: GitHubClient,
   owner: string,
@@ -695,35 +698,56 @@ export async function getRawFile(
   return decodeBase64Utf8(file.content)
 }
 
-// Read a config file, falling back to `fallbackPath` only on a 404. The roster
-// read-modify-write mutations use this so a classroom bootstrapped before the
-// students.csv -> roster.csv rename (only students.csv on disk) is still
-// editable: the write itself always targets roster.csv, converging the legacy
-// file on the next commit. A non-404 error propagates — a real API failure must
-// not be masked as "missing, use legacy".
-//
-// Not retried: the Contents API is eventually consistent per path, so right
-// after a roster.csv write it can briefly 404 while the pre-rename students.csv
-// still reads, and this would fall back to slightly-stale legacy bytes. We
-// accept that window rather than retry, because a 404 here is far more often a
-// stable "un-migrated classroom, only students.csv exists" than a lag blip —
-// retrying would slow every legacy-classroom read (the common case) to cover a
-// rare, self-healing one. The acting tab is masked by the optimistic cache
-// (useUpdateRosterCache), and the classroom TEAM, not this CSV, is the
-// authority for enrollment, so a transient stale read is display-only.
-export async function getRawFileWithFallback(
+// Read a config file for a WRITE, reporting whether the returned bytes came
+// from the legacy fallback path. Callers pass `fromLegacy` to rosterWriteTree,
+// where it authorizes deleting the legacy file — so it must NOT be decided by a
+// bare Contents-API 404: that API is eventually consistent per path, so right
+// after a write to the current name a read pinned to that commit can briefly
+// 404 while the legacy name still serves stale bytes. Trusting that 404 would
+// overwrite the current file with stale legacy content and delete it on a clean
+// fast-forward the conflict-retry loop can't catch — a silently lost write. So
+// on a 404 we resolve legacy-vs-lag from the git TREE at the same commit
+// (internally consistent, unlike per-path Contents reads). A non-404 error
+// propagates unchanged.
+export async function getRawFileWithFallbackSource(
   client: GitHubClient,
   input: GetAssignmentsFileInput & { fallbackPath: string },
-): Promise<string> {
+): Promise<{ content: string; fromLegacy: boolean }> {
   const { fallbackPath, ...primary } = input
   try {
-    return await getRawFile(client, primary)
+    return { content: await getRawFile(client, primary), fromLegacy: false }
   } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 404) {
-      return getRawFile(client, { ...primary, path: fallbackPath })
+    if (!(err instanceof GitHubAPIError && err.status === 404)) throw err
+    // Primary 404 — decide legacy-vs-lag from the commit tree, not the 404.
+    if (
+      await pathInCommitTree(client, primary.org, primary.path, primary.ref)
+    ) {
+      // Tree says the current name exists; the 404 was consistency lag. Re-read
+      // it so a stale legacy read can't drive an overwrite + delete.
+      return { content: await getRawFile(client, primary), fromLegacy: false }
     }
-    throw err
+    return {
+      content: await getRawFile(client, { ...primary, path: fallbackPath }),
+      fromLegacy: true,
+    }
   }
+}
+
+// True when `path` is a blob in the commit's recursive tree at `ref`. A
+// truncated tree is treated as "not confirmed present" so the caller only takes
+// the destructive legacy path when the tree positively lacks `path`.
+async function pathInCommitTree(
+  client: GitHubClient,
+  org: string,
+  path: string,
+  ref: string,
+): Promise<boolean> {
+  const commit = await getCommit(client, org, ref)
+  const tree = await client.request<GitHubTreeResponse>(
+    `/repos/${org}/classroom50/git/trees/${commit.tree.sha}?recursive=1`,
+  )
+  if (tree.truncated) return false
+  return tree.tree.some((e) => e.type === "blob" && e.path === path)
 }
 
 export async function getClassroom50Yaml(

@@ -40,6 +40,9 @@ const makeClient = (opts: {
     name?: string | null
     email?: string | null
   }
+  onTree?: (
+    tree: { path: string; sha?: string | null; content?: string }[],
+  ) => void
 }) => {
   const committed: CommittedCsv = { content: null }
   const membershipState = opts.membershipState ?? null
@@ -85,8 +88,11 @@ const makeClient = (opts: {
       }
       if (path.endsWith("/git/trees")) {
         const tree = (
-          options?.body as { tree?: { path: string; content?: string }[] }
+          options?.body as {
+            tree?: { path: string; sha?: string | null; content?: string }[]
+          }
         )?.tree
+        if (tree) opts.onTree?.(tree)
         const csvEntry = tree?.find((t) => t.path.includes("roster.csv"))
         if (csvEntry?.content) committed.content = csvEntry.content
         return Promise.resolve({ sha: "tree-sha" })
@@ -138,56 +144,19 @@ const rowsFromCsv = (csv: string) =>
   >[]
 
 describe("roster write target — commits roster.csv, never students.csv", () => {
-  it("writes the roster blob at <classroom>/roster.csv", async () => {
+  // When roster.csv already exists, the write targets roster.csv and never
+  // touches the legacy students.csv (no stray upsert or deletion entry). The
+  // legacy-fallback + migrate-on-write case is covered separately below.
+  it("writes the roster blob at roster.csv and leaves students.csv untouched", async () => {
     const treePaths: string[] = []
-    const requestRaw = vi.fn().mockImplementation((path: string) => {
-      if (path.includes("/contents/") && path.includes("classroom.json")) {
-        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
-      }
-      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    const { client } = makeClient({
+      startingCsv: HEADER,
+      membershipState: "active",
+      user: { login: "alice", id: 42 },
+      onTree: (tree) => {
+        for (const t of tree) treePaths.push(t.path)
+      },
     })
-    const request = vi
-      .fn()
-      .mockImplementation((path: string, options?: { body?: unknown }) => {
-        // The write target is always roster.csv; the read may fall back to the
-        // legacy students.csv (covered separately below), but here roster.csv
-        // exists so no fallback fires.
-        if (path.includes("/contents/") && path.includes("roster.csv")) {
-          return Promise.resolve({
-            type: "file",
-            encoding: "base64",
-            content: Buffer.from(HEADER, "utf-8").toString("base64"),
-          })
-        }
-        if (path.startsWith("/users/")) {
-          return Promise.resolve({ login: "alice", id: 42, name: null })
-        }
-        if (path.includes("/memberships/") && !path.includes("/teams/")) {
-          return Promise.reject(new Error("404 not a member"))
-        }
-        if (path.includes("/git/ref/")) {
-          return Promise.resolve({ object: { sha: "base-sha" } })
-        }
-        if (path.includes("/git/commits/")) {
-          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
-        }
-        if (path.endsWith("/git/trees")) {
-          const tree = (options?.body as { tree?: { path: string }[] })?.tree
-          for (const t of tree ?? []) treePaths.push(t.path)
-          return Promise.resolve({ sha: "tree-sha" })
-        }
-        if (path.endsWith("/git/commits")) {
-          return Promise.resolve({ sha: "new-commit-sha" })
-        }
-        if (path.endsWith("/git/refs/heads/main")) {
-          return Promise.resolve({})
-        }
-        if (path.includes("/teams/")) {
-          return Promise.resolve({ state: "active" })
-        }
-        return Promise.reject(new Error(`unexpected request: ${path}`))
-      })
-    const client = { request, requestRaw } as unknown as GitHubClient
 
     await enrollStudentInClassroom(client, {
       org: "acme",
@@ -199,13 +168,18 @@ describe("roster write target — commits roster.csv, never students.csv", () =>
     expect(treePaths).not.toContain("cs101/students.csv")
   })
 
-  // A classroom bootstrapped before the students.csv -> roster.csv rename has
-  // only students.csv on disk. The read-modify-write mutations must fall back to
-  // the legacy file on a roster.csv 404 (mirroring the display readers) so the
-  // roster stays editable from the web before `gh teacher roster migrate` runs;
-  // the write still converges onto roster.csv.
-  it("reads the legacy students.csv when roster.csv is absent, still writing roster.csv", async () => {
-    const treePaths: string[] = []
+  // A classroom bootstrapped before the roster rename has only the legacy file
+  // on disk. The read-modify-write mutations must fall back to it on a
+  // roster.csv 404 (mirroring the display readers) so the roster stays editable
+  // from the web before `gh teacher roster migrate` runs; the write converges
+  // onto roster.csv AND deletes the legacy file in the same commit
+  // (migrate-on-write), so a first edit renames it.
+  it("reads the legacy students.csv when roster.csv is absent, writing roster.csv and deleting students.csv", async () => {
+    const treeEntries: {
+      path: string
+      sha?: string | null
+      content?: string
+    }[] = []
     const requestRaw = vi.fn().mockImplementation((path: string) => {
       if (path.includes("/contents/") && path.includes("classroom.json")) {
         return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
@@ -253,9 +227,21 @@ describe("roster write target — commits roster.csv, never students.csv", () =>
         if (path.includes("/git/commits/")) {
           return Promise.resolve({ tree: { sha: "base-tree-sha" } })
         }
+        // Recursive tree read used by getRawFileWithFallbackSource to resolve
+        // legacy-vs-lag: this un-migrated classroom has students.csv only.
+        if (path.includes("/git/trees/") && path.includes("recursive=1")) {
+          return Promise.resolve({
+            tree: [{ path: "cs101/students.csv", type: "blob" }],
+            truncated: false,
+          })
+        }
         if (path.endsWith("/git/trees")) {
-          const tree = (options?.body as { tree?: { path: string }[] })?.tree
-          for (const t of tree ?? []) treePaths.push(t.path)
+          const tree = (
+            options?.body as {
+              tree?: { path: string; sha?: string | null; content?: string }[]
+            }
+          )?.tree
+          for (const t of tree ?? []) treeEntries.push(t)
           return Promise.resolve({ sha: "tree-sha" })
         }
         if (path.endsWith("/git/commits")) {
@@ -278,9 +264,128 @@ describe("roster write target — commits roster.csv, never students.csv", () =>
       username: "alice",
     })
 
-    // The write converges onto roster.csv even though the read came from legacy.
-    expect(treePaths).toContain("cs101/roster.csv")
-    expect(treePaths).not.toContain("cs101/students.csv")
+    // The write converges onto roster.csv (content upsert)...
+    const rosterUpsert = treeEntries.find(
+      (t) => t.path === "cs101/roster.csv" && t.content !== undefined,
+    )
+    expect(rosterUpsert).toBeTruthy()
+    // ...and deletes the legacy students.csv in the same commit (sha: null).
+    const legacyDelete = treeEntries.find(
+      (t) => t.path === "cs101/students.csv" && t.sha === null,
+    )
+    expect(legacyDelete).toBeTruthy()
+  })
+
+  // Regression guard for the stale-read data-loss hazard: the Contents API can
+  // 404 roster.csv at a pinned commit due to per-path lag while the deleted
+  // legacy students.csv is still served stale. The delete + overwrite must NOT
+  // be driven by that 404 — getRawFileWithFallbackSource consults the git tree
+  // (consistent at a commit) and, seeing roster.csv present, re-reads it and
+  // reports fromLegacy=false, so no students.csv deletion and no stale
+  // overwrite are committed.
+  it("does not migrate when roster.csv 404s from lag but the tree shows it present", async () => {
+    const treeEntries: {
+      path: string
+      sha?: string | null
+      content?: string
+    }[] = []
+    let rosterContentsReads = 0
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("/contents/") && path.includes("classroom.json")) {
+        return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+    const notFound = (path: string) =>
+      new GitHubAPIError({
+        status: 404,
+        url: path,
+        message: "not found",
+        body: null,
+        rateLimit: {
+          limit: null,
+          remaining: null,
+          used: null,
+          reset: null,
+          resource: null,
+          retryAfter: null,
+        },
+      })
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/") && path.includes("roster.csv")) {
+          rosterContentsReads++
+          // First read 404s (lag); the tree-confirmed re-read succeeds.
+          if (rosterContentsReads === 1) return Promise.reject(notFound(path))
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(HEADER, "utf-8").toString("base64"),
+          })
+        }
+        // The stale legacy blob is still served — but must NOT be trusted.
+        if (path.includes("/contents/") && path.includes("students.csv")) {
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(HEADER + "ghost,,,,,999\n", "utf-8").toString(
+              "base64",
+            ),
+          })
+        }
+        if (path.startsWith("/users/")) {
+          return Promise.resolve({ login: "alice", id: 42, name: null })
+        }
+        if (path.includes("/memberships/") && !path.includes("/teams/")) {
+          return Promise.reject(new Error("404 not a member"))
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        // Tree is authoritative: roster.csv IS present (the 404 was lag).
+        if (path.includes("/git/trees/") && path.includes("recursive=1")) {
+          return Promise.resolve({
+            tree: [
+              { path: "cs101/roster.csv", type: "blob" },
+              { path: "cs101/students.csv", type: "blob" },
+            ],
+            truncated: false,
+          })
+        }
+        if (path.endsWith("/git/trees")) {
+          const tree = (options?.body as { tree?: typeof treeEntries })?.tree
+          for (const t of tree ?? []) treeEntries.push(t)
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          return Promise.resolve({})
+        }
+        if (path.includes("/teams/")) {
+          return Promise.resolve({ state: "active" })
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+    const client = { request, requestRaw } as unknown as GitHubClient
+
+    await enrollStudentInClassroom(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "alice",
+    })
+
+    // No students.csv deletion — the tree said roster.csv exists.
+    expect(treeEntries.some((t) => t.path === "cs101/students.csv")).toBe(false)
+    // The write used the (re-read) roster.csv content, not the stale legacy
+    // blob: the fabricated `ghost` row from students.csv must not appear.
+    const rosterUpsert = treeEntries.find((t) => t.path === "cs101/roster.csv")
+    expect(rosterUpsert?.content).not.toContain("ghost")
   })
 })
 

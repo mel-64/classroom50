@@ -684,7 +684,7 @@ class TestGroupMemberUsernames:
 
 class TestListRepoCollaboratorLogins:
     def test_returns_all_collaborators_including_admins_and_paginates(self, monkeypatch):
-        # Crediting is gated on roster membership downstream
+        # Crediting is gated on classroom-team membership downstream
         # (group_member_usernames), NOT on permission level, so this
         # function returns EVERY collaborator regardless of role_name.
         # A group teammate who is an org owner (admin on every repo) or a
@@ -1374,17 +1374,6 @@ class TestRosterMetadataJoin:
 
     def test_load_roster_metadata_missing_returns_empty(self, tmp_path):
         assert cs.load_roster_metadata(tmp_path) == {}
-
-    def test_load_roster_metadata_prefers_roster_csv(self, tmp_path):
-        write_roster(tmp_path / "roster.csv", [{"username": "alice", "first_name": "New"}])
-        write_roster(tmp_path / "students.csv", [{"username": "alice", "first_name": "Old"}])
-        meta = cs.load_roster_metadata(tmp_path)
-        assert meta["alice"]["first_name"] == "New"
-
-    def test_load_roster_metadata_legacy_fallback(self, tmp_path):
-        write_roster(tmp_path / "students.csv", [{"username": "alice", "first_name": "Grace"}])
-        meta = cs.load_roster_metadata(tmp_path)
-        assert meta["alice"]["first_name"] == "Grace"
 
 
 # load_scores / save_scores ---------------------------------------------------

@@ -5,7 +5,7 @@ Walks the classroom team × assignment manifest: for each (team member,
 assignment) pair, pages the canonical `<classroom>-<assignment>-<username>`
 repo's `submit/*` releases, validates each `result.json` asset, and upserts
 into `<classroom>/scores.json`. The classroom GitHub team is the source of
-truth for enrollment; the roster (roster.csv, legacy students.csv) is only a
+truth for enrollment; the roster (roster.csv, or the legacy name) is only a
 best-effort source of optional display metadata (name/section/email).
 
 `scores.json` is keyed by assignment slug under root `assignments`: each value
@@ -244,7 +244,7 @@ def iter_classrooms(
     Collection is TEAM-driven: the classroom GitHub team is the source of truth
     for enrollment, so this no longer reads the roster to decide who to poll
     (the team enumeration in collect_classroom drives the pairs). The roster
-    (roster.csv, legacy students.csv) is only best-effort display metadata,
+    (roster.csv, or the legacy name) is only best-effort display metadata,
     joined onto collected results and also consumed elsewhere (the Go download
     scores.csv join and the web roster view).
     """
@@ -283,7 +283,7 @@ def iter_classrooms(
 
 def load_roster_metadata(classroom_dir: pathlib.Path) -> dict[str, dict[str, str]]:
     """Best-effort roster read for optional display metadata, keyed by
-    lowercased username. Tries roster.csv first, then the legacy students.csv
+    lowercased username. Tries roster.csv first, then the legacy name
     (classrooms bootstrapped before the rename); writers always target
     roster.csv. The classroom GitHub team — not this file — is authoritative
     for enrollment, so a missing/unreadable/malformed roster is NOT fatal: it
@@ -361,7 +361,7 @@ def collect_classroom(
     mode_flip_assignments = 0
 
     # Team-driven username source: the classroom GitHub team is authoritative
-    # for enrollment. The roster (roster.csv, legacy students.csv) is only
+    # for enrollment. The roster (roster.csv, or the legacy name) is only
     # best-effort display metadata, so the (student, assignment) pairs come from
     # the team member list, NOT the CSV. A 404 (team missing) or empty team
     # yields no pairs (warn + return), replacing the old "roster missing" skip.
@@ -1228,8 +1228,8 @@ def list_repo_collaborator_logins(
     """Logins of every direct collaborator on owner/repo, walking pagination.
 
     Returns ALL collaborators regardless of permission level. The crediting gate
-    is NOT permission level — it's roster membership, applied by the caller
-    (group_member_usernames intersects with the roster). Filtering on
+    is NOT permission level — it's classroom-team membership, applied by the
+    caller (group_member_usernames intersects with the team). Filtering on
     `role_name == "admin"` here was a bug: a group teammate who is also an org
     owner (admin on every repo), or a founder kept as repo `admin` to invite
     teammates, is `admin` yet a legitimate student — the old filter dropped
@@ -1283,30 +1283,35 @@ def group_member_usernames(
     api_url: str, org: str, repo: str, owner_username: str, token: str, roster_logins: set[str]
 ) -> list[str]:
     """Member list for a group submission: the repo's collaborators (any
-    permission) **intersected with the roster** (case-insensitive), sorted and
-    deduped, owner guaranteed present. Crediting is gated on roster membership,
-    NOT collaborator permission: a rostered teammate is credited whether push or
-    admin (an org owner is admin everywhere; a founder is kept admin to invite).
-    A non-rostered collaborator (instructor, TA, non-student org owner, or an
-    account added out-of-band) is never credited. Raises on the underlying
-    HTTP/parse error so the caller can fall back to owner-only.
+    permission) **intersected with the classroom team** (case-insensitive),
+    sorted and deduped, owner guaranteed present. Crediting is gated on team
+    membership, NOT collaborator permission: a teammate on the classroom team is
+    credited whether push or admin (an org owner is admin everywhere; a founder
+    is kept admin to invite). A collaborator not on the team (instructor, TA,
+    non-student org owner, or an account added out-of-band) is never credited.
+    Raises on the underlying HTTP/parse error so the caller can fall back to
+    owner-only.
 
-    TRUST ASSUMPTION (F6, documented residual): every rostered collaborator on
-    the repo is credited. GitHub doesn't record HOW a collaborator was added, so
-    collection can't distinguish a teammate the founder invited via `gh student
-    invite` from one a student added via the UI. The roster intersection bounds
-    the blast radius to rostered classmates — a stranger can never be credited —
-    but a student could add a rostered classmate and credit them this score.
-    Treating that as acceptable (rostered students are mutually trusted within a
-    classroom) is the deliberate, simple model; see wiki/Autograders.md.
-    Tightening it would require a teacher-approved group manifest, out of scope.
+    (`roster_logins` is the case-folded set of classroom-team logins the caller
+    passes in — the team is authoritative for enrollment; the name is legacy.)
+
+    TRUST ASSUMPTION (F6, documented residual): every teammate on the classroom
+    team who is a collaborator on the repo is credited. GitHub doesn't record HOW
+    a collaborator was added, so collection can't distinguish a teammate the
+    founder invited via `gh student invite` from one a student added via the UI.
+    The team intersection bounds the blast radius to classmates on the team — a
+    stranger can never be credited — but a student could add a teammate on the
+    team and credit them this score. Treating that as acceptable (classmates on
+    the team are mutually trusted within a classroom) is the deliberate, simple
+    model; see wiki/Autograders.md. Tightening it would require a teacher-approved
+    group manifest, out of scope.
     """
     logins = list_repo_collaborator_logins(api_url, org, repo, token)
     seen: dict[str, str] = {}
     owner_key = owner_username.lower()
     for login in [owner_username, *logins]:
         key = login.lower()
-        # Owner always credited; other collaborators only if on the roster.
+        # Owner always credited; other collaborators only if on the team.
         if key != owner_key and key not in roster_logins:
             continue
         if key not in seen:
