@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   buildTeamRoster,
   countByState,
-  notInOrgUsernames,
   rowToStudent,
   teamMembersMissingFromCsv,
+  rowsNeedingBackfill,
 } from "./teamRoster"
+import { enrolledCountsByRole } from "./rosterRoles"
 import type { Student } from "@/types/classroom"
 import { STAFF_ROLES } from "@/types/classroom"
 import type { GitHubUser, GitHubOrgInvitation } from "@/hooks/github/types"
@@ -148,7 +149,7 @@ describe("buildTeamRoster", () => {
     expect(rows[0].invitation_id).toBe(3)
   })
 
-  it("marks CSV rows (with a username) not on the team/invite as not_in_org", () => {
+  it("does NOT emit a row for a CSV person not on any team or invite", () => {
     const rows = buildTeamRoster({
       members: [member(101, "ada")],
       invitations: [],
@@ -157,12 +158,12 @@ describe("buildTeamRoster", () => {
         csvRow({ username: "ghost", first_name: "Ghost" }),
       ],
     })
-    const ghost = rows.find((r) => r.username === "ghost")
-    expect(ghost?.state).toBe("not_in_org")
+    // ada is enrolled (on the team); ghost has only a CSV row -> no row.
+    expect(rows.map((r) => r.username)).toEqual(["ada"])
     expect(rows.filter((r) => r.state === "enrolled")).toHaveLength(1)
   })
 
-  it("does not emit a member as both enrolled and not_in_org", () => {
+  it("does not emit a member twice", () => {
     const rows = buildTeamRoster({
       members: [member(101, "ada")],
       students: [csvRow({ github_id: "101", username: "ada" })],
@@ -178,60 +179,51 @@ describe("buildTeamRoster", () => {
     expect(rows).toHaveLength(0)
   })
 
-  it("merges a legacy email-only row's metadata into a username row sharing its email", () => {
-    // The username row carries no name; the legacy email-only row (ignored on
-    // its own) lends its name/section by matching email.
+  it("enriches an enrolled row from its matching CSV row", () => {
+    // roster.csv only enriches — the row exists because ada is on the team; the
+    // CSV lends her name/section.
     const rows = buildTeamRoster({
-      members: [],
+      members: [member(101, "ada")],
       students: [
-        csvRow({ username: "sam", email: "sam@uni.edu" }),
-        csvRow({ email: "sam@uni.edu", first_name: "Sam", section: "C" }),
+        csvRow({
+          github_id: "101",
+          username: "ada",
+          first_name: "Ada",
+          section: "C",
+        }),
       ],
     })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
-      state: "not_in_org",
-      username: "sam",
-      first_name: "Sam",
+      state: "enrolled",
+      username: "ada",
+      first_name: "Ada",
       section: "C",
     })
   })
 
-  it("dedupes duplicate CSV rows for the same username", () => {
-    const rows = buildTeamRoster({
-      members: [],
-      students: [
-        csvRow({ username: "dup", first_name: "Dup" }),
-        csvRow({ username: "dup", last_name: "Licate" }),
-      ],
-    })
-    expect(rows).toHaveLength(1)
-    expect(rows[0].state).toBe("not_in_org")
-  })
-
-  it("sorts enrolled, then pending, then not_in_org", () => {
+  it("sorts enrolled, then pending", () => {
     const rows = buildTeamRoster({
       members: [member(2, "zed")],
       invitations: [invite({ id: 9, login: "pat" })],
       students: [csvRow({ username: "wanda" })],
     })
-    expect(rows.map((r) => r.state)).toEqual([
-      "enrolled",
-      "pending",
-      "not_in_org",
-    ])
+    // wanda is CSV-only (not on a team) -> not rendered.
+    expect(rows.map((r) => r.state)).toEqual(["enrolled", "pending"])
   })
 
   it("counts rows by state for the banner", () => {
     const rows = buildTeamRoster({
       members: [member(1, "a"), member(2, "b")],
       invitations: [invite({ id: 9, login: "c" })],
+      // CSV-only rows d/e are not rendered (team-driven).
       students: [csvRow({ username: "d" }), csvRow({ username: "e" })],
     })
     expect(countByState(rows)).toEqual({
       enrolled: 2,
       pending: 1,
-      not_in_org: 2,
+      needs_attention_in_org: 0,
+      needs_attention_not_in_org: 0,
     })
   })
 
@@ -258,6 +250,135 @@ describe("buildTeamRoster", () => {
       github_id: "101",
       // primary role recorded from team membership (student team here)
       role: "student",
+    })
+  })
+})
+
+describe("buildTeamRoster — needs-attention (CSV row on no team)", () => {
+  it("suppresses CSV-only rows when org membership is unknown (degrade)", () => {
+    const rows = buildTeamRoster({
+      members: [member(1, "ada")],
+      students: [csvRow({ github_id: "50", username: "wanda" })],
+      // orgMembersKnown omitted -> defaults false -> no needs-attention rows.
+    })
+    expect(rows.map((r) => r.username)).toEqual(["ada"])
+  })
+
+  it("renders an active org member on no team as needs_attention_in_org (no role)", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ github_id: "50", username: "wanda" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(["50"]),
+      orgMemberLogins: new Set(["wanda"]),
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      state: "needs_attention_in_org",
+      username: "wanda",
+      github_id: "50",
+      // placeholder role only; the view renders no role badge.
+      roles: ["student"],
+    })
+  })
+
+  it("renders a non-org-member on no team as needs_attention_not_in_org", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ github_id: "77", username: "stranger" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(),
+      orgMemberLogins: new Set(),
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      state: "needs_attention_not_in_org",
+      username: "stranger",
+    })
+  })
+
+  it("classifies by login when the CSV row has no github_id", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ username: "Wanda" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(),
+      orgMemberLogins: new Set(["wanda"]),
+    })
+    expect(rows[0].state).toBe("needs_attention_in_org")
+  })
+
+  it("a removed TA (CSV role ta, on no team, still an org member) reads as needs_attention_in_org, not student/enrolled", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      staffMembers: { instructor: [], ta: [] },
+      students: [
+        csvRow({
+          github_id: "50",
+          username: "tania",
+          role: "ta",
+        } as Partial<Student>),
+      ],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(["50"]),
+      orgMemberLogins: new Set(["tania"]),
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].state).toBe("needs_attention_in_org")
+    // The row asserts no team role (placeholder only) — never renders as "ta".
+    expect(rows[0].roles).toEqual(["student"])
+  })
+
+  it("does not emit a needs-attention row for someone already enrolled or pending", () => {
+    const rows = buildTeamRoster({
+      members: [member(1, "ada")],
+      invitations: [invite({ id: 9, login: "pat" })],
+      students: [
+        csvRow({ github_id: "1", username: "ada" }),
+        csvRow({ username: "pat" }),
+        csvRow({ github_id: "50", username: "wanda" }),
+      ],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(["1", "50"]),
+      orgMemberLogins: new Set(["ada", "wanda"]),
+    })
+    // ada=enrolled, pat=pending, wanda=needs_attention_in_org (only one NA row).
+    expect(countByState(rows)).toEqual({
+      enrolled: 1,
+      pending: 1,
+      needs_attention_in_org: 1,
+      needs_attention_not_in_org: 0,
+    })
+  })
+
+  it("sorts needs-attention after enrolled and pending", () => {
+    const rows = buildTeamRoster({
+      members: [member(2, "zed")],
+      invitations: [invite({ id: 9, login: "pat" })],
+      students: [csvRow({ github_id: "50", username: "wanda" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(["50"]),
+      orgMemberLogins: new Set(["wanda"]),
+    })
+    expect(rows.map((r) => r.state)).toEqual([
+      "enrolled",
+      "pending",
+      "needs_attention_in_org",
+    ])
+  })
+
+  it("excludes needs-attention rows from enrolled role counts", () => {
+    const rows = buildTeamRoster({
+      members: [member(1, "ada")],
+      students: [csvRow({ github_id: "50", username: "wanda" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(["50"]),
+      orgMemberLogins: new Set(["wanda"]),
+    })
+    expect(enrolledCountsByRole(rows)).toEqual({
+      instructor: 0,
+      ta: 0,
+      student: 1,
     })
   })
 })
@@ -385,15 +506,6 @@ describe("buildTeamRoster — roles (union across student + staff teams)", () =>
     expect(rows[0].roles).toEqual(["instructor", "ta"])
   })
 
-  it("keeps not_in_org CSV rows as student", () => {
-    const rows = buildTeamRoster({
-      members: [],
-      students: [csvRow({ username: "ghost" })],
-    })
-    expect(rows[0]).toMatchObject({ state: "not_in_org", username: "ghost" })
-    expect(rows[0].roles).toEqual(["student"])
-  })
-
   it("includes every STAFF_ROLES role (guards STAFF_ROLES drift)", () => {
     // One staff member per role; the roster must surface all of them. If a new
     // staff role were added to STAFF_ROLES but the builder's fanout drifted,
@@ -405,6 +517,38 @@ describe("buildTeamRoster — roles (union across student + staff teams)", () =>
     const seen = new Set(rows.flatMap((r) => r.roles))
     for (const role of STAFF_ROLES) expect(seen.has(role)).toBe(true)
     expect(rows).toHaveLength(STAFF_ROLES.length)
+  })
+})
+
+describe("rowsNeedingBackfill", () => {
+  it("flags a login-only row on a team (blank github_id) — the rliu50 case", () => {
+    const needing = rowsNeedingBackfill(
+      [member(127826836, "rliu50")],
+      {},
+      [csvRow({ username: "rliu50" })], // blank github_id + blank role
+    )
+    expect(needing.map((s) => s.username)).toEqual(["rliu50"])
+  })
+
+  it("flags a row whose recorded role is stale vs the team", () => {
+    const needing = rowsNeedingBackfill(
+      [],
+      { instructor: [member(1, "prof")] },
+      [csvRow({ github_id: "1", username: "prof", role: "student" })],
+    )
+    expect(needing.map((s) => s.username)).toEqual(["prof"])
+  })
+
+  it("does not flag a complete, in-sync row", () => {
+    const needing = rowsNeedingBackfill([member(1, "ada")], {}, [
+      csvRow({ github_id: "1", username: "ada", role: "student" }),
+    ])
+    expect(needing).toEqual([])
+  })
+
+  it("does not flag a CSV row for someone on no team (needs-attention, not backfill)", () => {
+    const needing = rowsNeedingBackfill([], {}, [csvRow({ username: "ghost" })])
+    expect(needing).toEqual([])
   })
 })
 
@@ -455,41 +599,26 @@ describe("teamMembersMissingFromCsv", () => {
   })
 })
 
-describe("notInOrgUsernames", () => {
-  // The rostered usernames that are `not_in_org` — what auto-reconcile tries to
-  // team-add. Enrolled team members and pending invites are excluded; only
-  // rows the roster classified as on-CSV-but-not-in-org contribute.
-  const roster = (students: Student[], members: GitHubUser[]) =>
-    buildTeamRoster({ members, students })
-
-  it("returns the username of a not_in_org row", () => {
-    const rows = roster(
-      [
+describe("buildTeamRoster — CSV-only rows do not render (team-driven)", () => {
+  it("does not render a CSV row for someone on no team or invite", () => {
+    // The team is the source of truth for who appears. A roster.csv row with a
+    // username/id but no matching team member or pending invite produces NO row
+    // (it only enriches team/invite rows).
+    const rows = buildTeamRoster({
+      members: [member(101, "ada")],
+      students: [
         csvRow({ github_id: "101", username: "ada" }),
-        csvRow({ github_id: "202", username: "bob" }),
+        csvRow({ github_id: "202", username: "bob", role: "ta" }),
       ],
-      [member(101, "ada")], // only ada is on the team; bob is not_in_org
-    )
-    expect(notInOrgUsernames(rows)).toEqual(["bob"])
+    })
+    expect(rows.map((r) => r.username)).toEqual(["ada"])
   })
 
-  it("returns the username of an id-less not_in_org row verbatim", () => {
-    const rows = roster([csvRow({ username: "Bob" })], [])
-    // No reverse match against the org list: the CSV username is authoritative,
-    // returned as written (reconcile lowercases/verifies membership itself).
-    expect(notInOrgUsernames(rows)).toEqual(["Bob"])
-  })
-
-  it("excludes already-enrolled team members", () => {
-    const rows = roster(
-      [csvRow({ github_id: "101", username: "ada" })],
-      [member(101, "ada")],
-    )
-    expect(notInOrgUsernames(rows)).toEqual([])
-  })
-
-  it("is empty when there are no not_in_org rows", () => {
-    const rows = roster([], [member(101, "ada")])
-    expect(notInOrgUsernames(rows)).toEqual([])
+  it("renders nothing when the CSV has rows but no team members or invites", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ username: "ghost" }), csvRow({ username: "casper" })],
+    })
+    expect(rows).toEqual([])
   })
 })

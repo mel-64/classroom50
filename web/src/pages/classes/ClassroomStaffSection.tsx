@@ -18,10 +18,17 @@ import {
   staffTeamName,
   grantTeamConfigRepoWrite,
 } from "@/hooks/github/mutations"
-import { normalizeGithubUsername } from "@/api/mutations/students"
+import {
+  normalizeGithubUsername,
+  syncRosterFromTeam,
+} from "@/api/mutations/students"
+import { rosterPath } from "@/util/rosterPath"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { STAFF_ROLES, type StaffRole } from "@/types/classroom"
 import type { GitHubUser } from "@/hooks/github/types"
+import type { GitHubClient } from "@/hooks/github/client"
+import type { QueryClient } from "@tanstack/react-query"
+import { logger } from "@/lib/logger"
 import { Button, Card, FormField, Input, Select } from "@/components/ui"
 
 // i18n key for each role's singular label. A map (not inline t()) so it works in
@@ -29,6 +36,35 @@ import { Button, Card, FormField, Input, Select } from "@/components/ui"
 const ROLE_LABEL_KEY: Record<StaffRole, string> = {
   instructor: "classes.staff.roleInstructor",
   ta: "classes.staff.roleTa",
+}
+
+const log = logger.scope("classroom:staff")
+
+// Best-effort roster.csv convergence after a staff membership change: the roster
+// records a `role` per member (team is the authority), so adding/removing staff
+// should proactively sync roster.csv rather than waiting for the next roster
+// open. Failure is non-fatal — the roster page auto-syncs on open — so this
+// never blocks or surfaces an error on the staff action itself.
+async function syncRosterAfterStaffChange(
+  client: GitHubClient,
+  queryClient: QueryClient,
+  org: string,
+  classroom: string,
+): Promise<void> {
+  try {
+    await syncRosterFromTeam(client, { org, classroom })
+    await queryClient.invalidateQueries({
+      queryKey: githubKeys.csvFile(org, "classroom50", rosterPath(classroom)),
+    })
+  } catch (err) {
+    // Best-effort; the roster page's auto-sync converges it on next open. Log
+    // so a persistently failing convergence is diagnosable.
+    log.debug("roster sync after staff change failed (non-fatal)", {
+      org,
+      classroom,
+      err,
+    })
+  }
 }
 
 // Manage a classroom's staff (instructor / TA), backed by the per-classroom
@@ -153,6 +189,8 @@ const AddStaff = ({
           staffTeamName(classroom, addedRole),
         ),
       })
+      // Record the new staffer's role in roster.csv now (best-effort).
+      void syncRosterAfterStaffChange(client, queryClient, org, classroom)
       notify({
         tone: "success",
         durationMs: 5000,
@@ -327,6 +365,9 @@ const StaffMemberRow = ({
       queryClient.invalidateQueries({
         queryKey: githubKeys.teamMembers(org, teamSlug),
       })
+      // Clear the removed staffer's stale role from roster.csv now
+      // (best-effort) so the roster stops showing them with a role.
+      void syncRosterAfterStaffChange(client, queryClient, org, classroom)
       notify({
         tone: "success",
         durationMs: 4000,

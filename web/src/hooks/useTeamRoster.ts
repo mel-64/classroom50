@@ -7,18 +7,21 @@ import {
   githubKeys,
   teamMembersQuery,
   teamInvitationsQuery,
+  orgMembersAllQuery,
 } from "@/hooks/github/queries"
 import { staffTeamName } from "@/hooks/github/mutations"
 import { classroomTeamSlugHeuristic } from "@/util/orgMembership"
 import {
   buildTeamRoster,
   countByState,
-  notInOrgUsernames,
   teamMembersMissingFromCsv,
+  rowsNeedingBackfill,
   type TeamRosterRow,
   type TeamRosterRowState,
+  type RosterRole,
 } from "@/util/teamRoster"
 import { enrolledCountsByRole, type RoleCounts } from "@/util/rosterRoles"
+import { memberIdentitySets } from "@/util/identity"
 import type { Student } from "@/types/classroom"
 import type { GitHubUser } from "@/hooks/github/types"
 
@@ -56,20 +59,29 @@ export type UseTeamRosterResult = {
   pendingHidden: boolean
   // The resolved team slug (classroom.json.team.slug, else classroom50-<c>).
   teamSlug: string
+  // Resolved team slug per role, so the detail view can link each role a member
+  // actually holds to its real team (student -> classroom team, instructor/ta ->
+  // the staff team) rather than assuming everyone is on the student team.
+  teamSlugByRole: Record<RosterRole, string>
   // Count of team members with no roster.csv row — the exact set "Sync roster"
   // appends. 0 = in sync (button disabled, "In sync"); >0 = drift the teacher
-  // can sync (auto-synced on open). Opposite direction from `not_in_org` (on
-  // CSV, not on team), which sync can't fix.
+  // can sync (auto-synced on open).
   csvMissingCount: number
   // Lowercased logins of team members with no roster.csv row — used to skip a
   // just-unenrolled member (team-drop failed) from the automatic CSV backfill.
   csvMissingLogins: string[]
-  // Rostered students who are `not_in_org` (on roster.csv with a username but
-  // not a team/org member and not a pending invite) — the usernames
-  // auto-reconcile feeds to reconcileTeamFromOrgMembers. It team-adds the ones
-  // that are in fact active org members (native invite / SSO) and skips the
-  // rest, which stay `not_in_org` and are highlighted for invite/removal.
-  notInOrgUsernames: string[]
+  // Count of existing CSV rows that are stale against team membership (blank
+  // github_id or a role differing from the team). Sync backfills these; the
+  // view uses it (with csvMissingCount) to decide whether a sync is worthwhile.
+  backfillNeededCount: number
+  // Lowercased logins of the stale rows, so the auto-sync trigger can drop a
+  // suppressed (just-unenrolled) login before deciding to sync — mirroring
+  // csvMissingLogins, so both drift terms agree on who is suppressed.
+  backfillNeededLogins: string[]
+  // Whether org membership was readable, so the view can gate the in-org
+  // "needs attention" filter option (no such rows exist when membership is
+  // unknown — those rows are suppressed).
+  orgMembersKnown: boolean
   // Re-run the team-member fetch so an error surface can offer a retry without a
   // full page reload.
   refetch: () => void
@@ -130,6 +142,18 @@ export function useTeamRoster(
   )
   const taInvitesQuery = useQuery(teamInvitationsQuery(client, org, taSlug))
 
+  // All active org members (shared cache with the Org Members page). Used only
+  // to classify a roster.csv row on no team as in-org (assign a role) vs
+  // not-in-org (invite). A failed/forbidden read leaves orgMembersKnown false,
+  // so buildTeamRoster suppresses those needs-attention rows rather than
+  // guessing — the roster degrades to the pure team-driven view, never errors.
+  const orgMembersQuery = useQuery(orgMembersAllQuery(client, org))
+  const orgMembersKnown = orgMembersQuery.isSuccess
+  const { orgMemberIds, orgMemberLogins } = useMemo(() => {
+    const { ids, logins } = memberIdentitySets(orgMembersQuery.data ?? [])
+    return { orgMemberIds: ids, orgMemberLogins: logins }
+  }, [orgMembersQuery.data])
+
   const pendingHidden = computePendingHidden(invitesForbidden)
 
   const rows = useMemo(
@@ -155,6 +179,9 @@ export function useTeamRoster(
               ta: taInvitesQuery.data ?? [],
             },
         students,
+        orgMemberIds,
+        orgMemberLogins,
+        orgMembersKnown,
       }),
     [
       members,
@@ -165,6 +192,9 @@ export function useTeamRoster(
       taInvitesQuery.data,
       pendingHidden,
       students,
+      orgMemberIds,
+      orgMemberLogins,
+      orgMembersKnown,
     ],
   )
 
@@ -200,10 +230,28 @@ export function useTeamRoster(
     [csvMissing],
   )
 
-  // Rostered `not_in_org` usernames — what auto-reconcile tries to team-add
-  // (reconcile skips any that aren't active org members). Memoized so the join
-  // key stays a stable string list rather than a fresh array every render.
-  const notInOrg = useMemo(() => notInOrgUsernames(rows), [rows])
+  // Rows already in the CSV but stale against team membership (blank github_id
+  // or a role that differs from the team's) — the login-only `rliu50` case.
+  // These need the same sync backfill but aren't "missing", so they must feed
+  // the sync trigger separately, else a login-only row would never converge.
+  const backfillNeeded = useMemo(
+    () =>
+      rowsNeedingBackfill(
+        members ?? [],
+        { instructor: instructorMembers ?? [], ta: taMembers ?? [] },
+        students,
+      ),
+    [members, instructorMembers, taMembers, students],
+  )
+  const backfillNeededCount = backfillNeeded.length
+  // Lowercased logins of the stale rows, so the auto-sync trigger can drop a
+  // just-unenrolled member the same way it does for csvMissingLogins — a
+  // suppressed login's still-present stale row must not re-fire a resurrecting
+  // sync during the eventual-consistency window.
+  const backfillNeededLogins = useMemo(
+    () => backfillNeeded.map((s) => s.username.trim().toLowerCase()),
+    [backfillNeeded],
+  )
 
   // Any team-member fetch (student or staff) failing for a non-404 reason is a
   // real error — surface it rather than rendering a partial roster as "empty".
@@ -230,9 +278,16 @@ export function useTeamRoster(
     isEmpty: !isLoading && !isError && rows.length === 0,
     pendingHidden,
     teamSlug,
+    teamSlugByRole: {
+      student: teamSlug,
+      instructor: instructorSlug,
+      ta: taSlug,
+    },
     csvMissingCount,
     csvMissingLogins,
-    notInOrgUsernames: notInOrg,
+    backfillNeededCount,
+    backfillNeededLogins,
+    orgMembersKnown,
     // isError folds in the staff-member fetches too, so a retry must re-run
     // every team-member query (student + instructor + ta), not just the
     // student one — otherwise a staff-team failure stays stuck in error. Also
@@ -244,6 +299,7 @@ export function useTeamRoster(
       void taMembersQuery.refetch()
       void instructorInvitesQuery.refetch()
       void taInvitesQuery.refetch()
+      void orgMembersQuery.refetch()
     },
   }
 }
@@ -278,8 +334,8 @@ export type OptimisticMember = {
 
 // Optimistically add a just-enrolled member to the team-members cache, then
 // invalidate to reconcile. Enrolling an already-active org member team-adds them
-// with no pending invite, so without the seed buildTeamRoster flashes the row as
-// "not_in_org" until the refetch lands. Dedup by id; the refetch replaces the
+// with no pending invite, so without the seed the just-enrolled member would not
+// render until the refetch lands. Dedup by id; the refetch replaces the
 // stub (or drops it if the add didn't land). No-ops a blank/invalid id.
 export function useSeedTeamMember(
   org: string,

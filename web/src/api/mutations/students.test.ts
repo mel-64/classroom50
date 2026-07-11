@@ -7,13 +7,17 @@ import {
   unenrollStudent,
   bulkUnenrollStudents,
   bulkEnrollStudentsInClassroom,
-  reconcileTeamFromOrgMembers,
+  assignRosterMemberRole,
+  applyRosterRoleChange,
   inviteRosterStudents,
   syncRosterFromTeam,
+  writeRosterRoles,
   migrateRosterFile,
   updateStudent,
   updateStudentWithConflictRetry,
   parseStudentsCsv,
+  parseRosterCsv,
+  RosterCsvMalformedError,
   STUDENT_CSV_FIELDS,
   StudentAlreadyEnrolledError,
 } from "./students"
@@ -1216,8 +1220,8 @@ describe("bulkUnenrollStudents — single-commit batch removal", () => {
 })
 
 // A fake client over multiple GitHub users, per-user org membership, and the
-// classroom team. Drives bulkEnrollStudentsInClassroom / reconcileTeamFromOrgMembers
-// / syncRosterFromTeam end to end (CSV read+commit, /users/{login}, membership
+// classroom team. Drives bulkEnrollStudentsInClassroom / syncRosterFromTeam end
+// to end (CSV read+commit, /users/{login}, membership
 // GET, team-add PUT, team-members list). `users` maps login -> id/name/email;
 // `members` is the set of ACTIVE org-member logins (case-insensitive); `teamHas`
 // seeds the STUDENT team-member list, and `instructorHas`/`taHas` the staff
@@ -1234,6 +1238,12 @@ const makeTeamClient = (opts: {
   teamHas?: TeamMemberSeed[]
   instructorHas?: TeamMemberSeed[]
   taHas?: TeamMemberSeed[]
+  // Pending team invitations per role (login, and/or email for email-only
+  // invitees). syncRosterFromTeam reads these so it never clears the role of a
+  // person who is invited-but-not-yet-a-member.
+  teamInvites?: { login?: string; email?: string }[]
+  instructorInvites?: { login?: string; email?: string }[]
+  taInvites?: { login?: string; email?: string }[]
   // When set, a members read for the instructor/ta team rejects with this
   // non-404 status (to exercise the best-effort staff-read degradation).
   staffReadRejects?: { role: "instructor" | "ta"; status: number }
@@ -1271,6 +1281,21 @@ const makeTeamClient = (opts: {
         const login = decodeURIComponent(path.split("/memberships/")[1])
         teamAdds.push(login)
         return Promise.resolve({ state: "active" })
+      }
+      // Team pending invitations (syncRosterFromTeam): GET
+      // .../teams/{slug}/invitations. Route by slug to the seeded per-role list.
+      if (path.includes("/teams/") && path.includes("/invitations")) {
+        const slug = decodeURIComponent(
+          path.split("/teams/")[1].split("/invitations")[0],
+        )
+        const seed = slug.endsWith("-instructor")
+          ? (opts.instructorInvites ?? [])
+          : slug.endsWith("-ta")
+            ? (opts.taInvites ?? [])
+            : (opts.teamInvites ?? [])
+        return Promise.resolve(
+          seed.map((i) => ({ login: i.login ?? null, email: i.email ?? null })),
+        )
       }
       // Team members list (syncRosterFromTeam): GET .../teams/{slug}/members
       // (checked AFTER /memberships/ since "/members" is a substring of it).
@@ -1317,7 +1342,25 @@ const makeTeamClient = (opts: {
         if (memberSet.has(login.toLowerCase())) {
           return Promise.resolve({ state: "active" })
         }
-        return Promise.reject(new Error("404 not a member"))
+        // A non-member is a real 404 (mirrors GitHub) so a status-aware caller
+        // (assignRosterMemberRole) can tell "not a member" from a transient
+        // read failure; isActiveMember-style callers swallow it to false anyway.
+        return Promise.reject(
+          new GitHubAPIError({
+            status: 404,
+            url: path,
+            message: "Not Found",
+            body: null,
+            rateLimit: {
+              limit: null,
+              remaining: null,
+              used: null,
+              reset: null,
+              resource: null,
+              retryAfter: null,
+            },
+          }),
+        )
       }
       if (path.includes("/git/ref/")) {
         return Promise.resolve({ object: { sha: "base-sha" } })
@@ -1346,11 +1389,12 @@ const makeTeamClient = (opts: {
     client: { request, requestRaw } as unknown as GitHubClient,
     committed,
     teamAdds,
+    request,
   }
 }
 
 describe("bulkEnrollStudentsInClassroom — verify org membership, flag non-members", () => {
-  it("adds active org members to the team and flags non-members as notInOrg", async () => {
+  it("adds active org members to the team and skips non-members", async () => {
     const { client, committed, teamAdds } = makeTeamClient({
       startingCsv: HEADER,
       users: {
@@ -1370,9 +1414,9 @@ describe("bulkEnrollStudentsInClassroom — verify org membership, flag non-memb
     const rows = rowsFromCsv(committed.content!)
     expect(rows.map((r) => r.username).sort()).toEqual(["ada", "bob"])
     expect(rows.find((r) => r.username === "ada")?.github_id).toBe("101")
-    // ...but only the active member is team-added; the non-member is flagged.
+    // ...but only the active member is team-added; the non-member (bob, not in
+    // the org) is skipped and left for the upload's org-invite pass.
     expect(teamAdds).toEqual(["ada"])
-    expect(result.notInOrg).toEqual(["bob"])
     expect(result.teamResults).toEqual([{ username: "ada", status: "added" }])
   })
 
@@ -1432,42 +1476,6 @@ describe("bulkEnrollStudentsInClassroom — verify org membership, flag non-memb
   })
 })
 
-describe("reconcileTeamFromOrgMembers — verified, best-effort team-add", () => {
-  it("adds active members and skips a rostered non-member (stays not_in_org)", async () => {
-    const { client, teamAdds } = makeTeamClient({
-      startingCsv: HEADER,
-      users: { ada: { id: 101 }, gone: { id: 999 } },
-      members: ["ada"], // "gone" is not an active org member
-    })
-
-    const result = await reconcileTeamFromOrgMembers(client, {
-      org: "acme",
-      classroom: "cs101",
-      usernames: ["ada", "gone"],
-    })
-
-    expect(result.added).toEqual(["ada"])
-    expect(teamAdds).toEqual(["ada"])
-    // A non-member isn't a failure — it's skipped and stays highlighted.
-    expect(result.skipped).toEqual(["gone"])
-    expect(result.failed).toEqual([])
-  })
-
-  it("short-circuits with no usernames", async () => {
-    const { client, teamAdds } = makeTeamClient({
-      startingCsv: HEADER,
-      users: {},
-    })
-    const result = await reconcileTeamFromOrgMembers(client, {
-      org: "acme",
-      classroom: "cs101",
-      usernames: [],
-    })
-    expect(result).toEqual({ added: [], skipped: [], failed: [] })
-    expect(teamAdds).toEqual([])
-  })
-})
-
 describe("syncRosterFromTeam — identity-only backfill", () => {
   it("appends an identity-only row (username + github_id, blank metadata)", async () => {
     const { client, committed } = makeTeamClient({
@@ -1498,6 +1506,69 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
       // Student-team member records the "student" role.
       role: "student",
     })
+  })
+
+  it("backfills a blank github_id on a login-matched row (the rliu50 case)", async () => {
+    // Teacher wrote a bare username, invited, the student joined the team — but
+    // the row still has no github_id. Sync must fill it in from the team member.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "rliu50,,,,,,\n",
+      users: {},
+      teamHas: [{ login: "rliu50", id: 127826836 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.noop).toBe(false)
+    const rliu = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "rliu50",
+    )
+    expect(rliu).toMatchObject({
+      username: "rliu50",
+      github_id: "127826836",
+      role: "student",
+    })
+  })
+
+  it("never overwrites an existing github_id (renamed-login safety)", async () => {
+    // The CSV row already has an id; a team member sharing the login but a
+    // DIFFERENT id must not repoint the row onto the other account.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "rliu50,,,,,999,student\n",
+      users: {},
+      teamHas: [{ login: "rliu50", id: 127826836 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    // Role already correct + id must be preserved -> nothing to change.
+    expect(result.noop).toBe(true)
+    const rliu = rowsFromCsv(
+      committed.content ?? HEADER + "rliu50,,,,,999,student\n",
+    ).find((r) => r.username === "rliu50")
+    expect(rliu?.github_id).toBe("999")
+  })
+
+  it("leaves a blank-id row untouched when its login is on no team", async () => {
+    const { client } = makeTeamClient({
+      startingCsv: HEADER + "ghost,,,,,,\n",
+      users: {},
+      teamHas: [],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    // No team members at all -> nothing to backfill or append.
+    expect(result.noop).toBe(true)
   })
 
   it("syncs instructors and TAs with their role, not just students", async () => {
@@ -1579,6 +1650,112 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
       email: "g@x.edu",
       section: "A",
     })
+  })
+
+  it("clears the role of a row whose person is on no team (removed staffer)", async () => {
+    // tara was a TA (role recorded), then removed from the staff team. She's on
+    // no team now, so sync clears her role to "" while keeping her row and
+    // teacher-owned metadata — the CSV stops disagreeing with the team.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "tara,Tara,Vance,t@x.edu,B,55,ta\n",
+      users: {},
+      teamHas: [],
+      instructorHas: [],
+      taHas: [], // removed from the ta team
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.addedUsernames).toEqual([])
+    expect(result.noop).toBe(false) // a role change happened
+    const tara = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "tara",
+    )
+    // Row kept, metadata intact, role cleared.
+    expect(tara).toMatchObject({
+      username: "tara",
+      github_id: "55",
+      first_name: "Tara",
+      email: "t@x.edu",
+      section: "B",
+      role: "",
+    })
+  })
+
+  it("does NOT clear the role of a pending invitee (still on no team)", async () => {
+    // prof was just invited as an instructor (org owner) and their role was
+    // written to roster.csv, but they haven't accepted yet — so they're on no
+    // team. A pending instructor-team invite must preserve the recorded role;
+    // clearing it here would wipe the writeback for the whole pending window.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,instructor\n" + "ada,,,,,101,\n", // a co-occurring backfill row makes sync run
+      users: {},
+      teamHas: [{ login: "ada", id: 101 }],
+      instructorHas: [], // prof not yet a member
+      instructorInvites: [{ login: "prof" }], // ...but has a pending invite
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.noop).toBe(false) // ada's role backfill still runs
+    const prof = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "prof",
+    )
+    expect(prof?.role).toBe("instructor") // preserved, not cleared to ""
+  })
+
+  it("clears a stale role when the person is on no team AND has no pending invite", async () => {
+    // The pending-preservation guard must be narrow: no membership and no
+    // pending invite still clears (the removed-staffer case), even when another
+    // row drives the sync.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "gone,,,,,77,ta\n" + "ada,,,,,101,\n",
+      users: {},
+      teamHas: [{ login: "ada", id: 101 }],
+      taHas: [],
+      taInvites: [], // no pending invite for gone
+    })
+
+    await syncRosterFromTeam(client, { org: "acme", classroom: "cs101" })
+
+    const gone = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "gone",
+    )
+    expect(gone?.role).toBe("")
+  })
+
+  it("does NOT clear an active staffer's role when a staff-team read degrades", async () => {
+    // grace is a current instructor, but the instructor-team read transiently
+    // 500s (degrades to []). Sync must NOT treat "absent from the degraded read"
+    // as "removed" and wipe her recorded role — the read was incomplete.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "grace,Grace,Hopper,g@x.edu,A,707,instructor\n",
+      users: {},
+      teamHas: [],
+      instructorHas: [{ login: "grace", id: 707 }],
+      staffReadRejects: { role: "instructor", status: 500 },
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    // No append, and crucially no role change from the incomplete read.
+    expect(result.addedUsernames).toEqual([])
+    expect(result.noop).toBe(true)
+    if (committed.content !== null) {
+      const grace = rowsFromCsv(committed.content).find(
+        (r) => r.username === "grace",
+      )
+      expect(grace?.role).toBe("instructor")
+    }
   })
 
   it("a non-404 failure on a staff-team read degrades to [] and still syncs students", async () => {
@@ -1677,6 +1854,101 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
   })
 })
 
+describe("writeRosterRoles — set role on existing rows", () => {
+  it("writes the assigned role onto a matching row and commits", async () => {
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,\n",
+      users: {},
+      teamHas: [],
+    })
+
+    const res = await writeRosterRoles(client, {
+      org: "acme",
+      classroom: "cs101",
+      roles: [{ username: "prof", role: "instructor" }],
+    })
+
+    expect(res.changed).toBe(1)
+    const prof = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "prof",
+    )
+    expect(prof?.role).toBe("instructor")
+  })
+
+  it("no-ops when the role already matches (no commit)", async () => {
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,instructor\n",
+      users: {},
+      teamHas: [],
+    })
+
+    const res = await writeRosterRoles(client, {
+      org: "acme",
+      classroom: "cs101",
+      roles: [{ username: "prof", role: "instructor" }],
+    })
+
+    expect(res.changed).toBe(0)
+    expect(committed.content).toBeNull()
+  })
+
+  it("throws RosterCsvMalformedError on a malformed roster.csv (no commit)", async () => {
+    // The self-healing case: a stray-comma sibling row (8 fields vs 7). The
+    // writeback must NOT silently rewrite (positional re-serialize would corrupt
+    // the bad row) nor swallow — it raises a typed error the caller surfaces.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,\n" + "rliu50,,,,,,,\n",
+      users: {},
+      teamHas: [],
+    })
+
+    await expect(
+      writeRosterRoles(client, {
+        org: "acme",
+        classroom: "cs101",
+        roles: [{ username: "prof", role: "instructor" }],
+      }),
+    ).rejects.toBeInstanceOf(RosterCsvMalformedError)
+    expect(committed.content).toBeNull() // nothing written
+  })
+
+  it("no-ops for a username absent from the CSV (never appends a row)", async () => {
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,instructor\n",
+      users: {},
+      teamHas: [],
+    })
+
+    const res = await writeRosterRoles(client, {
+      org: "acme",
+      classroom: "cs101",
+      roles: [{ username: "ghost", role: "ta" }],
+    })
+
+    expect(res.changed).toBe(0)
+    expect(committed.content).toBeNull()
+  })
+
+  it("no-ops (no git read/commit) for an empty roles input", async () => {
+    const { client, committed, request } = makeTeamClient({
+      startingCsv: HEADER + "prof,,,,,9,instructor\n",
+      users: {},
+      teamHas: [],
+    })
+
+    const res = await writeRosterRoles(client, {
+      org: "acme",
+      classroom: "cs101",
+      roles: [],
+    })
+
+    expect(res.changed).toBe(0)
+    expect(committed.content).toBeNull()
+    // Early return before any ref read or commit.
+    expect(request).not.toHaveBeenCalled()
+  })
+})
+
 describe("parseStudentsCsv — short-row tolerance is trailing-only", () => {
   const HEADER = STUDENT_CSV_FIELDS.join(",") + "\n"
 
@@ -1719,6 +1991,42 @@ describe("parseStudentsCsv — short-row tolerance is trailing-only", () => {
         HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A,42,student,extra\n",
       ),
     ).toThrow(/roster\.csv/)
+  })
+})
+
+describe("parseRosterCsv — structured per-line problems", () => {
+  const HEADER = STUDENT_CSV_FIELDS.join(",") + "\n"
+
+  it("reports the exact malformed line for a too-many-fields row (the rliu50 case)", () => {
+    // The real bug: a hand-written row with one comma too many (8 fields vs 7).
+    const csv =
+      HEADER + "rongxin-liu,,,,,10591665,instructor\n" + "rliu50,,,,,,,\n"
+    const { rows, problems } = parseRosterCsv(csv)
+    expect(problems).toHaveLength(1)
+    // Header is line 1; rongxin-liu line 2; the malformed rliu50 row is line 3.
+    expect(problems[0].line).toBe(3)
+    expect(problems[0].message).toMatch(/too many fields/i)
+    // Rows are still returned (the view stays tolerant) — the good row parses.
+    expect(rows.some((r) => r.username === "rongxin-liu")).toBe(true)
+  })
+
+  it("returns no problems for a well-formed roster", () => {
+    const csv = HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A,42,student\n"
+    const { problems } = parseRosterCsv(csv)
+    expect(problems).toEqual([])
+  })
+
+  it("treats a row short by exactly one trailing column as benign (no problem)", () => {
+    const csv = HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A,42\n"
+    const { problems } = parseRosterCsv(csv)
+    expect(problems).toEqual([])
+  })
+
+  it("flags a row short by more than one column", () => {
+    const csv = HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A\n"
+    const { problems } = parseRosterCsv(csv)
+    expect(problems.length).toBeGreaterThan(0)
+    expect(problems[0].line).toBe(2)
   })
 })
 
@@ -1800,6 +2108,16 @@ const makeInviteClient = (opts: {
         invitations.push(body ?? {})
         return Promise.resolve({})
       }
+      // Staff-team creation (resolveTeamIdByRole -> ensureClassroomRoleTeam).
+      // Create returns a fresh team; the config-repo write grant is a no-op PUT.
+      if (path.endsWith("/teams") && options?.method === "POST") {
+        const body = (options as { body?: { name?: string } }).body
+        const name = body?.name ?? "team"
+        return Promise.resolve({ id: 5000, slug: name, privacy: "secret" })
+      }
+      if (path.includes("/teams/") && path.includes("/repos/")) {
+        return Promise.resolve({})
+      }
       return Promise.reject(new Error(`unexpected request: ${path}`))
     })
 
@@ -1819,7 +2137,7 @@ describe("inviteRosterStudents — fresh invites for not_in_org students", () =>
       students: [{ username: "octocat", github_id: "1" }],
     })
 
-    expect(res.invited).toEqual(["octocat"])
+    expect(res.invited).toEqual([{ username: "octocat", role: "student" }])
     expect(invitations).toEqual([{ invitee_id: 1, role: "direct_member" }])
   })
 
@@ -1834,8 +2152,149 @@ describe("inviteRosterStudents — fresh invites for not_in_org students", () =>
       students: [{ username: "torvalds", github_id: "" }],
     })
 
-    expect(res.invited).toEqual(["torvalds"])
+    expect(res.invited).toEqual([{ username: "torvalds", role: "student" }])
     expect(invitations).toEqual([{ invitee_id: 2, role: "direct_member" }])
+  })
+
+  it("does not create staff teams for a students-only upload", async () => {
+    // resolveTeamIdByRole must only ensure a staff team for a role actually
+    // present. A students-only invite must not create/grant instructor/ta teams.
+    const teamWrites: string[] = []
+    const { client, invitations } = makeInviteClient({
+      users: { stu: { id: 5 } },
+      members: [],
+    })
+    // Wrap request to record any team-membership/creation write.
+    const orig = client.request as unknown as (
+      p: string,
+      o?: { method?: string },
+    ) => Promise<unknown>
+    ;(client as unknown as { request: typeof orig }).request = (p, o) => {
+      if (
+        p.includes("/teams") ||
+        (p.includes("/orgs/") && p.endsWith("/teams"))
+      )
+        teamWrites.push(p)
+      return orig(p, o)
+    }
+
+    await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "stu", github_id: "5", role: "student" }],
+    })
+
+    expect(teamWrites).toEqual([])
+    expect(invitations[0]).toMatchObject({ role: "direct_member" })
+  })
+
+  it("invites an instructor row as an organization OWNER (role admin)", async () => {
+    const { client, invitations } = makeInviteClient({
+      users: { prof: { id: 9 } },
+      members: [],
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "prof", github_id: "9", role: "instructor" }],
+    })
+
+    expect(res.invited).toEqual([{ username: "prof", role: "instructor" }])
+    // The org invite must carry admin (owner), not direct_member.
+    expect(invitations[0]).toMatchObject({ invitee_id: 9, role: "admin" })
+  })
+
+  it("invites a ta row as a plain member (direct_member), not an owner", async () => {
+    const { client, invitations } = makeInviteClient({
+      users: { helper: { id: 8 } },
+      members: [],
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "helper", github_id: "8", role: "ta" }],
+    })
+
+    expect(res.invited).toEqual([{ username: "helper", role: "ta" }])
+    // A TA is a plain org member; only instructor -> admin.
+    expect(invitations[0]).toMatchObject({
+      invitee_id: 8,
+      role: "direct_member",
+    })
+  })
+
+  it("dispatches org role per target in a mixed-role batch", async () => {
+    const { client, invitations } = makeInviteClient({
+      users: { stu: { id: 1 }, helper: { id: 2 }, prof: { id: 3 } },
+      members: [],
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [
+        { username: "stu", github_id: "1", role: "student" },
+        { username: "helper", github_id: "2", role: "ta" },
+        { username: "prof", github_id: "3", role: "instructor" },
+      ],
+    })
+
+    expect(res.invited).toEqual(
+      expect.arrayContaining([
+        { username: "stu", role: "student" },
+        { username: "helper", role: "ta" },
+        { username: "prof", role: "instructor" },
+      ]),
+    )
+    // Only the instructor is invited as an org owner (admin); the rest are plain.
+    const byId = new Map(invitations.map((i) => [i.invitee_id, i]))
+    expect(byId.get(1)).toMatchObject({ role: "direct_member" })
+    expect(byId.get(2)).toMatchObject({ role: "direct_member" })
+    expect(byId.get(3)).toMatchObject({ role: "admin" })
+  })
+
+  it("does not escalate an existing active member for an instructor row", async () => {
+    // The no-escalation invariant: ensureOrgMembership short-circuits an
+    // active/pending member BEFORE createOrgInvitation, so an instructor-role
+    // upload of an already-member never sends an admin (owner) invite.
+    const { client, invitations } = makeInviteClient({
+      users: { prof: { id: 9 } },
+      members: ["prof"],
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "prof", github_id: "9", role: "instructor" }],
+    })
+
+    expect(res.invited).toEqual([])
+    expect(res.skipped).toEqual([
+      { username: "prof", reason: "already-member" },
+    ])
+    // No invite at all -> no admin escalation of the existing member.
+    expect(invitations).toEqual([])
+  })
+
+  it("does not escalate an existing pending member for an instructor row", async () => {
+    const { client, invitations } = makeInviteClient({
+      users: { prof: { id: 9 } },
+      pending: ["prof"],
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "prof", github_id: "9", role: "instructor" }],
+    })
+
+    expect(res.invited).toEqual([])
+    expect(res.skipped).toEqual([
+      { username: "prof", reason: "already-pending" },
+    ])
+    expect(invitations).toEqual([])
   })
 
   it("skips an already-active member without inviting", async () => {
@@ -2052,5 +2511,369 @@ describe("migrateRosterFile — converge students.csv onto roster.csv", () => {
 
     expect(result.migrated).toBe(false)
     expect(treePosted()).toBe(false)
+  })
+})
+
+describe("assignRosterMemberRole — enroll a rostered active member", () => {
+  it("adds an active org member to the student team and reports assigned", async () => {
+    const { client, teamAdds } = makeTeamClient({
+      startingCsv: HEADER,
+      users: { wanda: { id: 50 } },
+      members: ["wanda"], // wanda is an active org member, on no team yet
+    })
+
+    const result = await assignRosterMemberRole(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "wanda",
+      role: "student",
+    })
+
+    expect(result).toEqual({ state: "assigned", role: "student" })
+    // Added to the derived classroom student team.
+    expect(teamAdds).toEqual(["wanda"])
+  })
+
+  it("never team-adds a non-member — reports not-member for the invite path", async () => {
+    const { client, teamAdds } = makeTeamClient({
+      startingCsv: HEADER,
+      users: { stranger: { id: 77 } },
+      members: [], // not an active org member
+    })
+
+    const result = await assignRosterMemberRole(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "stranger",
+      role: "student",
+    })
+
+    expect(result).toEqual({ state: "not-member" })
+    expect(teamAdds).toEqual([])
+  })
+
+  it("surfaces a transient membership-read failure instead of misreporting not-member", async () => {
+    const { client, request, teamAdds } = makeTeamClient({
+      startingCsv: HEADER,
+      users: { wanda: { id: 50 } },
+      members: ["wanda"],
+    })
+    // Make the membership read fail transiently (500), not a definitive 404.
+    request.mockImplementationOnce((path: string) => {
+      if (path.includes("/memberships/") && !path.includes("/teams/")) {
+        return Promise.reject(
+          new GitHubAPIError({
+            status: 500,
+            url: path,
+            message: "boom",
+            body: null,
+            rateLimit: {
+              limit: null,
+              remaining: null,
+              used: null,
+              reset: null,
+              resource: null,
+              retryAfter: null,
+            },
+          }),
+        )
+      }
+      return Promise.reject(new Error(`unexpected: ${path}`))
+    })
+
+    await expect(
+      assignRosterMemberRole(client, {
+        org: "acme",
+        classroom: "cs101",
+        username: "wanda",
+        role: "student",
+      }),
+    ).rejects.toThrow(/boom/)
+    // Never team-added on an unknown membership picture.
+    expect(teamAdds).toEqual([])
+  })
+})
+
+// A focused client mock for applyRosterRoleChange: records team adds, team
+// removes, org-membership role PUTs, and an ordered `ops` log (to assert the
+// owner-demote-first ordering). `members` are active org members; anyone else
+// 404s. `failRemoveSlug` makes a team-removal of that slug throw (best-effort
+// warning path).
+const makeRoleChangeClient = (opts: {
+  members: string[]
+  failRemoveSlug?: string
+}) => {
+  const memberSet = new Set(opts.members.map((m) => m.toLowerCase()))
+  const teamAdds: { slug: string; login: string }[] = []
+  const teamRemoves: { slug: string; login: string }[] = []
+  const orgRolePuts: { login: string; role: string }[] = []
+  const ops: (
+    | { kind: "orgRole"; login: string; role: string }
+    | { kind: "teamAdd"; slug: string; login: string }
+    | { kind: "teamRemove"; slug: string; login: string }
+  )[] = []
+
+  const requestRaw = vi.fn().mockImplementation((path: string) => {
+    if (path.includes("/contents/") && path.includes("classroom.json")) {
+      return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
+    }
+    return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+  })
+
+  const request = vi
+    .fn()
+    .mockImplementation(
+      (path: string, options?: { method?: string; body?: unknown }) => {
+        const method = options?.method ?? "GET"
+        // classroom.json read (resolveClassroomTeamSlugs) -> derived slugs.
+        if (path.includes("/contents/") && path.includes("classroom.json")) {
+          return Promise.reject(
+            new GitHubAPIError({
+              status: 404,
+              url: path,
+              message: "Not Found",
+              body: null,
+              rateLimit: {
+                limit: null,
+                remaining: null,
+                used: null,
+                reset: null,
+                resource: null,
+                retryAfter: null,
+              },
+            }),
+          )
+        }
+        // Create team (ensureSecretTeamByName): POST /orgs/{org}/teams
+        if (path.endsWith("/teams") && method === "POST") {
+          const name = (options?.body as { name?: string })?.name ?? ""
+          return Promise.resolve({ id: 999, slug: name, name })
+        }
+        // Ensure staff team (GET/adopt team by name) -> resolve an adopted team.
+        if (path.includes("/teams/") && !path.includes("/memberships/")) {
+          const slugMatch = path.match(/\/teams\/([^/]+)/)
+          const slug = slugMatch ? decodeURIComponent(slugMatch[1]) : ""
+          // Team-remove: DELETE .../teams/{slug}/memberships handled below.
+          return Promise.resolve({ id: 999, slug, name: slug })
+        }
+        // Grant config-repo write: PUT /orgs/{org}/teams/{slug}/repos/... — the
+        // team-repo path also matches /teams/ above; disambiguate by /repos/.
+        // (Handled by the /teams/ branch returning a benign object.)
+        // Team membership PUT/DELETE: .../teams/{slug}/memberships/{login}
+        if (path.includes("/teams/") && path.includes("/memberships/")) {
+          const parts = path.split("/teams/")[1]
+          const slug = decodeURIComponent(parts.split("/memberships/")[0])
+          const login = decodeURIComponent(parts.split("/memberships/")[1])
+          if (method === "DELETE") {
+            if (opts.failRemoveSlug && slug === opts.failRemoveSlug) {
+              return Promise.reject(new Error(`remove failed: ${slug}`))
+            }
+            teamRemoves.push({ slug, login })
+            ops.push({ kind: "teamRemove", slug, login })
+            return Promise.resolve()
+          }
+          teamAdds.push({ slug, login })
+          ops.push({ kind: "teamAdd", slug, login })
+          return Promise.resolve({ state: "active" })
+        }
+        // Org membership: GET returns state; PUT sets role.
+        if (path.includes("/memberships/") && !path.includes("/teams/")) {
+          const login = decodeURIComponent(path.split("/memberships/")[1])
+          if (method === "PUT") {
+            const role = (options?.body as { role?: string })?.role ?? ""
+            orgRolePuts.push({ login, role })
+            ops.push({ kind: "orgRole", login, role })
+            return Promise.resolve({ state: "active", role })
+          }
+          if (memberSet.has(login.toLowerCase())) {
+            return Promise.resolve({ state: "active" })
+          }
+          return Promise.reject(
+            new GitHubAPIError({
+              status: 404,
+              url: path,
+              message: "Not Found",
+              body: null,
+              rateLimit: {
+                limit: null,
+                remaining: null,
+                used: null,
+                reset: null,
+                resource: null,
+                retryAfter: null,
+              },
+            }),
+          )
+        }
+        // Add repo to team (grantTeamConfigRepoWrite): PUT
+        // /orgs/{org}/teams/{slug}/repos/{owner}/{repo}
+        if (path.includes("/repos/")) {
+          return Promise.resolve()
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      },
+    )
+
+  return {
+    client: { request, requestRaw } as unknown as GitHubClient,
+    teamAdds,
+    teamRemoves,
+    orgRolePuts,
+    ops,
+  }
+}
+
+describe("applyRosterRoleChange — confirmed team move / enroll", () => {
+  it("moves a student to TA: adds to the ta team, removes from the student team", async () => {
+    const { client, teamAdds, teamRemoves, orgRolePuts } = makeRoleChangeClient(
+      { members: ["userb"] },
+    )
+
+    const result = await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "userb",
+      fromRoles: ["student"],
+      toRole: "ta",
+    })
+
+    expect(result.warnings).toEqual([])
+    expect(teamAdds).toContainEqual({
+      slug: "classroom50-cs101-ta",
+      login: "userb",
+    })
+    expect(teamRemoves).toContainEqual({
+      slug: "classroom50-cs101",
+      login: "userb",
+    })
+    // Not an instructor move, so no org-owner promotion.
+    expect(orgRolePuts).toEqual([])
+  })
+
+  it("promotes to instructor: adds to the instructor team AND sets org role admin", async () => {
+    const { client, teamAdds, orgRolePuts } = makeRoleChangeClient({
+      members: ["userb"],
+    })
+
+    await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "userb",
+      fromRoles: ["student"],
+      toRole: "instructor",
+    })
+
+    expect(teamAdds).toContainEqual({
+      slug: "classroom50-cs101-instructor",
+      login: "userb",
+    })
+    expect(orgRolePuts).toContainEqual({ login: "userb", role: "admin" })
+  })
+
+  it("downgrades an instructor to student: demotes org role to member BEFORE any team change", async () => {
+    const { client, teamAdds, teamRemoves, orgRolePuts, ops } =
+      makeRoleChangeClient({ members: ["boss"] })
+
+    await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "boss",
+      fromRoles: ["instructor"],
+      toRole: "student",
+    })
+
+    expect(teamAdds).toContainEqual({
+      slug: "classroom50-cs101",
+      login: "boss",
+    })
+    expect(teamRemoves).toContainEqual({
+      slug: "classroom50-cs101-instructor",
+      login: "boss",
+    })
+    expect(orgRolePuts).toContainEqual({ login: "boss", role: "member" })
+    // The owner demote must run FIRST, so a failure never leaves the member
+    // half-moved-but-still-owner. The first recorded op is the membership PUT.
+    expect(ops[0]).toEqual({ kind: "orgRole", login: "boss", role: "member" })
+  })
+
+  it("drops EVERY non-target classroom team for a multi-team member", async () => {
+    const { client, teamRemoves } = makeRoleChangeClient({ members: ["boss"] })
+
+    // On both instructor + ta; move to student -> both staff teams dropped.
+    await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "boss",
+      fromRoles: ["ta", "instructor"],
+      toRole: "student",
+    })
+
+    expect(teamRemoves).toContainEqual({
+      slug: "classroom50-cs101-instructor",
+      login: "boss",
+    })
+    expect(teamRemoves).toContainEqual({
+      slug: "classroom50-cs101-ta",
+      login: "boss",
+    })
+  })
+
+  it("enroll (empty fromRoles): adds to the target team and drops nothing", async () => {
+    const { client, teamAdds, teamRemoves, orgRolePuts } = makeRoleChangeClient(
+      { members: ["newta"] },
+    )
+
+    await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "newta",
+      fromRoles: [],
+      toRole: "ta",
+    })
+
+    expect(teamAdds).toContainEqual({
+      slug: "classroom50-cs101-ta",
+      login: "newta",
+    })
+    expect(teamRemoves).toEqual([])
+    expect(orgRolePuts).toEqual([]) // ta target, not instructor
+  })
+
+  it("surfaces a warning (not a throw) when the old-team removal fails", async () => {
+    const { client, teamAdds } = makeRoleChangeClient({
+      members: ["userb"],
+      failRemoveSlug: "classroom50-cs101",
+    })
+
+    const result = await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "userb",
+      fromRoles: ["student"],
+      toRole: "ta",
+    })
+
+    // Target add still landed; the failed removal is a warning, not fatal.
+    expect(teamAdds).toContainEqual({
+      slug: "classroom50-cs101-ta",
+      login: "userb",
+    })
+    expect(result.warnings.length).toBe(1)
+    expect(result.warnings[0]).toMatch(/removing them from/)
+  })
+
+  it("throws for a non-member (never team-adds) so the caller routes to invite", async () => {
+    const { client, teamAdds } = makeRoleChangeClient({ members: [] })
+
+    await expect(
+      applyRosterRoleChange(client, {
+        org: "acme",
+        classroom: "cs101",
+        username: "stranger",
+        fromRoles: ["student"],
+        toRole: "ta",
+      }),
+    ).rejects.toThrow(/not an active member/)
+    expect(teamAdds).toEqual([])
   })
 })

@@ -1,16 +1,19 @@
-import Papa from "papaparse"
 import type { GitHubClient } from "@/hooks/github/client"
 import {
   addUserToTeam,
   createGitCommit,
   createGitTree,
   createOrgInvitation,
+  ensureClassroomRoleTeam,
   ensureOrgMembership,
   getErrorMessage,
   getOrgMembershipState,
+  grantTeamConfigRepoWrite,
   isActiveMember,
+  readOrgMembershipState,
   removeOrgMembership,
   removeUserFromTeam,
+  setOrgMembershipRole,
   staffTeamName,
   updateRef,
 } from "@/hooks/github/mutations"
@@ -23,6 +26,8 @@ import {
   getRawFile,
   getRawFileWithFallback,
   getUser,
+  listAllOrgMembers,
+  listTeamInvitations,
   listTeamMembers,
   sleep,
   REPO_READ_CONCURRENCY,
@@ -33,10 +38,26 @@ import { GitHubAPIError, isDefinitiveGitHubStatus } from "@/hooks/github/errors"
 import { isSameGitHubUser, parseGitHubId } from "@/util/students"
 import { studentKey, rosterClaimSet } from "@/util/identity"
 import { mapWithConcurrency } from "@/util/concurrency"
-import { escapeCsvFormulaInjection } from "@/util/csv"
 import { prefixCommit } from "@/util/commit"
+import {
+  formatRosterProblems,
+  normalizeStudentRow,
+  parseRosterCsv,
+  parseStudentsCsv,
+  splitName,
+  stringifyStudentsCsv,
+  type StudentCsvRow,
+} from "@/util/rosterCsv"
 import { rosterPath, legacyRosterPath } from "@/util/rosterPath"
 import { ROLE_RANK, type RosterRole } from "@/util/teamRoster"
+import { memberIdentitySets } from "@/util/identity"
+import {
+  classifyRosterUpload,
+  membershipLookup,
+  type PreflightResult,
+  type PreflightRow,
+  type ResolvedMembership,
+} from "@/util/rosterUploadPreflight"
 import { STAFF_ROLES, type StaffRole, type Student } from "@/types/classroom"
 import { logger } from "@/lib/logger"
 
@@ -135,165 +156,23 @@ async function tryAddUserToTeam(
   }
 }
 
-export const STUDENT_CSV_FIELDS = [
-  "username",
-  "first_name",
-  "last_name",
-  "email",
-  "section",
-  "github_id",
-  "role",
-] as const
-type StudentCsvField = (typeof STUDENT_CSV_FIELDS)[number]
-
-export type StudentCsvRow = Record<StudentCsvField, string>
-
-export function normalizeStudentRow(
-  row: Partial<Record<StudentCsvField, unknown>>,
-): StudentCsvRow {
-  return {
-    username: String(row.username ?? "").trim(),
-    first_name: String(row.first_name ?? "").trim(),
-    last_name: String(row.last_name ?? "").trim(),
-    email: String(row.email ?? "").trim(),
-    section: String(row.section ?? "").trim(),
-    github_id: String(row.github_id ?? "").trim(),
-    // Best-effort recorded metadata (instructor/ta/student, or ""), refreshed
-    // from the classroom's GitHub teams on sync. A pre-role file has no role
-    // column, so this coerces to "".
-    role: String(row.role ?? "").trim(),
-  }
-}
-
-// Split a full name: first token is first_name, the remainder is last_name.
-// Accepts null since GitHub's display name may be null. The single canonical
-// implementation; re-exported from util/roster as splitName for UI callers.
-export function splitName(name: string | null): {
-  first_name: string
-  last_name: string
-} {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean)
-  return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
-}
-
-export function parseStudentsCsv(csv: string): StudentCsvRow[] {
-  const parsed = Papa.parse<Record<string, string>>(csv, {
-    header: true,
-    delimiter: ",",
-    skipEmptyLines: "greedy",
-    transformHeader: (header) => header.trim(),
-  })
-
-  // A `TooFewFields` row is tolerated ONLY when it is short by exactly one
-  // column — the ambiguous-but-benign "trailing `github_id` omitted" case:
-  // `octocat,Grace,Hopper,,Section A` (5 fields) maps cleanly under
-  // `header: true` (the missing trailing field is `undefined`, coerced to "" by
-  // normalizeStudentRow), so a sync/read shouldn't abort on a roster merely
-  // missing trailing commas. A row short by TWO or more can't be explained by a
-  // single dropped trailing field, and since Papa maps values POSITIONALLY it
-  // would silently shift every value into the wrong column (corrupting the
-  // identity/email join with no error) — exactly as untrustworthy as a
-  // `TooManyFields` row, so it stays fatal. (A row short by exactly one where a
-  // MIDDLE cell was dropped is positionally indistinguishable from a dropped
-  // trailing field, so it is unavoidably read as the latter; nothing in the row
-  // data can disambiguate the two.)
-  // Only re-parse (tooFewFieldsAreTrailingOnly runs a second full parse) when a
-  // TooFewFields error is actually present — the flag is never read otherwise.
-  const shortRowsWithinTolerance =
-    parsed.errors.some((error) => error.code === "TooFewFields") &&
-    tooFewFieldsAreTrailingOnly(
-      csv,
-      parsed.meta.fields?.length ?? STUDENT_CSV_FIELDS.length,
-    )
-
-  const fatalErrors = parsed.errors.filter(
-    (error) =>
-      error.type !== "Delimiter" &&
-      !(error.code === "TooFewFields" && shortRowsWithinTolerance),
-  )
-
-  if (fatalErrors.length > 0) {
-    throw new Error(
-      `Could not parse roster.csv: ${fatalErrors
-        .map((error) => error.message)
-        .join("; ")}`,
-    )
-  }
-
-  return parsed.data
-    .map((row) => normalizeStudentRow(row))
-    .filter((row) => row.username || row.github_id || row.email)
-}
-
-// True when EVERY short data row is short by exactly one column, i.e. only the
-// trailing field was dropped. Re-parses without `header` to read raw row widths
-// (the header-keyed `data` hides which physical column is missing), so a row
-// dropping a middle cell — which Papa would silently left-shift — is NOT treated
-// as benign. A row that's short by 2+ (or a header we couldn't count) is fatal.
-function tooFewFieldsAreTrailingOnly(
-  csv: string,
-  headerWidth: number,
-): boolean {
-  if (headerWidth <= 0) return false
-  const raw = Papa.parse<string[]>(csv, {
-    delimiter: ",",
-    skipEmptyLines: "greedy",
-  })
-  // rows[0] is the header; a short DATA row is benign only at width-1.
-  return raw.data
-    .slice(1)
-    .every(
-      (row) => row.length === headerWidth || row.length === headerWidth - 1,
-    )
-}
-
-// Which student fields to defang. Applied to name/section free text AND email —
-// email is a member-controlled GitHub profile field written verbatim by
-// syncRosterFromTeam/bulk import, so a formula-leading verified email (e.g.
-// `=1+1@evil.com`) would otherwise reach roster.csv and execute on open. NOT
-// applied to github_id/tokens/hashes/timestamps, which must round-trip
-// byte-exact.
-//
-// NOTE: this writes the leading quote into the STORED value, so any consumer of
-// roster.csv (this app's parse layer, the gh-teacher CLI) must tolerate it on
-// these fields. The Go writer defangs the same set; keep them in lockstep.
-// Email matching keys on the normalized (trim+lowercase) email, so guarding the
-// cell doesn't affect match-by-email.
-const FORMULA_GUARDED_FIELDS = [
-  "first_name",
-  "last_name",
-  "section",
-  "email",
-] as const
-
-function stringifyStudentsCsv(rows: StudentCsvRow[]) {
-  const normalizedRows = rows
-    .map((row) => normalizeStudentRow(row))
-    .filter((row) => row.username || row.github_id || row.email)
-    .map((row) => {
-      const guarded = { ...row }
-      for (const field of FORMULA_GUARDED_FIELDS) {
-        guarded[field] = escapeCsvFormulaInjection(guarded[field])
-      }
-      return guarded
-    })
-
-  // Papa.unparse omits the header for an empty array, so an emptied roster
-  // would commit a header-less file the CLI/skeleton readers reject. Write the
-  // canonical header explicitly instead (keep in lockstep with STUDENT_CSV_FIELDS).
-  if (normalizedRows.length === 0) {
-    return STUDENT_CSV_FIELDS.join(",") + "\n"
-  }
-
-  return (
-    Papa.unparse(normalizedRows, {
-      columns: [...STUDENT_CSV_FIELDS],
-      delimiter: ",",
-      header: true,
-      newline: "\n",
-    }) + "\n"
-  )
-}
+// The roster.csv parse/serialize layer lives in util/rosterCsv (pure, no
+// GitHubClient dependency). Re-exported here so existing importers of these
+// symbols from "@/api/mutations/students" keep working unchanged.
+export {
+  STUDENT_CSV_FIELDS,
+  normalizeStudentRow,
+  splitName,
+  parseRosterCsv,
+  formatRosterProblems,
+  parseStudentsCsv,
+  stringifyStudentsCsv,
+} from "@/util/rosterCsv"
+export type {
+  StudentCsvRow,
+  RosterCsvProblem,
+  ParsedRosterCsv,
+} from "@/util/rosterCsv"
 
 export async function addStudentToClassroom(
   client: GitHubClient,
@@ -593,6 +472,10 @@ export type ImportRosterRow = {
   last_name?: string
   email?: string
   section?: string
+  // Classroom role from an optional `role` column, validated to a RosterRole.
+  // Undefined when absent or unrecognized; the upload defaults it to "student"
+  // and lets the instructor override per row before inviting.
+  role?: RosterRole
 }
 
 export type AddStudentsToClassroomInput = {
@@ -621,6 +504,18 @@ export const normalizeGithubUsername = (username: string) => {
 export const isLikelyGithubUsername = (username: string) => {
   // alphanumeric + hyphens, no hyphens at start or end
   return /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(username)
+}
+
+// Thrown by addStudentsToClassroom when every candidate row is a duplicate or
+// invalid, so there is nothing to commit. A typed sentinel (not a bare Error)
+// so a caller like the roster upload can detect the benign "all rows already
+// present" re-run and still proceed to its invite pass, while other callers
+// keep surfacing it as a hard "nothing to add."
+export class NoNewStudentsError extends Error {
+  constructor() {
+    super("No new students to add")
+    this.name = "NoNewStudentsError"
+  }
 }
 
 export async function addStudentsToClassroom(
@@ -775,7 +670,7 @@ export async function addStudentsToClassroom(
   }
 
   if (addedStudents.length === 0) {
-    throw new Error("No new students to add")
+    throw new NoNewStudentsError()
   }
 
   input.onProgress?.({
@@ -898,20 +793,61 @@ async function listClassroomMembersWithRoles(
   client: GitHubClient,
   org: string,
   slugs: { student: string; staff: Record<StaffRole, string> },
-): Promise<MemberWithRole[]> {
+): Promise<{
+  members: MemberWithRole[]
+  fullyRead: boolean
+  // Lowercased logins + emails with a pending invite to ANY classroom team.
+  // A pending invitee isn't a team MEMBER yet, so sync must not clear the role
+  // it (or an upload writeback) just recorded — the invite already carries that
+  // role, and it activates on acceptance. Empty when pending reads degrade, in
+  // which case fullyRead is false so the clear path stays conservative anyway.
+  pendingRoleKeys: Set<string>
+}> {
   // The student read stays strict (a transient failure there fails the sync so
   // it retries against fresh state). The two staff reads are best-effort: a
   // flaky or permission-blocked staff team degrades to [] rather than blocking
   // an otherwise-fine student sync — listTeamMembers already treats a missing
   // team (404) as [], so only a non-404 reject reaches the settle here.
-  const [studentMembers, ...staffMemberLists] = await Promise.all([
+  //
+  // `fullyRead` is false when any staff or pending read was degraded, so the
+  // caller must NOT treat "absent from this list" as "on no team" (that would
+  // wipe an active staffer's role from an incomplete picture). Appends are
+  // still safe from a partial list; only the role-CLEAR path is gated on it.
+  const allSlugs = [slugs.student, ...STAFF_ROLES.map((r) => slugs.staff[r])]
+  const [studentMembers, staffSettled, pendingSettled] = await Promise.all([
     listTeamMembers(client, org, slugs.student),
-    ...STAFF_ROLES.map((role) =>
-      Promise.allSettled([
-        listTeamMembers(client, org, slugs.staff[role]),
-      ]).then(([r]) => (r.status === "fulfilled" ? r.value : [])),
+    Promise.all(
+      STAFF_ROLES.map((role) =>
+        Promise.allSettled([
+          listTeamMembers(client, org, slugs.staff[role]),
+        ]).then(([r]) => r),
+      ),
+    ),
+    // Pending invitations per team (owner-only; 404 -> [], other errors settle
+    // to a rejection we treat as a degraded read).
+    Promise.all(
+      allSlugs.map((slug) =>
+        Promise.allSettled([listTeamInvitations(client, org, slug)]).then(
+          ([r]) => r,
+        ),
+      ),
     ),
   ])
+  const staffFullyRead = staffSettled.every((r) => r.status === "fulfilled")
+  const pendingFullyRead = pendingSettled.every((r) => r.status === "fulfilled")
+  const fullyRead = staffFullyRead && pendingFullyRead
+  const staffMemberLists = staffSettled.map((r) =>
+    r.status === "fulfilled" ? r.value : [],
+  )
+
+  const pendingRoleKeys = new Set<string>()
+  for (const r of pendingSettled) {
+    if (r.status !== "fulfilled") continue
+    for (const invite of r.value) {
+      if (invite.login) pendingRoleKeys.add(invite.login.toLowerCase())
+      if (invite.email) pendingRoleKeys.add(invite.email.trim().toLowerCase())
+    }
+  }
 
   const byId = new Map<number, MemberWithRole>()
   const consider = (
@@ -935,7 +871,7 @@ async function listClassroomMembersWithRoles(
     for (const m of staffMemberLists[i]) consider(m, role)
   })
 
-  return [...byId.values()]
+  return { members: [...byId.values()], fullyRead, pendingRoleKeys }
 }
 
 // Sync roster.csv from the classroom's GitHub teams: ensure every active member
@@ -965,7 +901,7 @@ export async function syncRosterFromTeam(
   return withGitConflictRetry(async () => {
     // Re-read teams + CSV on every attempt so the diff is always against the
     // latest state (a concurrent add/edit can't be clobbered or duplicated).
-    const [members, ref] = await Promise.all([
+    const [{ members, fullyRead, pendingRoleKeys }, ref] = await Promise.all([
       listClassroomMembersWithRoles(client, org, slugs),
       getBranchRef(client, org),
     ])
@@ -1002,27 +938,73 @@ export async function syncRosterFromTeam(
         !(m.email ? emails.has(m.email.trim().toLowerCase()) : false),
     )
 
-    // Refresh the recorded role on existing rows whose team-derived role has
-    // changed (a promotion/demotion, or a first-ever role on a pre-role row).
-    // Matched by id, then login — the same identity join used above. This is
-    // the only in-place edit sync makes; name/email/section stay teacher-owned.
+    // Reconcile the recorded role on existing rows to match live team
+    // membership — the team is the authority. Matched by id, then login (the
+    // same identity join used above):
+    //  - on a team now -> set the team-derived primary role (promotion/demotion,
+    //    or a first-ever role on a pre-role row);
+    //  - on NO team, and every team read SUCCEEDED (fullyRead) -> clear the role
+    //    to "" (e.g. a TA removed from the staff team; the stale "ta" must not
+    //    linger). When a staff read was degraded (not fullyRead), leave the role
+    //    UNCHANGED — "absent from an incomplete read" is not proof of removal, so
+    //    a transient staff-team blip must never wipe an active staffer's role.
+    // This is the only in-place edit sync makes; name/email/section stay
+    // teacher-owned. The row itself is never removed (CSV-only rows are drift,
+    // not deletions).
     const roleById = new Map(members.map((m) => [String(m.id), m.role]))
     const roleByLogin = new Map(
       members.map((m) => [m.login.toLowerCase(), m.role]),
     )
+    // github_id per login, to backfill a row that carries only a username (the
+    // common "teacher wrote a bare username, invited, the student joined" flow).
+    // Only usable when a login maps to exactly one member — a duplicate login
+    // (shouldn't happen on one team, but be safe) is left un-backfilled rather
+    // than guess. An existing non-empty id is NEVER overwritten (a renamed login
+    // must not silently repoint an id onto a different account).
+    const loginCounts = new Map<string, number>()
+    for (const m of members) {
+      const k = m.login.toLowerCase()
+      loginCounts.set(k, (loginCounts.get(k) ?? 0) + 1)
+    }
+    const idByLogin = new Map(
+      members
+        .filter((m) => loginCounts.get(m.login.toLowerCase()) === 1)
+        .map((m) => [m.login.toLowerCase(), String(m.id)]),
+    )
     let roleChanges = 0
+    let idBackfills = 0
     const reconciledStudents = currentStudents.map((s) => {
-      const role =
+      const loginKey = s.username.trim().toLowerCase()
+      const emailKey = s.email?.trim().toLowerCase()
+      const teamRole =
         (s.github_id ? roleById.get(s.github_id.trim()) : undefined) ??
-        roleByLogin.get(s.username.trim().toLowerCase())
-      if (role && role !== s.role) {
+        roleByLogin.get(loginKey)
+      // A pending invitee is not a team member yet, so teamRole is undefined —
+      // but the invite already carries their role and activates on acceptance.
+      // Clearing it here (a fresh upload writeback, or any recorded role) would
+      // wipe the role for the whole pending window, so preserve s.role while a
+      // pending invite for this login/email exists.
+      const hasPendingRole =
+        (loginKey && pendingRoleKeys.has(loginKey)) ||
+        (emailKey ? pendingRoleKeys.has(emailKey) : false)
+      const role = teamRole ?? (fullyRead && !hasPendingRole ? "" : s.role)
+      // Backfill only a blank id (see the idByLogin block above).
+      const backfilledId =
+        !s.github_id.trim() && loginKey ? idByLogin.get(loginKey) : undefined
+
+      let next = s
+      if (role !== s.role) {
         roleChanges++
-        return { ...s, role }
+        next = { ...next, role }
       }
-      return s
+      if (backfilledId) {
+        idBackfills++
+        next = { ...next, github_id: backfilledId }
+      }
+      return next
     })
 
-    if (missing.length === 0 && roleChanges === 0) {
+    if (missing.length === 0 && roleChanges === 0 && idBackfills === 0) {
       log.info("sync roster from team: completed (up to date)", {
         org,
         classroom,
@@ -1080,11 +1062,113 @@ export async function syncRosterFromTeam(
       classroom,
       added: addedRows.length,
       roleChanges,
+      idBackfills,
     })
     return {
       addedUsernames: addedRows.map((r) => r.username),
       noop: false,
     }
+  })
+}
+
+export type WriteRosterRolesInput = {
+  org: string
+  classroom: string
+  // Usernames -> the role to persist on their roster.csv row. Used by the upload
+  // to write an assigned role for a freshly-invited (still-pending) member,
+  // whose role auto-sync can't yet derive from team membership.
+  roles: { username: string; role: RosterRole }[]
+}
+
+// A role writeback couldn't run because roster.csv is malformed. Typed so the
+// caller can surface "fix the file, then re-check" instead of blanket-swallowing
+// a generic parse error — we refuse to rewrite a file we can't fully parse
+// (a positional re-serialize would corrupt the malformed row).
+export class RosterCsvMalformedError extends Error {
+  problemsSummary: string
+  constructor(problemsSummary: string) {
+    super(
+      `roster.csv is malformed, so roles were not written: ${problemsSummary}`,
+    )
+    this.name = "RosterCsvMalformedError"
+    this.problemsSummary = problemsSummary
+  }
+}
+
+// Set the `role` column on existing roster.csv rows matched by username. Only
+// touches rows that exist and whose role actually changes; never appends,
+// removes, or edits other fields. Best-effort caller (upload) — a conflict-safe
+// single commit.
+export async function writeRosterRoles(
+  client: GitHubClient,
+  input: WriteRosterRolesInput,
+): Promise<{ changed: number }> {
+  const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
+  const roleByLogin = new Map(
+    input.roles
+      .map((r) => [r.username.trim().toLowerCase(), r.role] as const)
+      .filter(([login]) => login),
+  )
+  if (roleByLogin.size === 0) return { changed: 0 }
+
+  return withGitConflictRetry(async () => {
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+    const studentsFilePath = rosterPath(classroom)
+    const currentCsv = await getRawFileWithFallback(client, {
+      org,
+      path: studentsFilePath,
+      fallbackPath: legacyRosterPath(classroom),
+      ref: ref.object.sha,
+    })
+    // Parse tolerantly: a role writeback must not throw an opaque error on a
+    // malformed sibling row (the exact self-healing case this feature targets).
+    // But we refuse to rewrite a file we can't fully parse — re-serializing
+    // positionally would corrupt the malformed row — so raise a TYPED error the
+    // caller can surface as "fix roster.csv, then re-check" instead of silently
+    // dropping the role. The role still converges on the next clean sync.
+    const { rows: currentStudents, problems } = parseRosterCsv(currentCsv)
+    if (problems.length > 0) {
+      throw new RosterCsvMalformedError(formatRosterProblems(problems))
+    }
+
+    let changed = 0
+    const nextStudents = currentStudents.map((s) => {
+      const role = roleByLogin.get(s.username.trim().toLowerCase())
+      if (role && role !== s.role) {
+        changed++
+        return { ...s, role }
+      }
+      return s
+    })
+
+    if (changed === 0) return { changed: 0 }
+
+    const nextCsv = stringifyStudentsCsv(nextStudents)
+    const tree = await createGitTree(client, {
+      org,
+      base_tree: commit.tree.sha,
+      tree: [
+        {
+          path: studentsFilePath,
+          mode: "100644",
+          type: "blob",
+          content: nextCsv,
+        },
+      ],
+    })
+    const newCommit = await createGitCommit(client, {
+      org,
+      message: prefixCommit(
+        `Set role on ${changed} roster member${changed === 1 ? "" : "s"}: ${classroom}`,
+      ),
+      tree_sha: tree.sha,
+      parents: [ref.object.sha],
+    })
+    await updateRef(client, org, newCommit.sha)
+    log.info("write roster roles: committed", { org, classroom, changed })
+    return { changed }
   })
 }
 
@@ -1175,105 +1259,15 @@ export async function migrateRosterFile(
   })
 }
 
-export type ReconcileTeamInput = {
-  org: string
-  classroom: string
-  // The rostered usernames (from `not_in_org` rows) to try to promote onto the
-  // classroom team. These are the GitHub usernames the teacher put in
-  // roster.csv — the teacher owns their accuracy; this is just a convenient
-  // batch team-add. A username that isn't an active org member is skipped and
-  // stays `not_in_org` (highlighted in the roster for invite/removal).
-  usernames: string[]
-}
-
-export type ReconcileTeamResult = {
-  // Usernames added to the classroom team this run.
-  added: string[]
-  // Rostered usernames that aren't active org members yet, so nothing was added
-  // — they stay `not_in_org` for the teacher to invite or remove. Not an error.
-  skipped: string[]
-  // Usernames whose team-add API call failed (retryable, worth surfacing).
-  failed: { login: string; message: string }[]
-}
-
-// Batch-add the roster's `not_in_org` students to the classroom team when they
-// turn out to already be active org members — the convenient team-add the
-// teacher would otherwise do by hand. The CSV username is authoritative (the
-// teacher owns its accuracy); this only closes the gap where a student joined
-// the ORG (native invite / SSO) but was never put on the team. Each add is:
-//   1) verified as an ACTIVE org member (never team-add a non-member); a
-//      non-member is SKIPPED (stays `not_in_org`, highlighted), not a failure.
-//   2) an idempotent PUT team membership.
-// Best-effort per user: one failure never blocks the others, and nothing here
-// touches org membership or roster.csv.
-export async function reconcileTeamFromOrgMembers(
-  client: GitHubClient,
-  input: ReconcileTeamInput,
-): Promise<ReconcileTeamResult> {
-  const { org, classroom, usernames } = input
-  log.info("reconcile team from org members: started", {
-    org,
-    classroom,
-    candidates: usernames.length,
-  })
-  await assertClassroomNotArchived(client, org, classroom)
-
-  const added: string[] = []
-  const skipped: string[] = []
-  const failed: ReconcileTeamResult["failed"] = []
-
-  if (usernames.length === 0) return { added, skipped, failed }
-
-  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
-
-  // Check active org membership for all candidates concurrently (bounded) — each
-  // is an independent GET, and on a roster open with N drifted rows a serial
-  // scan is up to N blocking round-trips. A throw still rejects the whole run
-  // (Promise.all semantics), matching the prior serial loop.
-  const logins = usernames.map((u) => u.trim()).filter(Boolean)
-  const memberships = await mapWithConcurrency(
-    logins,
-    REPO_READ_CONCURRENCY,
-    async (login) => ({
-      login,
-      active: await isActiveMember(client, org, login),
-    }),
-  )
-
-  // Only team-add active org members. A rostered non-member isn't a failure —
-  // they simply aren't in the org yet, so they stay `not_in_org` and the roster
-  // highlights them for the teacher to invite or remove.
-  for (const { login, active } of memberships) {
-    if (!active) {
-      skipped.push(login)
-      continue
-    }
-    const result = await tryAddUserToTeam(
-      client,
-      { org, teamSlug, username: login },
-      "reconcile team from org members",
-    )
-    if (result.ok) added.push(login)
-    else failed.push({ login, message: result.detail })
-  }
-
-  log.info("reconcile team from org members: completed", {
-    org,
-    classroom,
-    added: added.length,
-    skipped: skipped.length,
-    failed: failed.length,
-  })
-  return { added, skipped, failed }
-}
-
 export type InviteRosterStudentsInput = {
   org: string
   classroom: string
-  // Rows to invite. Each carries at least a username (a `not_in_org` roster row
-  // always has one); github_id is used when present, else derived from the
-  // username. `pending` rows are handled by resendOrgInvitation, not here.
-  students: { username: string; github_id?: string }[]
+  // Rows to invite. Each carries at least a username (a roster.csv row always
+  // has one); github_id is used when present, else derived from the username.
+  // `role` (default "student") selects the target team and org role: student ->
+  // classroom team, ta -> TA team, instructor -> org OWNER (admin) + instructor
+  // team. `pending` rows are handled by resendOrgInvitation, not here.
+  students: { username: string; github_id?: string; role?: RosterRole }[]
   onProgress?: (progress: {
     processed: number
     total: number
@@ -1282,8 +1276,9 @@ export type InviteRosterStudentsInput = {
 }
 
 export type InviteRosterStudentsResult = {
-  // A fresh org invite was created (carrying the classroom team).
-  invited: string[]
+  // A fresh org invite was created (carrying the role's team). Each carries the
+  // role it was invited as, so a caller can write it back to roster.csv.
+  invited: { username: string; role: RosterRole }[]
   // Already an active member or already had a pending invite — no new invite.
   skipped: { username: string; reason: "already-member" | "already-pending" }[]
   // Couldn't invite (username didn't resolve to a GitHub account, or the invite
@@ -1294,14 +1289,15 @@ export type InviteRosterStudentsResult = {
   deferred: string[]
 }
 
-// Bulk-invite roster students who are on roster.csv (by username) but not yet
-// in the organization — the `not_in_org` rows. Resolves each username to its
-// immutable GitHub id (using the stored github_id when present, else
-// GET /users/{username}) and sends a fresh org invitation carrying the
-// classroom team, so accepting it activates team membership atomically. This is
-// the roster-side counterpart to the Org Members "Invite" action; it does NOT
-// write roster.csv (identity backfill is syncRosterFromTeam's job) and never
-// touches an existing active/pending state (ensureOrgMembership no-ops those).
+// Bulk-invite roster members who aren't yet in the organization, by role.
+// Resolves each username to its immutable GitHub id (stored github_id when
+// present, else GET /users/{username}) and sends a fresh org invitation
+// carrying the role's team so accepting it activates the right membership
+// atomically: student -> classroom team, ta -> TA team, instructor -> the
+// instructor team AND org OWNER (role "admin"). Does NOT write roster.csv
+// (writeback is the caller's job) and never touches an existing active/pending
+// state (ensureOrgMembership no-ops those, so an existing member is never
+// escalated).
 export async function inviteRosterStudents(
   client: GitHubClient,
   input: InviteRosterStudentsInput,
@@ -1309,26 +1305,29 @@ export async function inviteRosterStudents(
   const { org, classroom, students, onProgress } = input
   await assertClassroomNotArchived(client, org, classroom)
 
-  const invited: string[] = []
+  const invited: InviteRosterStudentsResult["invited"] = []
   const skipped: InviteRosterStudentsResult["skipped"] = []
   const failed: InviteRosterStudentsResult["failed"] = []
   const deferred: string[] = []
 
   const targets = students
-    .map((s) => ({ username: s.username.trim(), github_id: s.github_id }))
+    .map((s) => ({
+      username: s.username.trim(),
+      github_id: s.github_id,
+      role: s.role ?? "student",
+    }))
     .filter((s) => s.username)
   if (targets.length === 0) return { invited, skipped, failed, deferred }
 
-  // Resolve the classroom team once so every fresh invite carries it (accepting
-  // the single org invite then activates team membership). A missing team id is
-  // tolerated — the invite still sends, just without the team attached.
-  let teamIds: number[] | undefined
-  try {
-    const teamId = (await resolveClassroomTeam(client, org, classroom)).id
-    teamIds = teamId ? [teamId] : undefined
-  } catch {
-    teamIds = undefined
-  }
+  // Resolve every role's team id once so a fresh invite carries the right team
+  // (accepting the single org invite then activates that membership). A missing
+  // team id is tolerated — the invite still sends, just without a team attached.
+  const teamIdByRole = await resolveTeamIdByRole(
+    client,
+    org,
+    classroom,
+    new Set(targets.map((t) => t.role)),
+  )
 
   let processed = 0
   const bump = (username: string) => {
@@ -1336,15 +1335,19 @@ export async function inviteRosterStudents(
     onProgress?.({ processed, total: targets.length, message: username })
   }
 
-  // Once GitHub returns a (secondary) rate limit, stop issuing new invites:
+  // Once GitHub returns a (secondary) rate limit, stop issuing NEW invites:
   // hammering a throttled endpoint for every remaining target only extends the
   // throttle window and floods the results with spurious failures. Remaining
-  // targets are reported as `deferred` for a later retry — mirroring the
-  // pending-resend loop in RosterBulkActionsBar, which breaks on isRateLimited.
+  // (not-yet-started) targets are reported as `deferred` for a later retry.
+  // Every error is classified individually by isRateLimited below, so a genuine
+  // 429 — even one that lands concurrently after the flag is set — is always
+  // deferred, never mislabeled `failed`; only a non-rate-limit error becomes a
+  // real `failed`. A re-run re-invites anyone deferred/failed (ensureOrgMembership
+  // no-ops those already active/pending).
   let rateLimited = false
 
   await mapWithConcurrency(targets, REPO_READ_CONCURRENCY, async (target) => {
-    const { username } = target
+    const { username, role } = target
     if (rateLimited) {
       deferred.push(username)
       bump(username)
@@ -1355,13 +1358,16 @@ export async function inviteRosterStudents(
       const inviteeId =
         parseGitHubId(target.github_id ?? "") ??
         (await getUser(client, username)).id
+      const teamId = teamIdByRole[role]
       const result = await ensureOrgMembership(client, {
         org,
         username,
         inviteeId,
-        teamIds,
+        teamIds: teamId ? [teamId] : undefined,
+        // An instructor becomes an org OWNER; student/ta are plain members.
+        role: role === "instructor" ? "admin" : "direct_member",
       })
-      if (result.state === "invited") invited.push(username)
+      if (result.state === "invited") invited.push({ username, role })
       else if (result.state === "active")
         skipped.push({ username, reason: "already-member" })
       else skipped.push({ username, reason: "already-pending" })
@@ -1380,16 +1386,292 @@ export async function inviteRosterStudents(
   return { invited, skipped, failed, deferred }
 }
 
+// Resolve the team id for each role present in the invite batch: student ->
+// classroom team, instructor/ta -> the staff team (created if missing, mirroring
+// the Settings staff flow so an instructor/ta invite lands them on the right
+// team on acceptance). Only ensures a staff team when that role is actually
+// being invited — a students-only upload must not create (and grant config-repo
+// write to) empty instructor/ta teams as a side effect. A failed resolve leaves
+// that role's id undefined — the invite still sends teamless.
+async function resolveTeamIdByRole(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+  rolesPresent: ReadonlySet<RosterRole>,
+): Promise<Record<RosterRole, number | undefined>> {
+  const result: Record<RosterRole, number | undefined> = {
+    student: undefined,
+    instructor: undefined,
+    ta: undefined,
+  }
+  if (rolesPresent.has("student")) {
+    // resolveClassroomTeam already returns id: undefined on a genuine 404 (no
+    // team block) WITHOUT throwing, and propagates a transient read failure —
+    // so no catch here: a blip must surface, not be mistaken for "no team".
+    result.student = (await resolveClassroomTeam(client, org, classroom)).id
+  }
+  for (const role of STAFF_ROLES) {
+    if (!rolesPresent.has(role)) continue
+    try {
+      const team = await ensureClassroomRoleTeam(client, org, classroom, role)
+      await grantTeamConfigRepoWrite(client, org, team.slug)
+      result[role] = team.id
+    } catch (err) {
+      // Only a DEFINITIVE failure (e.g. 403 no permission to create/grant the
+      // staff team) degrades to a teamless invite. A transient 5xx/429/network
+      // error must propagate — sending an instructor an org-OWNER invite while
+      // silently dropping them off the instructor team is worse than retrying.
+      if (
+        err instanceof GitHubAPIError &&
+        isDefinitiveGitHubStatus(err.status)
+      ) {
+        result[role] = undefined
+      } else {
+        throw err
+      }
+    }
+  }
+  return result
+}
+
+export type ResolveRosterUploadPreflightInput = {
+  org: string
+  classroom: string
+  // The uploaded rows reduced to identity + intended role. github_id is
+  // optional (threaded when the enroll pass has resolved it) and anchors the
+  // membership lookup across a login rename.
+  rows: PreflightRow[]
+}
+
+// Preflight a CSV roster upload: read the classroom's CURRENT GitHub membership
+// (all active org members + the three per-classroom team memberships) once, then
+// classify each uploaded row (pure, via classifyRosterUpload) into no-action /
+// invite / enroll / role-change. Read-only — sends NOTHING to GitHub — so the
+// upload dialog can preview the plan and gate role changes behind confirmation.
+//
+// The team reads 404-tolerate (an uncreated staff team reads as empty), and the
+// org-member read pages to completion; a hard failure of either propagates so
+// the caller surfaces "couldn't preview, try again" rather than a wrong plan.
+export async function resolveRosterUploadPreflight(
+  client: GitHubClient,
+  input: ResolveRosterUploadPreflightInput,
+): Promise<PreflightResult> {
+  const { org, classroom, rows } = input
+  const slugs = await resolveClassroomTeamSlugs(client, org, classroom)
+
+  const [orgMembers, studentMembers, instructorMembers, taMembers] =
+    await Promise.all([
+      listAllOrgMembers(client, org),
+      listTeamMembers(client, org, slugs.student),
+      listTeamMembers(client, org, slugs.staff.instructor),
+      listTeamMembers(client, org, slugs.staff.ta),
+    ])
+
+  const orgSets = memberIdentitySets(orgMembers)
+  const studentSets = memberIdentitySets(studentMembers)
+  const instructorSets = memberIdentitySets(instructorMembers)
+  const taSets = memberIdentitySets(taMembers)
+
+  const resolved: ResolvedMembership = {
+    orgMemberIds: orgSets.ids,
+    orgMemberLogins: orgSets.logins,
+    teamIdsByRole: {
+      student: studentSets.ids,
+      instructor: instructorSets.ids,
+      ta: taSets.ids,
+    },
+    teamLoginsByRole: {
+      student: studentSets.logins,
+      instructor: instructorSets.logins,
+      ta: taSets.logins,
+    },
+  }
+
+  return classifyRosterUpload(rows, membershipLookup(resolved))
+}
+
+export type ApplyRosterRoleChangeInput = {
+  org: string
+  classroom: string
+  username: string
+  github_id?: string
+  // ALL classroom roles the account currently holds (the teams to move OFF of).
+  // Empty for an additive enroll (an active member on no team) — then no team
+  // is dropped. The target team is never dropped even if present here.
+  fromRoles: RosterRole[]
+  // The CSV's intended role (the team to move ONTO).
+  toRole: RosterRole
+}
+
+export type ApplyRosterRoleChangeResult = {
+  username: string
+  toRole: RosterRole
+  // Non-fatal warnings (a best-effort old-team removal that failed, etc.).
+  warnings: string[]
+}
+
+// Apply a CONFIRMED role change (or an additive enroll) for an active org
+// member: move them onto the CSV role's team and off every other classroom
+// team. The caller must only invoke this for a member the preflight classified
+// as `role_change` or `enroll` and — for an instructor target or a demotion off
+// instructor — the teacher confirmed, since it grants/revokes org-OWNER.
+//
+// Ordering is chosen so a mid-sequence failure never leaves ELEVATED access
+// dangling:
+//  1) Demote org owner -> member FIRST when leaving instructor for a
+//     non-instructor role. Done before any team change, so if it throws we abort
+//     with the member unchanged (still instructor + owner) rather than
+//     half-moved-but-still-owner.
+//  2) Add to the target team (student -> classroom team; ta/instructor -> the
+//     staff team, created + granted config-repo write if missing), then promote
+//     to org owner when the target is instructor.
+//  3) Remove from EVERY currently-held classroom team that isn't the target
+//     (best-effort — a failed drop is a warning, since the target add + any
+//     owner change already landed). Dropping all non-target teams (not just the
+//     primary) means a member on both the instructor and TA teams moved to
+//     student leaves neither staff team behind.
+//
+// NEVER team-adds a non-member (that would create a stray team invitation); the
+// preflight only produces role_change/enroll for active members, and this
+// re-verifies.
+export async function applyRosterRoleChange(
+  client: GitHubClient,
+  input: ApplyRosterRoleChangeInput,
+): Promise<ApplyRosterRoleChangeResult> {
+  const { org, classroom, fromRoles, toRole } = input
+  const username = input.username.trim()
+  await assertClassroomNotArchived(client, org, classroom)
+  if (!username) throw new Error("A username is required")
+
+  const warnings: string[] = []
+
+  // Re-verify active membership directly: only a definitive 404 is not-a-member
+  // (a transient read rethrows so the caller retries rather than team-adding a
+  // non-member on a blip).
+  const state = await readOrgMembershipState(client, org, username)
+  if (state !== "active") {
+    throw new Error(
+      `${username} is not an active member of ${org}, so their role can't be ` +
+        `changed here; invite them to the organization instead.`,
+    )
+  }
+
+  const slugs = await resolveClassroomTeamSlugs(client, org, classroom)
+  const slugForRole = (role: RosterRole): string =>
+    role === "student" ? slugs.student : slugs.staff[role]
+
+  const wasInstructor = fromRoles.includes("instructor")
+
+  // 1) Demote org owner FIRST when leaving instructor for a non-instructor role.
+  // Doing this before any team mutation guarantees a failure here leaves the
+  // member fully unchanged (still owner) rather than partially moved but still
+  // an owner — the dangerous partial state.
+  if (wasInstructor && toRole !== "instructor") {
+    await setOrgMembershipRole(client, { org, username, role: "member" })
+  }
+
+  // 2) Add to the target team (ensure a staff team exists + config write), then
+  // promote to org owner for an instructor target.
+  if (toRole === "student") {
+    await addUserToTeam(client, {
+      org,
+      teamSlug: slugs.student,
+      username,
+      role: "member",
+    })
+  } else {
+    const team = await ensureClassroomRoleTeam(client, org, classroom, toRole)
+    await grantTeamConfigRepoWrite(client, org, team.slug)
+    await addUserToTeam(client, {
+      org,
+      teamSlug: team.slug,
+      username,
+      role: "member",
+    })
+  }
+  if (toRole === "instructor") {
+    await setOrgMembershipRole(client, { org, username, role: "admin" })
+  }
+
+  // 3) Remove from EVERY currently-held classroom team except the target
+  // (best-effort). Dedupe so a role held twice isn't dropped twice.
+  const toDrop = [...new Set(fromRoles)].filter((role) => role !== toRole)
+  for (const role of toDrop) {
+    const fromSlug = slugForRole(role)
+    if (!fromSlug) continue
+    try {
+      await removeUserFromTeam(client, { org, teamSlug: fromSlug, username })
+    } catch (err) {
+      log.error("role-change old-team removal failed", { err, role })
+      warnings.push(
+        `${username} was added to the ${toRole} team, but removing them from ` +
+          `their previous ${role} team failed (${getErrorMessage(err)}); ` +
+          `retry to complete the move.`,
+      )
+    }
+  }
+
+  return { username, toRole, warnings }
+}
+
+export type AssignRosterMemberRoleInput = {
+  org: string
+  classroom: string
+  username: string
+  role: RosterRole
+}
+
+export type AssignRosterMemberRoleResult =
+  // Added to the target team.
+  | { state: "assigned"; role: RosterRole }
+  // Not an active org member (must be invited first, not team-added).
+  | { state: "not-member" }
+
+// Assign a roster member (who is an active org member but on none of this
+// classroom's teams — a `needs_attention_in_org` row) a classroom role by
+// adding them to the target team: the classroom team for "student", else the
+// per-classroom staff team (created + granted config write if missing, mirroring
+// the Settings staff flow). NEVER team-adds a non-member — GitHub would create a
+// team INVITATION for a non-member, so a non-member is reported as `not-member`
+// and routed to the invite affordance instead. Idempotent (PUT membership).
+export async function assignRosterMemberRole(
+  client: GitHubClient,
+  input: AssignRosterMemberRoleInput,
+): Promise<AssignRosterMemberRoleResult> {
+  const { org, classroom, role } = input
+  const username = input.username.trim()
+  await assertClassroomNotArchived(client, org, classroom)
+  if (!username) throw new Error("A username is required")
+
+  // Never team-add a non-member (GitHub would create a stray team invitation,
+  // not an enrollment) — the caller routes a confirmed non-member to the invite
+  // action. readOrgMembershipState surfaces a TRANSIENT read failure as an
+  // error the caller can retry (rather than misreporting it as "not a member",
+  // which would wrongly send the teacher to re-invite an already-active member).
+  // Only a definitive 404 (null) — or a non-active state — means not-a-member.
+  const state = await readOrgMembershipState(client, org, username)
+  if (state !== "active") {
+    return { state: "not-member" }
+  }
+
+  const teamSlug =
+    role === "student"
+      ? await resolveClassroomTeamSlug(client, org, classroom)
+      : (await ensureClassroomRoleTeam(client, org, classroom, role)).slug
+  if (role !== "student") {
+    await grantTeamConfigRepoWrite(client, org, teamSlug)
+  }
+
+  await addUserToTeam(client, { org, teamSlug, username, role: "member" })
+  return { state: "assigned", role }
+}
+
 export type BulkEnrollStudentsResult = AddStudentsToClassroomResult & {
   teamResults: {
     username: string
     status: "added" | "failed"
     message?: string
   }[]
-  // Added to roster.csv but NOT an active org member and not a pending invite
-  // — on the roster, not in the organization. Surfaced so the teacher can chase
-  // an invite; the team-driven roster shows them as `not_in_org`.
-  notInOrg: string[]
 }
 
 export type BulkImportResult = {
@@ -1404,7 +1686,6 @@ export type BulkImportResult = {
     status: "added" | "failed"
     message?: string
   }[]
-  notInOrg?: string[]
 }
 export async function bulkEnrollStudentsInClassroom(
   client: GitHubClient,
@@ -1455,7 +1736,6 @@ export async function bulkEnrollStudentsInClassroom(
   }
 
   const teamResults: BulkImportResult["teamResults"] = []
-  const notInOrg: string[] = []
 
   for (let i = 0; i < addResult.addedStudents.length; i++) {
     const student = addResult.addedStudents[i]
@@ -1468,10 +1748,9 @@ export async function bulkEnrollStudentsInClassroom(
 
     // Verify by team membership through org membership: only an active org
     // member is team-added (the trust model used across the enroll paths). A
-    // non-member is recorded as not_in_org (needs an invite) rather than a team
-    // failure — they aren't in the org to add yet.
+    // non-member is skipped here — they need an org invite first (sent by the
+    // upload's invite pass), so there's nothing to team-add yet.
     if (!(await isActiveMember(client, bulkInput.org, student.username))) {
-      notInOrg.push(student.username)
       onProgress?.({
         processed: i + 1,
         total: addResult.addedStudents.length,
@@ -1531,14 +1810,12 @@ export async function bulkEnrollStudentsInClassroom(
     classroom: bulkInput.classroom,
     added: addResult.addedStudents.length,
     skipped: addResult.skippedStudents.length,
-    notInOrg: notInOrg.length,
     teamFailed: teamResults.filter((r) => r.status === "failed").length,
   })
 
   return {
     ...addResult,
     teamResults,
-    notInOrg,
   }
 }
 

@@ -89,6 +89,19 @@ export const githubKeys = {
   rawFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "raw-file", owner, repo, path, ref ?? null] as const,
 
+  // Distinct from `rawFile`: the roster raw read uses a different queryFn (with
+  // a legacy roster.csv -> students.csv 404 fallback), so it must not share a
+  // cache entry with rawFileQuery for the same path.
+  rosterRawFile: (owner: string, repo: string, path: string, ref?: string) =>
+    [
+      ...githubKeys.all,
+      "roster-raw-file",
+      owner,
+      repo,
+      path,
+      ref ?? null,
+    ] as const,
+
   jsonFile: (owner: string, repo: string, path?: string, ref?: string) =>
     [
       ...githubKeys.all,
@@ -617,6 +630,50 @@ function readContents(
   )
 }
 
+// Raw roster.csv bytes with a legacy fallback (roster.csv -> students.csv on a
+// 404), returning the unparsed text so the caller can run the strict parser and
+// surface per-line problems. Keyed on `rosterRawFile` — a namespace of its own,
+// distinct from both `rawFile` (rawFileQuery, no fallback, different queryFn)
+// and csvFileQuery's parsed-rows key — so this additive problem-detection read
+// can never collide with another raw or parsed read of the same path. The
+// parsed-rows read (csvFileQuery) still drives display.
+export function rosterRawFileQuery(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  path: string,
+  fallbackPath?: string,
+  ref?: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.rosterRawFile(owner, repo, path, ref),
+    queryFn: async ({ signal }) => {
+      try {
+        return await readContents(client, owner, repo, path, ref, signal)
+      } catch (err) {
+        if (
+          fallbackPath &&
+          err instanceof GitHubAPIError &&
+          err.status === 404
+        ) {
+          return await readContents(
+            client,
+            owner,
+            repo,
+            fallbackPath,
+            ref,
+            signal,
+          )
+        }
+        throw err
+      }
+    },
+    enabled: Boolean(owner && repo && typeof path === "string"),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+}
+
 export async function getRawFile(
   client: GitHubClient,
   input: GetAssignmentsFileInput,
@@ -701,6 +758,24 @@ export function listAllOrgMembers(client: GitHubClient, org: string) {
     client,
     (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
   )
+}
+
+// The active org-member list (all pages) as a shared query. Single source for
+// the `orgMembersAll` cache both the classroom roster (needs-attention
+// in-org/not-in-org split) and the org Members page read, so the two can't
+// drift on cache key, fetcher, or freshness. Kept short (30s): membership
+// classification must react quickly to an invite accepted or a member removed
+// in another tab/session, and the list is cheap to refetch. Since the two
+// needs-attention states only affect a CSV-only row's sub-label (never
+// enrollment, which is team-driven), a brief staleness is display-only.
+export const ORG_MEMBERS_STALE_MS = 30 * 1000
+export function orgMembersAllQuery(client: GitHubClient, org: string) {
+  return queryOptions({
+    queryKey: githubKeys.orgMembersAll(org),
+    queryFn: () => listAllOrgMembers(client, org),
+    enabled: Boolean(org),
+    staleTime: ORG_MEMBERS_STALE_MS,
+  })
 }
 
 // Org owners/admins across all pages (GET /orgs/{org}/members?role=admin). Used

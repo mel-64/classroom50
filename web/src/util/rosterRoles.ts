@@ -4,6 +4,7 @@ import {
   sortRolesByRank,
   type RosterRole,
   type TeamRosterRow,
+  type TeamRosterRowState,
 } from "@/util/teamRoster"
 
 // Single source of truth for how a classroom role is presented and ranked.
@@ -28,6 +29,24 @@ export const ROLE_BADGE_TONE: Record<RosterRole, BadgeTone> = {
   instructor: "primary",
   ta: "secondary",
   student: "neutral",
+}
+
+// Enrollment-state badge tone + i18n label, single-sourced so the roster row
+// list and the member modal render the same status chip (AGENTS.md: one recipe,
+// one source — previously hand-synced across EnrolledStudents + RosterMemberModal
+// and already drifted once on a renamed key).
+export const STATE_BADGE_TONE: Record<TeamRosterRowState, BadgeTone> = {
+  enrolled: "success",
+  pending: "warning",
+  needs_attention_in_org: "warning",
+  needs_attention_not_in_org: "error",
+}
+
+export const STATE_LABEL_KEY: Record<TeamRosterRowState, string> = {
+  enrolled: "students.statusEnrolled",
+  pending: "students.statusPending",
+  needs_attention_in_org: "students.statusNeedsAttentionInOrg",
+  needs_attention_not_in_org: "students.statusNeedsAttentionNotInOrg",
 }
 
 // A row's single highest-precedence role for the primary badge (instructor >
@@ -67,8 +86,8 @@ export function countByRole(rows: TeamRosterRow[]): RoleCounts {
 }
 
 // Enrolled (active-member) head counts by role — the header's "who's in the
-// class" numbers. Pending invites and not_in_org rows are excluded so the
-// counts reflect people actually on a team, matching the old enrolled semantics.
+// class" numbers. Pending invites are excluded so the counts reflect people
+// actually on a team, matching the old enrolled semantics.
 export function enrolledCountsByRole(rows: TeamRosterRow[]): RoleCounts {
   return countByRole(rows.filter((r) => r.state === "enrolled"))
 }

@@ -789,6 +789,25 @@ export async function removeOrgMembership(
 
 export type OrgMembershipState = "active" | "pending"
 
+// Set an EXISTING member's (or invitee's) org-level role. PUT
+// /orgs/{org}/memberships/{username} with { role } — "admin" promotes to org
+// owner, "member" demotes to a plain member. Used to promote an already-active
+// member to owner on a confirmed instructor role change (the invite path only
+// sets the role on a FRESH invite, so an existing member is never escalated
+// there). Idempotent — setting the role a member already holds is a no-op PUT.
+export async function setOrgMembershipRole(
+  client: GitHubClient,
+  input: { org: string; username: string; role: "admin" | "member" },
+): Promise<void> {
+  const { org, username, role } = input
+  await client.request(
+    `/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(
+      username,
+    )}`,
+    { method: "PUT", body: { role } },
+  )
+}
+
 // PATCH /repos/{owner}/{repo} { archived: true }. Reversible and covered by the
 // existing `repo` scope (unlike deletion, which needs delete_repo and a
 // re-auth). The safe fallback when deletion isn't permitted. 404 = success.
@@ -833,17 +852,41 @@ export async function deleteRepo(
   }
 }
 
-// GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
+// GET /orgs/{org}/memberships/{username} -> the raw membership state. A 404
+// (definitively not a member) resolves to null; ANY OTHER error propagates. The
+// single low-level org-membership read every higher-level helper builds on, so
+// the "404 = not a member vs. a transient blip" distinction lives in one place
+// rather than being re-inlined (previously done raw in assignRosterMemberRole).
+export async function readOrgMembershipState(
+  client: GitHubClient,
+  org: string,
+  username: string,
+): Promise<OrgMembershipState | null> {
+  try {
+    const membership = await client.request<{ state?: OrgMembershipState }>(
+      `/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(
+        username,
+      )}`,
+    )
+    return membership.state ?? null
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) return null
+    throw err
+  }
+}
+
+// GET /orgs/{org}/memberships/{username} -> state, or null on 404/error. The
+// error-SWALLOWING form for yes/no gates that can safely treat any read failure
+// as "not active" (enroll/reconcile re-checks). A caller that must tell a
+// definitive non-member apart from a transient error (to avoid misrouting the
+// teacher) uses readOrgMembershipState, which rethrows non-404s.
 export async function getOrgMembershipState(
   client: GitHubClient,
   org: string,
   username: string,
 ): Promise<OrgMembershipState | null> {
   try {
-    const membership = await client.request<{ state: OrgMembershipState }>(
-      `/orgs/${org}/memberships/${username}`,
-    )
-    return membership.state ?? null
+    return await readOrgMembershipState(client, org, username)
   } catch {
     return null
   }
@@ -881,9 +924,13 @@ export async function ensureOrgMembership(
     username: string
     inviteeId: number
     teamIds?: number[]
+    // Org-level role for a FRESH invite: "admin" makes the invitee an org owner
+    // (used for an instructor invite), else a plain member. Ignored when the
+    // person is already active/pending (we don't escalate an existing member).
+    role?: "direct_member" | "admin"
   },
 ): Promise<EnsureOrgMembershipResult> {
-  const { org, username, inviteeId, teamIds } = input
+  const { org, username, inviteeId, teamIds, role = "direct_member" } = input
 
   const existing = await getOrgMembershipState(client, org, username)
   if (existing === "active" || existing === "pending") {
@@ -895,6 +942,7 @@ export async function ensureOrgMembership(
       org,
       invitee_id: inviteeId,
       team_ids: teamIds,
+      role,
     })
     return { state: "invited" }
   } catch (err) {

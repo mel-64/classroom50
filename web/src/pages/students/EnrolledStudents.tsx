@@ -20,11 +20,8 @@ import {
 import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import {
-  syncRosterFromTeam,
-  reconcileTeamFromOrgMembers,
-  migrateRosterFile,
-} from "@/api/mutations/students"
+import { syncRosterFromTeam, migrateRosterFile } from "@/api/mutations/students"
+import type { RosterCsvProblem } from "@/api/mutations/students"
 import { getErrorMessage } from "@/hooks/github/mutations"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -44,6 +41,8 @@ import { STAFF_ROLES } from "@/types/classroom"
 import {
   ROLE_LABEL_KEY,
   ROLE_BADGE_TONE,
+  STATE_BADGE_TONE,
+  STATE_LABEL_KEY,
   hasStudentEnrollment,
   primaryRole,
 } from "@/util/rosterRoles"
@@ -100,12 +99,22 @@ export function groupStudentsBySection<T extends { section?: string }>(
 
 const EnrolledStudents = ({
   students = [],
+  parseProblems = [],
+  onRecheckRoster,
+  rechecking = false,
   org,
   classroom,
   addActions,
   suppressedLogins,
 }: {
   students: Student[]
+  // Per-line problems from the strict roster.csv parse (empty when the file is
+  // well-formed). Surfaced as a banner so the instructor can fix the file.
+  parseProblems?: RosterCsvProblem[]
+  // Re-read roster.csv so a teacher who just fixed it can re-verify in place.
+  onRecheckRoster?: () => void
+  // The recheck read is in flight (disables the button, shows a spinner).
+  rechecking?: boolean
   org: string
   classroom: string
   addActions?: AddStudentActions
@@ -133,7 +142,6 @@ const EnrolledStudents = ({
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   // Session-only banner dismissal — a page refresh re-derives roster state and
   // shows them again.
-  const [driftDismissed, setDriftDismissed] = useState(false)
   const [pendingDismissed, setPendingDismissed] = useState(false)
 
   const {
@@ -143,17 +151,13 @@ const EnrolledStudents = ({
     isError,
     isEmpty,
     pendingHidden,
-    teamSlug,
+    teamSlugByRole,
     csvMissingCount,
     csvMissingLogins,
-    notInOrgUsernames,
+    backfillNeededLogins,
+    orgMembersKnown,
     refetch: refetchRoster,
   } = useTeamRoster(org, classroom, students)
-
-  const notInOrg = useMemo(
-    () => rows.filter((r) => r.state === "not_in_org"),
-    [rows],
-  )
 
   const setWarning = (key: string, message: string) =>
     setWarnings((prev) => ({ ...prev, [key]: message }))
@@ -305,14 +309,27 @@ const EnrolledStudents = ({
   )
 
   // Status-filter options; hide "Pending" when invites are owner-only and this
-  // viewer can't read them (avoids a dead, always-empty filter).
+  // viewer can't read them (avoids a dead, always-empty filter). The two
+  // needs-attention options only exist when org membership is known (else those
+  // rows are suppressed, so the filters would be dead).
   const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: "all", label: t("students.filterAll") },
     { value: "enrolled", label: t("students.filterEnrolled") },
     ...(pendingHidden
       ? []
       : [{ value: "pending" as const, label: t("students.filterPending") }]),
-    { value: "not_in_org", label: t("students.filterNotInOrg") },
+    ...(orgMembersKnown
+      ? [
+          {
+            value: "needs_attention_in_org" as const,
+            label: t("students.filterNeedsAttentionInOrg"),
+          },
+          {
+            value: "needs_attention_not_in_org" as const,
+            label: t("students.filterNeedsAttentionNotInOrg"),
+          },
+        ]
+      : []),
   ]
 
   // Auto-migrate on open: converge a classroom bootstrapped before the
@@ -369,79 +386,53 @@ const EnrolledStudents = ({
   })
 
   // Auto-sync on open: append team members lacking a CSV row (fire once per
-  // drift episode; re-arm when count returns to 0). Gated on migrate having
-  // settled for this classroom so the two roster writers run in sequence, not a
-  // race. dropSuppressed skips any csv-missing member the teacher just
-  // unenrolled whose best-effort team-drop failed — otherwise auto-sync would
-  // re-append the student it just removed. (suppressedLogins is read in the
-  // effect, not during render; syncRosterFromTeam re-derives the authoritative
-  // set server-side.)
-  const autoSyncedRef = useRef(false)
+  // drift episode, per classroom; re-arm when the drift clears). Gated on
+  // migrate having settled for this classroom so the two roster writers run in
+  // sequence, not a race. dropSuppressed skips any csv-missing member the
+  // teacher just unenrolled whose best-effort team-drop failed — otherwise
+  // auto-sync would re-append the student it just removed. (suppressedLogins is
+  // read in the effect, not during render; syncRosterFromTeam re-derives the
+  // authoritative set server-side.)
+  //
+  // Keyed by classroom (not a boolean): the component instance is reused across
+  // a $classroom param switch, so a boolean set true for a drifting classroom A
+  // would wrongly skip a drifting classroom B navigated to directly (no
+  // intervening zero-drift render to reset it).
+  const autoSyncedForRef = useRef<string | null>(null)
   const csvMissingKey = csvMissingLogins.join(",")
+  const backfillNeededKey = backfillNeededLogins.join(",")
   useEffect(() => {
     if (isLoading || isError) return
     // Wait for the migrate pass to settle first (converges students.csv ->
     // roster.csv) so sync's write can't race migrate's on the ref.
     if (migrateSettledFor !== classroom) return
-    if (dropSuppressed(csvMissingLogins, suppressedLogins).length === 0) {
-      autoSyncedRef.current = false
+    // Sync when there's drift to fix: a team member with no CSV row (missing),
+    // OR an existing CSV row that's stale against the team (blank github_id or a
+    // wrong role — the login-only `rliu50` case). Without the backfill term a
+    // login-only row would never converge, since it isn't "missing". BOTH terms
+    // drop suppressed (just-unenrolled) logins so a stale row lingering during
+    // the eventual-consistency window can't re-fire a resurrecting sync.
+    const hasMissing =
+      dropSuppressed(csvMissingLogins, suppressedLogins).length > 0
+    const hasBackfill =
+      dropSuppressed(backfillNeededLogins, suppressedLogins).length > 0
+    if (!hasMissing && !hasBackfill) {
+      if (autoSyncedForRef.current === classroom)
+        autoSyncedForRef.current = null
       return
     }
-    if (autoSyncedRef.current || syncMutation.isPending) return
-    autoSyncedRef.current = true
+    if (autoSyncedForRef.current === classroom || syncMutation.isPending) return
+    autoSyncedForRef.current = classroom
     syncMutation.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [csvMissingKey, isLoading, isError, migrateSettledFor, classroom])
-
-  // Auto-reconcile on open: team-add rostered not_in_org usernames that are in
-  // fact active org members (native invite / SSO).
-  const reconcileMutation = useMutation({
-    mutationFn: (usernames: string[]) =>
-      reconcileTeamFromOrgMembers(client, { org, classroom, usernames }),
-    onSuccess: (result) => {
-      if (result.added.length > 0) {
-        invalidateTeamRoster()
-        notify({
-          tone: "success",
-          durationMs: 5000,
-          message: t("students.reconcileAdded", { count: result.added.length }),
-        })
-      }
-      if (result.failed.length > 0) {
-        notify({
-          tone: "warning",
-          durationMs: 8000,
-          message: t("students.reconcileFailed", {
-            list: result.failed.map((f) => f.login).join(", "),
-          }),
-        })
-      }
-    },
-    onError: (err) => {
-      notify({
-        tone: "error",
-        message: t("students.reconcileError", { error: getErrorMessage(err) }),
-      })
-    },
-  })
-
-  const autoReconciledRef = useRef(false)
-  // dropSuppressed runs in the effect (read after render) so a teacher's
-  // leftover active org membership isn't silently promoted back onto the team —
-  // the root of the "unenrolled student keeps coming back" loop.
-  const notInOrgKey = notInOrgUsernames.join(",")
-  useEffect(() => {
-    if (isLoading || isError) return
-    const targets = dropSuppressed(notInOrgUsernames, suppressedLogins)
-    if (targets.length === 0) {
-      autoReconciledRef.current = false
-      return
-    }
-    if (autoReconciledRef.current || reconcileMutation.isPending) return
-    autoReconciledRef.current = true
-    reconcileMutation.mutate(targets)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notInOrgKey, isLoading, isError])
+  }, [
+    csvMissingKey,
+    backfillNeededKey,
+    isLoading,
+    isError,
+    migrateSettledFor,
+    classroom,
+  ])
 
   const onRowMetadataSaved = (rowKey: string, updated: StudentCsvRow) => {
     updateRosterCache((current) => {
@@ -456,10 +447,9 @@ const EnrolledStudents = ({
 
   const onRowUnenrolled = (rowKey: string, teamWarning?: string) => {
     if (teamWarning) setWarning(rowKey, teamWarning)
-    // Remember this login so the automatic backfills (auto-sync, auto-reconcile)
-    // don't re-add the student the teacher just removed — e.g. when a
-    // best-effort team-drop failed, or the CSV delete hasn't propagated and they
-    // resurface as not_in_org while still an active org member.
+    // Remember this login so the automatic backfill (auto-sync-on-open) doesn't
+    // re-add the student the teacher just removed — e.g. when a best-effort
+    // team-drop failed, or the CSV delete hasn't propagated yet.
     const removed = rows.find((r) => r.key === rowKey)
     if (removed?.username) suppressedLogins.remember([removed.username])
     updateRosterCache((current) =>
@@ -541,10 +531,16 @@ const EnrolledStudents = ({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {(() => {
-            // Show only the person's highest-precedence role (instructor > ta >
-            // student), so a member on multiple teams reads as one primary role
-            // rather than a stack of chips. The student chip uses the neutral
-            // ghost style; staff roles use their tone.
+            // Enrolled/pending rows assert a role (the team is the authority),
+            // shown as the highest-precedence badge (instructor > ta > student;
+            // student uses the neutral ghost). Needs-attention rows have no
+            // team role yet, so they render no role badge.
+            if (
+              row.state === "needs_attention_in_org" ||
+              row.state === "needs_attention_not_in_org"
+            ) {
+              return null
+            }
             const role = primaryRole(row)
             return (
               <Badge
@@ -562,15 +558,14 @@ const EnrolledStudents = ({
               {row.section.trim()}
             </span>
           ) : null}
-          {row.state === "pending" ? (
-            <span className="badge badge-sm badge-warning badge-soft shrink-0">
-              {t("students.statusPending")}
-            </span>
-          ) : null}
-          {row.state === "not_in_org" ? (
-            <span className="badge badge-sm badge-error badge-soft shrink-0">
-              {t("students.statusNotInOrg")}
-            </span>
+          {row.state !== "enrolled" ? (
+            <Badge
+              size="sm"
+              tone={STATE_BADGE_TONE[row.state]}
+              className="shrink-0"
+            >
+              {t(STATE_LABEL_KEY[row.state])}
+            </Badge>
           ) : null}
           <ChevronRight
             aria-hidden="true"
@@ -583,6 +578,57 @@ const EnrolledStudents = ({
 
   return (
     <div className="flex w-full flex-col gap-6">
+      {/* Malformed roster.csv: name every bad line so the instructor can fix
+          the file on GitHub. Distinct from a network load error — this is a bad
+          file, and reads/writes silently misbehave until it's corrected. */}
+      {parseProblems.length > 0 ? (
+        <Alert tone="error">
+          <div className="flex flex-col gap-2">
+            <span className="font-medium">
+              {t("students.rosterParseError")}
+            </span>
+            <ul className="list-disc pl-5 text-sm">
+              {parseProblems.map((p, i) => (
+                <li key={`${p.line}-${i}`}>
+                  {t("students.rosterParseErrorLine", {
+                    line: p.line,
+                    message: p.message,
+                  })}
+                </li>
+              ))}
+            </ul>
+            <a
+              href={`https://github.com/${encodeURIComponent(org)}/classroom50/edit/main/${rosterPath(
+                classroom,
+              )
+                .split("/")
+                .map(encodeURIComponent)
+                .join("/")}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              {t("students.rosterEditOnGitHub")}
+            </a>
+            {onRecheckRoster ? (
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={rechecking}
+                  loadingLabel={t("students.rosterRechecking")}
+                  disabled={rechecking}
+                  onClick={onRecheckRoster}
+                >
+                  <RefreshCw aria-hidden="true" className="size-4" />
+                  {t("students.rosterRecheck")}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </Alert>
+      ) : null}
+
       {/* Warnings / action results. */}
       {Object.keys(warnings).length > 0 ? (
         <div className="flex w-full flex-col gap-2">
@@ -610,42 +656,6 @@ const EnrolledStudents = ({
             ))}
           </AnimatePresence>
         </div>
-      ) : null}
-
-      {/* Count-only drift banner: clicking "Review" filters the list to
-          not_in_org rather than expanding an inline list. Dismissable for the
-          session; a refresh re-derives and shows it again. */}
-      {!isLoading && !isError && !driftDismissed && notInOrg.length > 0 ? (
-        <Alert
-          tone="warning"
-          className="flex items-center justify-between gap-3"
-        >
-          <span className="flex items-center gap-2 text-sm">
-            <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
-            {t("students.driftBanner", { count: notInOrg.length })}
-          </span>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                setStatusFilter("not_in_org")
-              }}
-            >
-              {t("students.driftReview")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              shape="square"
-              aria-label={t("students.dismiss")}
-              title={t("students.dismiss")}
-              onClick={() => setDriftDismissed(true)}
-            >
-              <X aria-hidden="true" className="size-4" />
-            </Button>
-          </div>
-        </Alert>
       ) : null}
 
       {/* Pending-invites banner: clicking "Review" filters to pending so the
@@ -905,7 +915,7 @@ const EnrolledStudents = ({
         open={Boolean(selected)}
         org={org}
         classroom={classroom}
-        teamSlug={teamSlug}
+        teamSlugByRole={teamSlugByRole}
         row={selected}
         onClose={() => setSelectedKey(null)}
         onSaved={(rowKey, updated) => onRowMetadataSaved(rowKey, updated)}
@@ -915,6 +925,12 @@ const EnrolledStudents = ({
         onResent={(rowKey) => {
           dismissWarning(rowKey)
           invalidateInviteQueries()
+        }}
+        onChanged={(rowKey) => {
+          dismissWarning(rowKey)
+          invalidateInviteQueries()
+          invalidateTeamRoster()
+          refetchRoster()
         }}
         onError={(rowKey, message) => setWarning(rowKey, message)}
       />

@@ -16,6 +16,7 @@ import GitHub from "@/assets/github.svg?react"
 import EditStudentForm from "@/pages/students/EditStudentForm"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
+  assignRosterMemberRole,
   inviteRosterStudents,
   unenrollStudent,
   type StudentCsvRow,
@@ -23,16 +24,26 @@ import {
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { nameFromParts, parseGitHubId } from "@/util/students"
 import { rosterRowInitials } from "@/util/memberRow"
-import { rowToStudent, type TeamRosterRow } from "@/util/teamRoster"
-import { hasStudentEnrollment } from "@/util/rosterRoles"
-import { Button, Modal } from "@/components/ui"
+import {
+  rowToStudent,
+  sortRolesByRank,
+  type RosterRole,
+  type TeamRosterRow,
+} from "@/util/teamRoster"
+import {
+  hasStudentEnrollment,
+  STATE_BADGE_TONE,
+  STATE_LABEL_KEY,
+} from "@/util/rosterRoles"
+import { Badge, Button, Modal } from "@/components/ui"
 
 // Roster-owned detail modal (single native <dialog>), opened by clicking a
 // roster row. Shares the identity header with the Org Members modal; everything
 // below is classroom-scoped and gated by row.state:
-//   enrolled    -> edit metadata + unenroll
-//   pending     -> resend invite + unenroll (cancels the invite); no edit
-//   not_in_org  -> edit metadata + unenroll (drops the CSV row); no resend
+//   enrolled -> edit metadata + unenroll
+//   pending  -> resend invite + unenroll (cancels the invite); no edit
+//   needs_attention_in_org -> assign a role (adds to the chosen team)
+//   needs_attention_not_in_org -> invite to the organization
 //
 // The modal performs the writes but hands results back to the parent (which
 // owns the roster/invite caches and the per-row warnings map), mirroring the
@@ -41,38 +52,44 @@ const RosterMemberModal = ({
   open,
   org,
   classroom,
-  teamSlug,
+  teamSlugByRole,
   row,
   onClose,
   onSaved,
   onUnenrolled,
   onResent,
+  onChanged,
   onError,
 }: {
   open: boolean
   org: string
   classroom: string
-  // Resolved classroom-team slug (from useTeamRoster) — shown as the student's
-  // GitHub team, with a link and membership state.
-  teamSlug: string
+  // Resolved team slug per role, so each role a member actually holds links to
+  // its real team (student -> classroom team, instructor/ta -> the staff team)
+  // instead of assuming everyone is on the student team.
+  teamSlugByRole: Record<RosterRole, string>
   // Nullable so the <dialog> can stay mounted across open/close.
   row: TeamRosterRow | null
   onClose: () => void
   onSaved: (rowKey: string, updated: StudentCsvRow) => void
   onUnenrolled: (rowKey: string, teamWarning?: string) => void
   onResent: (rowKey: string) => void
+  // A needs-attention row was resolved (assigned a role, or invited) — the
+  // parent refetches the roster + invalidates invite/team caches so the row
+  // moves to enrolled/pending.
+  onChanged: (rowKey: string) => void
   onError: (rowKey: string, message: string) => void
 }) => {
   const { t } = useTranslation()
   const client = useGitHubClient()
   const titleId = useId()
   const [confirmingUnenroll, setConfirmingUnenroll] = useState(false)
-  const [confirmingInvite, setConfirmingInvite] = useState(false)
   const [confirmingResend, setConfirmingResend] = useState(false)
   const [editingProfile, setEditingProfile] = useState(false)
   const [working, setWorking] = useState(false)
   const [resending, setResending] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [resolving, setResolving] = useState(false)
 
   const unenrollMutation = useMutation({
     mutationFn: (student: ReturnType<typeof rowToStudent>) =>
@@ -84,12 +101,11 @@ const RosterMemberModal = ({
   // matching the unenroll (`working`) guard. Without it, closing or switching
   // rows mid-invite would let the captured-row promise apply onResent/onError/
   // onClose to a stale student.
-  const busy = working || submitting || resending
+  const busy = working || submitting || resending || resolving
 
   const handleClose = () => {
     if (busy) return
     setConfirmingUnenroll(false)
-    setConfirmingInvite(false)
     setConfirmingResend(false)
     setEditingProfile(false)
     onClose()
@@ -112,58 +128,94 @@ const RosterMemberModal = ({
   const displayName =
     nameFromParts(row.first_name, row.last_name) || row.username || row.email
   const displayInitials = rosterRowInitials(row)
+  const label = row.username || row.email
   const canResend = row.state === "pending" && Boolean(row.github_id)
-  // A not_in_org row is on the roster (by username) but not in the org — offer a
-  // fresh org invite (id derived from username when the CSV has no github_id).
-  const canInvite = row.state === "not_in_org" && Boolean(row.username)
+  const needsRole = row.state === "needs_attention_in_org"
+  const needsInvite = row.state === "needs_attention_not_in_org"
   // Unenroll drops a roster.csv row + student-team membership — a student-only
   // action. Hidden for a staff-only row (nothing to unenroll from the roster).
   const canUnenroll = !staffOnly
 
+  const handleAssignRole = async () => {
+    if (resolving) return
+    const { key, username } = row
+    if (!username) {
+      onError(key, t("students.assignRoleNoUsername", { label }))
+      return
+    }
+    setResolving(true)
+    try {
+      const result = await assignRosterMemberRole(client, {
+        org,
+        classroom,
+        username,
+        // The roster only assigns the student role; TA/instructor are assigned
+        // in classroom Settings (staff management), keeping role-granting in one
+        // place and the roster's needs-attention action a simple "enroll".
+        role: "student",
+      })
+      if (result.state === "not-member") {
+        onError(key, t("students.assignRoleNotMember", { label }))
+        return
+      }
+      onChanged(key)
+      onClose()
+    } catch (err) {
+      onError(
+        key,
+        t("students.assignRoleFailed", { label, error: getErrorMessage(err) }),
+      )
+    } finally {
+      setResolving(false)
+    }
+  }
+
   const handleInvite = async () => {
-    if (resending) return
-    setResending(true)
+    if (resolving) return
+    const { key, username, github_id } = row
+    if (!username) {
+      onError(key, t("students.inviteRosterNoUsername", { label }))
+      return
+    }
+    setResolving(true)
     try {
       const res = await inviteRosterStudents(client, {
         org,
         classroom,
-        students: [{ username: row.username, github_id: row.github_id }],
+        students: [{ username, github_id }],
       })
-      if (res.failed.length > 0) {
+      // A failed target sent nothing; a rate-limited (deferred) target also sent
+      // nothing. Only a fresh invite or an already-active/pending skip is a real
+      // success — otherwise surface it so the teacher retries rather than seeing
+      // a false success while the row stays put.
+      const failure = res.failed[0]
+      if (failure) {
         onError(
-          row.key,
-          t("students.inviteFailed", {
-            username: row.username || row.email,
-            error: res.failed[0].message,
-          }),
+          key,
+          t("students.inviteRosterFailed", { label, error: failure.message }),
         )
         return
       }
-      // A rate limit deferred the single invite: report it rather than closing
-      // as if the invite was sent.
       if (res.deferred.length > 0) {
-        onError(
-          row.key,
-          t("students.inviteFailed", {
-            username: row.username || row.email,
-            error: t("students.bulk.rateLimitedDeferred"),
-          }),
-        )
+        onError(key, t("students.inviteRosterDeferred", { label }))
         return
       }
-      onResent(row.key)
+      if (res.invited.length === 0 && res.skipped.length === 0) {
+        onError(key, t("students.inviteRosterNoneSent", { label }))
+        return
+      }
+      onChanged(key)
       onClose()
     } catch (err) {
       onError(
-        row.key,
-        t("students.inviteFailed", {
-          username: row.username || row.email,
+        key,
+        t("students.inviteRosterFailed", {
+          label,
           error: getErrorMessage(err),
         }),
       )
     } finally {
-      setResending(false)
-      setConfirmingInvite(false)
+      setResolving(false)
     }
   }
 
@@ -218,8 +270,6 @@ const RosterMemberModal = ({
       setConfirmingUnenroll(false)
     }
   }
-
-  const label = row.username || row.email
 
   return (
     <Modal
@@ -276,15 +326,16 @@ const RosterMemberModal = ({
           />
 
           <div className="flex shrink-0 items-center gap-1">
-            {canInvite && !confirmingInvite ? (
+            {needsInvite ? (
               <Button
-                variant="primary"
                 size="sm"
+                loading={resolving}
+                loadingLabel={t("common.working")}
                 disabled={busy}
-                onClick={() => setConfirmingInvite(true)}
+                onClick={() => void handleInvite()}
               >
                 <UserPlus aria-hidden="true" className="size-4" />
-                {t("students.invite")}
+                {t("students.inviteToOrg")}
               </Button>
             ) : null}
 
@@ -315,53 +366,8 @@ const RosterMemberModal = ({
         </div>
 
         {/* Inline confirmations for the enrollment actions above. */}
-        {(canInvite && confirmingInvite) ||
-        (canResend && confirmingResend) ||
-        confirmingUnenroll ? (
+        {(canResend && confirmingResend) || confirmingUnenroll ? (
           <section className="flex flex-col gap-3">
-            {canInvite && confirmingInvite ? (
-              <div className="flex flex-col gap-3 rounded-box border border-primary/30 bg-primary/5 p-4 text-sm">
-                <p className="text-base-content/80">
-                  {t(
-                    row.github_id
-                      ? "students.confirmInviteBody"
-                      : "students.confirmInviteBodyNoId",
-                    {
-                      label: row.username || row.email,
-                      org,
-                    },
-                  )}
-                </p>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={resending}
-                    onClick={() => setConfirmingInvite(false)}
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    loading={resending}
-                    loadingLabel={t("common.working")}
-                    disabled={resending}
-                    onClick={() => void handleInvite()}
-                  >
-                    {resending ? (
-                      t("common.working")
-                    ) : (
-                      <>
-                        <Send aria-hidden="true" className="size-4" />
-                        {t("students.sendInvite")}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
             {canResend && confirmingResend ? (
               <div className="flex flex-col gap-3 rounded-box border border-primary/30 bg-primary/5 p-4 text-sm">
                 <p className="text-base-content/80">
@@ -438,6 +444,36 @@ const RosterMemberModal = ({
           </section>
         ) : null}
 
+        {/* Needs-attention resolution: an in-org member is enrolled as a student
+              (TA/instructor roles are assigned in classroom Settings); a
+              not-in-org row is invited via the header action. */}
+        {needsRole ? (
+          <section className="flex flex-col gap-3 rounded-box border border-warning/30 bg-warning/5 p-4">
+            <p className="text-sm text-base-content/80">
+              {t("students.needsAttentionInOrgHelp", { label })}
+            </p>
+            <div className="flex justify-end">
+              <Button
+                variant="primary"
+                size="sm"
+                loading={resolving}
+                loadingLabel={t("common.working")}
+                disabled={busy}
+                onClick={() => void handleAssignRole()}
+              >
+                <UserPlus aria-hidden="true" className="size-4" />
+                {t("students.assignRoleAction")}
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
+        {needsInvite ? (
+          <p className="text-sm text-base-content/80">
+            {t("students.needsAttentionNotInOrgHelp", { label })}
+          </p>
+        ) : null}
+
         {/* GitHub & enrollment — a single read-only summary: status + the
               classroom team. */}
         <section className="flex flex-col gap-2">
@@ -449,33 +485,34 @@ const RosterMemberModal = ({
               <span className="text-sm text-base-content/70">
                 {t("students.statusLabel")}
               </span>
-              {row.state === "enrolled" ? (
-                <span className="badge badge-sm badge-success badge-soft">
-                  {t("students.statusEnrolled")}
-                </span>
-              ) : row.state === "pending" ? (
-                <span className="badge badge-sm badge-warning badge-soft">
-                  {t("students.statusPending")}
-                </span>
-              ) : (
-                <span className="badge badge-sm badge-error badge-soft">
-                  {t("students.statusNotInOrg")}
-                </span>
-              )}
+              <Badge size="sm" tone={STATE_BADGE_TONE[row.state]}>
+                {t(STATE_LABEL_KEY[row.state])}
+              </Badge>
             </div>
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+            <div className="flex items-start justify-between gap-3 px-4 py-2.5">
               <span className="text-sm text-base-content/70">
                 {t("students.classroomTeamLabel")}
               </span>
-              <a
-                href={`https://github.com/orgs/${org}/teams/${teamSlug}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 font-mono text-sm text-primary hover:underline"
-              >
-                {teamSlug}
-                <ExternalLink aria-hidden="true" className="size-3.5" />
-              </a>
+              {row.state === "enrolled" ? (
+                <div className="flex flex-col items-end gap-1">
+                  {sortRolesByRank(row.roles).map((r) => (
+                    <a
+                      key={r}
+                      href={`https://github.com/orgs/${org}/teams/${teamSlugByRole[r]}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-sm text-primary hover:underline"
+                    >
+                      {teamSlugByRole[r]}
+                      <ExternalLink aria-hidden="true" className="size-3.5" />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-sm text-base-content/50">
+                  {t("students.teamNotYet")}
+                </span>
+              )}
             </div>
           </div>
         </section>
