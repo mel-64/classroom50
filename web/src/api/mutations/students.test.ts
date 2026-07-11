@@ -10,6 +10,7 @@ import {
   reconcileTeamFromOrgMembers,
   inviteRosterStudents,
   syncRosterFromTeam,
+  migrateRosterFile,
   updateStudent,
   updateStudentWithConflictRetry,
   parseStudentsCsv,
@@ -105,7 +106,7 @@ const makeClient = (opts: {
   return { client, committed }
 }
 
-const HEADER = "username,first_name,last_name,email,section,github_id\n"
+const HEADER = "username,first_name,last_name,email,section,github_id,role\n"
 
 // The web leg of the three-way roster header lockstep. The Go
 // (TestFullRosterHeader) and Python (test_full_roster_header_matches_go_constant)
@@ -117,7 +118,7 @@ const HEADER = "username,first_name,last_name,email,section,github_id\n"
 describe("roster.csv header lockstep (web leg)", () => {
   it("STUDENT_CSV_FIELDS matches the Go/Python header verbatim", () => {
     expect(STUDENT_CSV_FIELDS.join(",")).toBe(
-      "username,first_name,last_name,email,section,github_id",
+      "username,first_name,last_name,email,section,github_id,role",
     )
   })
 
@@ -992,6 +993,7 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal", (
         email: "alice@x.edu",
         section: "",
         github_id: "42",
+        role: "",
       },
     })
 
@@ -1017,6 +1019,7 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal", (
         email: "bob@x.edu",
         section: "",
         github_id: "43",
+        role: "",
       },
     })
 
@@ -1043,6 +1046,7 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal", (
         email: "alice@x.edu",
         section: "",
         github_id: "42",
+        role: "",
       },
     })
 
@@ -1070,6 +1074,7 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal", (
         email: "bob@x.edu",
         section: "",
         github_id: "43",
+        role: "",
       },
     })
 
@@ -1092,6 +1097,7 @@ describe("bulkUnenrollStudents — single-commit batch removal", () => {
     email: `${username}@x.edu`,
     section: "",
     github_id,
+    role: "",
   })
 
   it("drops every matched row in exactly ONE commit", async () => {
@@ -1176,6 +1182,7 @@ describe("bulkUnenrollStudents — single-commit batch removal", () => {
           email: "sam@x.edu",
           section: "",
           github_id: "",
+          role: "",
         },
       ],
     })
@@ -1213,7 +1220,10 @@ describe("bulkUnenrollStudents — single-commit batch removal", () => {
 // / syncRosterFromTeam end to end (CSV read+commit, /users/{login}, membership
 // GET, team-add PUT, team-members list). `users` maps login -> id/name/email;
 // `members` is the set of ACTIVE org-member logins (case-insensitive); `teamHas`
-// seeds the team-member list syncRosterFromTeam reads.
+// seeds the STUDENT team-member list, and `instructorHas`/`taHas` the staff
+// teams (matched by the derived `classroom50-cs101[-role]` slug suffix) that
+// syncRosterFromTeam now reads across all three teams.
+type TeamMemberSeed = { login: string; id: number; name?: string | null }
 const makeTeamClient = (opts: {
   startingCsv: string
   users: Record<
@@ -1221,7 +1231,12 @@ const makeTeamClient = (opts: {
     { id: number; name?: string | null; email?: string | null }
   >
   members?: string[]
-  teamHas?: { login: string; id: number; name?: string | null }[]
+  teamHas?: TeamMemberSeed[]
+  instructorHas?: TeamMemberSeed[]
+  taHas?: TeamMemberSeed[]
+  // When set, a members read for the instructor/ta team rejects with this
+  // non-404 status (to exercise the best-effort staff-read degradation).
+  staffReadRejects?: { role: "instructor" | "ta"; status: number }
 }) => {
   const committed: { content: string | null } = { content: null }
   const memberSet = new Set((opts.members ?? []).map((m) => m.toLowerCase()))
@@ -1259,8 +1274,37 @@ const makeTeamClient = (opts: {
       }
       // Team members list (syncRosterFromTeam): GET .../teams/{slug}/members
       // (checked AFTER /memberships/ since "/members" is a substring of it).
+      // Route by the derived slug so the student vs instructor vs ta teams
+      // return their own seeded lists.
       if (path.includes("/teams/") && path.includes("/members")) {
-        const members = (opts.teamHas ?? []).map((m) => ({
+        const slug = decodeURIComponent(
+          path.split("/teams/")[1].split("/members")[0],
+        )
+        const rejects = opts.staffReadRejects
+        if (rejects && slug.endsWith(`-${rejects.role}`)) {
+          return Promise.reject(
+            new GitHubAPIError({
+              status: rejects.status,
+              url: path,
+              message: "boom",
+              body: null,
+              rateLimit: {
+                limit: null,
+                remaining: null,
+                used: null,
+                reset: null,
+                resource: null,
+                retryAfter: null,
+              },
+            }),
+          )
+        }
+        const seed = slug.endsWith("-instructor")
+          ? (opts.instructorHas ?? [])
+          : slug.endsWith("-ta")
+            ? (opts.taHas ?? [])
+            : (opts.teamHas ?? [])
+        const members = seed.map((m) => ({
           login: m.login,
           id: m.id,
           name: m.name ?? null,
@@ -1451,12 +1495,119 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
       last_name: "",
       email: "",
       section: "",
+      // Student-team member records the "student" role.
+      role: "student",
     })
   })
 
-  it("is a noop when every team member already has a CSV row", async () => {
+  it("syncs instructors and TAs with their role, not just students", async () => {
+    // The nice-classroom scenario: only an instructor and a TA, no students,
+    // and no roster.csv rows yet. Both must be appended with their role so the
+    // roster is populated from the staff teams alone.
     const { client, committed } = makeTeamClient({
-      startingCsv: HEADER + "grace,,,,,707\n",
+      startingCsv: HEADER,
+      users: {},
+      teamHas: [], // no student-team members
+      instructorHas: [{ login: "prof", id: 1 }],
+      taHas: [{ login: "helper", id: 2 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.noop).toBe(false)
+    expect(result.addedUsernames.sort()).toEqual(["helper", "prof"])
+    const rows = rowsFromCsv(committed.content!)
+    expect(rows.find((r) => r.username === "prof")).toMatchObject({
+      github_id: "1",
+      role: "instructor",
+    })
+    expect(rows.find((r) => r.username === "helper")).toMatchObject({
+      github_id: "2",
+      role: "ta",
+    })
+  })
+
+  it("records the highest-precedence role for a member on multiple teams", async () => {
+    // An instructor who is also on the student team records "instructor"
+    // (instructor > ta > student), matching the roster view's primary role.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER,
+      users: {},
+      teamHas: [{ login: "prof", id: 1 }], // also a student-team member
+      instructorHas: [{ login: "prof", id: 1 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.addedUsernames).toEqual(["prof"])
+    const rows = rowsFromCsv(committed.content!)
+    // One row, not one per team.
+    expect(rows.filter((r) => r.username === "prof")).toHaveLength(1)
+    expect(rows[0].role).toBe("instructor")
+  })
+
+  it("refreshes a role that changed (promotion) on an existing row", async () => {
+    // grace was recorded as a student; she's now on the instructor team. Sync
+    // updates her role in place without adding a row.
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "grace,Grace,Hopper,g@x.edu,A,707,student\n",
+      users: {},
+      teamHas: [],
+      instructorHas: [{ login: "grace", id: 707 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.addedUsernames).toEqual([])
+    expect(result.noop).toBe(false)
+    const grace = rowsFromCsv(committed.content!).find(
+      (r) => r.username === "grace",
+    )
+    // role refreshed; teacher-owned metadata untouched.
+    expect(grace).toMatchObject({
+      role: "instructor",
+      first_name: "Grace",
+      email: "g@x.edu",
+      section: "A",
+    })
+  })
+
+  it("a non-404 failure on a staff-team read degrades to [] and still syncs students", async () => {
+    // The instructor-team read 500s; that must NOT fail the whole sync — the
+    // student-team member is still backfilled (staff reads are best-effort).
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER,
+      users: {},
+      teamHas: [{ login: "stu", id: 10 }],
+      instructorHas: [{ login: "prof", id: 1 }], // would be added, but read 500s
+      staffReadRejects: { role: "instructor", status: 500 },
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    // The student synced; the instructor (whose read failed) did not, but the
+    // sync as a whole succeeded rather than throwing.
+    expect(result.addedUsernames).toEqual(["stu"])
+    const rows = rowsFromCsv(committed.content!)
+    expect(rows.map((r) => r.username)).toEqual(["stu"])
+    expect(rows[0].role).toBe("student")
+  })
+
+  it("is a noop when every team member already has a CSV row with its role", async () => {
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "grace,,,,,707,student\n",
       users: {},
       teamHas: [{ login: "grace", id: 707 }],
     })
@@ -1470,20 +1621,45 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
     expect(committed.content).toBeNull()
   })
 
+  // A pre-role row for an existing team member gets its recorded role refreshed
+  // in place (a role-only convergence), even though no member is missing.
+  it("refreshes a missing/stale role on an existing row without adding rows", async () => {
+    const { client, committed } = makeTeamClient({
+      startingCsv: HEADER + "grace,,,,,707\n", // role column empty
+      users: {},
+      teamHas: [{ login: "grace", id: 707 }],
+    })
+
+    const result = await syncRosterFromTeam(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    // No member was missing, so nothing was appended...
+    expect(result.addedUsernames).toEqual([])
+    expect(result.noop).toBe(false)
+    // ...but the role was written, so a commit did happen.
+    const rows = rowsFromCsv(committed.content!)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].role).toBe("student")
+  })
+
   // Regression: a roster hand-edited (or exported by a tool that drops empty
-  // trailing columns) has rows with only 5 fields — the empty `github_id`
-  // column omitted, e.g. `octocat,Grace,Hopper,g@x.edu,Section A`. Papa flags
-  // TooFewFields, but the row is benign (missing trailing field -> ""), so the
-  // parse must NOT throw and sync must still see the row's identity.
-  it("tolerates short rows missing the trailing github_id column", async () => {
+  // trailing columns) has rows with the empty trailing column omitted, e.g.
+  // `octocat,Grace,Hopper,g@x.edu,Section A,1` (the trailing `role` dropped).
+  // Papa flags TooFewFields, but the row is benign (missing trailing field ->
+  // ""), so the parse must NOT throw and sync must still see the row's identity.
+  it("tolerates short rows missing the trailing role column", async () => {
     const shortRows =
-      "octocat,Grace,Hopper,grace@example.edu,Section A\n" +
-      "torvalds,Linus,Torvalds,linus@example.edu,Section A\n"
+      "octocat,Grace,Hopper,grace@example.edu,Section A,1\n" +
+      "torvalds,Linus,Torvalds,linus@example.edu,Section A,2\n"
     const { client } = makeTeamClient({
       startingCsv: HEADER + shortRows,
       users: {},
-      // Both short-row students are already team members, so this is a noop —
-      // the point is that parsing the short rows doesn't throw.
+      // Both short-row students are already team members matched by id, so no
+      // member is missing — the point is that parsing the short rows doesn't
+      // throw. (Their empty role is refreshed to "student" in place, so this is
+      // not a no-op, but nothing is appended.)
       teamHas: [
         { login: "octocat", id: 1 },
         { login: "torvalds", id: 2 },
@@ -1495,20 +1671,20 @@ describe("syncRosterFromTeam — identity-only backfill", () => {
       classroom: "cs101",
     })
 
-    // octocat/torvalds carry no CSV github_id but ARE matched by login, so
-    // they're already "claimed" — nothing to backfill, and no parse error.
-    expect(result.noop).toBe(true)
+    // octocat/torvalds are matched by id, so nothing is backfilled and the
+    // short rows parsed without error.
+    expect(result.addedUsernames).toEqual([])
   })
 })
 
 describe("parseStudentsCsv — short-row tolerance is trailing-only", () => {
   const HEADER = STUDENT_CSV_FIELDS.join(",") + "\n"
 
-  it("parses a row missing the trailing github_id into correct fields", () => {
-    // 5 fields: the empty trailing github_id column omitted. The row must parse
-    // (not throw) AND keep every value in its own column, with github_id -> "".
+  it("parses a row missing the trailing role column into correct fields", () => {
+    // 6 fields: the empty trailing role column omitted. The row must parse
+    // (not throw) AND keep every value in its own column, with role -> "".
     const rows = parseStudentsCsv(
-      HEADER + "octocat,Grace,Hopper,grace@example.edu,Section A\n",
+      HEADER + "octocat,Grace,Hopper,grace@example.edu,Section A,42\n",
     )
     expect(rows).toEqual([
       {
@@ -1517,26 +1693,30 @@ describe("parseStudentsCsv — short-row tolerance is trailing-only", () => {
         last_name: "Hopper",
         email: "grace@example.edu",
         section: "Section A",
-        github_id: "",
+        github_id: "42",
+        role: "",
       },
     ])
   })
 
   it("throws on a row short by more than one column", () => {
-    // 4 fields — short by 2. A row this incomplete can't be a mere dropped
-    // trailing github_id; Papa would map its values into the wrong columns, so
-    // the trailing-only guard must reject it rather than silently misalign
-    // identity. (A row short by exactly one is inherently ambiguous and is
-    // treated as the optional trailing github_id being omitted — see above.)
+    // 5 fields — short by 2 (github_id AND role dropped). A row this incomplete
+    // can't be a mere dropped trailing column; Papa would map its values into
+    // the wrong columns, so the trailing-only guard must reject it rather than
+    // silently misalign identity. (A row short by exactly one is inherently
+    // ambiguous and is treated as the optional trailing column being omitted —
+    // see above.)
     expect(() =>
-      parseStudentsCsv(HEADER + "octocat,Grace,Hopper,grace@example.edu\n"),
+      parseStudentsCsv(
+        HEADER + "octocat,Grace,Hopper,grace@example.edu,Sec A\n",
+      ),
     ).toThrow(/roster\.csv/)
   })
 
   it("still rejects a TooManyFields (extra column) row as before", () => {
     expect(() =>
       parseStudentsCsv(
-        HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A,42,extra\n",
+        HEADER + "octocat,Grace,Hopper,g@x.edu,Sec A,42,student,extra\n",
       ),
     ).toThrow(/roster\.csv/)
   })
@@ -1734,5 +1914,143 @@ describe("inviteRosterStudents — fresh invites for not_in_org students", () =>
     // Only the one attempt that tripped the limit was POSTed; no further invites
     // were fired at the throttled endpoint.
     expect(invitations).toEqual([])
+  })
+})
+
+describe("migrateRosterFile — converge students.csv onto roster.csv", () => {
+  // A minimal client: contents reads for roster.csv/students.csv (present in
+  // `files`, else a real 404), plus the git-data write surface. Records the
+  // tree payload so a test can assert the upsert + delete.
+  const notFound = (path: string) =>
+    new GitHubAPIError({
+      status: 404,
+      url: path,
+      message: "Not Found",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  const makeMigrateClient = (files: Record<string, string>) => {
+    const committed: {
+      tree: { path: string; content?: string; sha?: string | null }[] | null
+    } = { tree: null }
+    let treePosted = false
+
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { body?: unknown }) => {
+        if (path.includes("/contents/")) {
+          const match = path.match(/\/contents\/(.+?)(\?|$)/)
+          const rel = match ? decodeURIComponent(match[1]) : ""
+          const content = files[rel]
+          if (content == null) return Promise.reject(notFound(path))
+          return Promise.resolve({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from(content, "utf-8").toString("base64"),
+          })
+        }
+        if (path.includes("/git/ref/")) {
+          return Promise.resolve({ object: { sha: "base-sha" } })
+        }
+        if (path.includes("/git/commits/")) {
+          return Promise.resolve({ tree: { sha: "base-tree-sha" } })
+        }
+        if (path.endsWith("/git/trees")) {
+          treePosted = true
+          committed.tree =
+            (
+              options?.body as {
+                tree?: {
+                  path: string
+                  content?: string
+                  sha?: string | null
+                }[]
+              }
+            )?.tree ?? null
+          return Promise.resolve({ sha: "tree-sha" })
+        }
+        if (path.endsWith("/git/commits")) {
+          return Promise.resolve({ sha: "new-commit-sha" })
+        }
+        if (path.endsWith("/git/refs/heads/main")) {
+          return Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected request: ${path}`))
+      })
+
+    return {
+      client: { request } as unknown as GitHubClient,
+      committed,
+      treePosted: () => treePosted,
+    }
+  }
+
+  const LEGACY =
+    "username,first_name,last_name,email,section,github_id,role\nada,,,,,1,student\n"
+
+  it("renames students.csv to roster.csv (write new + delete legacy) in one commit", async () => {
+    const { client, committed } = makeMigrateClient({
+      "cs101/students.csv": LEGACY,
+    })
+
+    const result = await migrateRosterFile(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.migrated).toBe(true)
+    const upsert = committed.tree?.find((t) => t.path === "cs101/roster.csv")
+    expect(upsert?.content).toBe(LEGACY) // legacy bytes verbatim
+    const del = committed.tree?.find((t) => t.path === "cs101/students.csv")
+    expect(del?.sha).toBeNull() // deletion
+  })
+
+  it("is a no-op when roster.csv already exists", async () => {
+    const { client, treePosted } = makeMigrateClient({
+      "cs101/roster.csv": LEGACY,
+    })
+
+    const result = await migrateRosterFile(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.migrated).toBe(false)
+    expect(treePosted()).toBe(false)
+  })
+
+  it("prefers the existing roster.csv when both files are present (no rename)", async () => {
+    const { client, treePosted } = makeMigrateClient({
+      "cs101/roster.csv": LEGACY,
+      "cs101/students.csv": LEGACY,
+    })
+
+    const result = await migrateRosterFile(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.migrated).toBe(false)
+    expect(treePosted()).toBe(false)
+  })
+
+  it("does nothing when neither file exists (brand-new classroom)", async () => {
+    const { client, treePosted } = makeMigrateClient({})
+
+    const result = await migrateRosterFile(client, {
+      org: "acme",
+      classroom: "cs101",
+    })
+
+    expect(result.migrated).toBe(false)
+    expect(treePosted()).toBe(false)
   })
 })

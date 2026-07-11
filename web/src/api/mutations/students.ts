@@ -11,6 +11,7 @@ import {
   isActiveMember,
   removeOrgMembership,
   removeUserFromTeam,
+  staffTeamName,
   updateRef,
 } from "@/hooks/github/mutations"
 import {
@@ -19,6 +20,7 @@ import {
   type CreateClassroomResult,
 } from "./classrooms"
 import {
+  getRawFile,
   getRawFileWithFallback,
   getUser,
   listTeamMembers,
@@ -34,7 +36,8 @@ import { mapWithConcurrency } from "@/util/concurrency"
 import { escapeCsvFormulaInjection } from "@/util/csv"
 import { prefixCommit } from "@/util/commit"
 import { rosterPath, legacyRosterPath } from "@/util/rosterPath"
-import { type Student } from "@/types/classroom"
+import { ROLE_RANK, type RosterRole } from "@/util/teamRoster"
+import { STAFF_ROLES, type StaffRole, type Student } from "@/types/classroom"
 import { logger } from "@/lib/logger"
 
 const log = logger.scope("mutations:students")
@@ -139,6 +142,7 @@ export const STUDENT_CSV_FIELDS = [
   "email",
   "section",
   "github_id",
+  "role",
 ] as const
 type StudentCsvField = (typeof STUDENT_CSV_FIELDS)[number]
 
@@ -154,6 +158,10 @@ export function normalizeStudentRow(
     email: String(row.email ?? "").trim(),
     section: String(row.section ?? "").trim(),
     github_id: String(row.github_id ?? "").trim(),
+    // Best-effort recorded metadata (instructor/ta/student, or ""), refreshed
+    // from the classroom's GitHub teams on sync. A pre-role file has no role
+    // column, so this coerces to "".
+    role: String(row.role ?? "").trim(),
   }
 }
 
@@ -839,22 +847,111 @@ export async function addStudentsToClassroomWithConflictRetry(
 export type SyncRosterFromTeamResult = {
   // Team members newly appended to roster.csv as metadata rows.
   addedUsernames: string[]
-  // No missing members — nothing was committed.
+  // No missing members and no role changes — nothing was committed.
   noop: boolean
 }
 
-// Backfill roster.csv from the classroom team: ensure every active team
-// member has an IDENTITY row (username + github_id), appended in ONE commit. The
-// team is the source of truth for enrollment; the CSV holds only teacher-
-// supplied metadata, so this writes identity only and never fabricates
-// name/email/section from the GitHub profile — the teacher fills those in.
-// Never removes rows (CSV-only rows are drift, not deletions).
+// A single classroom member unioned across the student + staff teams, tagged
+// with their highest-precedence role (instructor > ta > student).
+type MemberWithRole = {
+  id: number
+  login: string
+  email?: string | null
+  role: RosterRole
+}
+
+// Resolve the student-team slug plus the two staff-team slugs from one
+// classroom.json read (slugs are authoritative there; GitHub may rewrite them
+// on name collision). Falls back to the derived name per team when the block
+// is absent — mirroring useTeamRoster's resolution so the sync sees exactly the
+// teams the roster view does.
+async function resolveClassroomTeamSlugs(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<{ student: string; staff: Record<StaffRole, string> }> {
+  let json: Awaited<ReturnType<typeof getClassroomJson>> | null = null
+  try {
+    json = await getClassroomJson(client, { org, classroom })
+  } catch (err) {
+    // A missing classroom.json (404) -> derived slugs; a transient failure
+    // propagates so we don't sync against a wrong team.
+    if (!(err instanceof GitHubAPIError && err.isNotFound)) {
+      throw err
+    }
+  }
+  return {
+    student: json?.team?.slug || `classroom50-${classroom}`,
+    staff: {
+      instructor:
+        json?.teams?.instructor?.slug || staffTeamName(classroom, "instructor"),
+      ta: json?.teams?.ta?.slug || staffTeamName(classroom, "ta"),
+    },
+  }
+}
+
+// Union the student + staff team memberships into one member-per-github_id map,
+// each tagged with their highest-precedence role. A staff team that doesn't
+// exist yet (404) lists as empty (listTeamMembers already 404-tolerates), so a
+// classroom with no staff team simply contributes no staff rows.
+async function listClassroomMembersWithRoles(
+  client: GitHubClient,
+  org: string,
+  slugs: { student: string; staff: Record<StaffRole, string> },
+): Promise<MemberWithRole[]> {
+  // The student read stays strict (a transient failure there fails the sync so
+  // it retries against fresh state). The two staff reads are best-effort: a
+  // flaky or permission-blocked staff team degrades to [] rather than blocking
+  // an otherwise-fine student sync — listTeamMembers already treats a missing
+  // team (404) as [], so only a non-404 reject reaches the settle here.
+  const [studentMembers, ...staffMemberLists] = await Promise.all([
+    listTeamMembers(client, org, slugs.student),
+    ...STAFF_ROLES.map((role) =>
+      Promise.allSettled([
+        listTeamMembers(client, org, slugs.staff[role]),
+      ]).then(([r]) => (r.status === "fulfilled" ? r.value : [])),
+    ),
+  ])
+
+  const byId = new Map<number, MemberWithRole>()
+  const consider = (
+    member: { id: number; login: string; email?: string | null },
+    role: RosterRole,
+  ) => {
+    const existing = byId.get(member.id)
+    // Keep the highest-precedence role when a person is on several teams
+    // (e.g. an instructor also on the student team records "instructor").
+    if (existing && ROLE_RANK[existing.role] >= ROLE_RANK[role]) return
+    byId.set(member.id, {
+      id: member.id,
+      login: member.login,
+      email: member.email,
+      role,
+    })
+  }
+
+  for (const m of studentMembers) consider(m, "student")
+  STAFF_ROLES.forEach((role, i) => {
+    for (const m of staffMemberLists[i]) consider(m, role)
+  })
+
+  return [...byId.values()]
+}
+
+// Sync roster.csv from the classroom's GitHub teams: ensure every active member
+// of the student, instructor, and ta teams has an IDENTITY row (username +
+// github_id) carrying their recorded `role`, and refresh the role on rows whose
+// team-derived role has changed — all in ONE commit. The teams are the source
+// of truth for enrollment and role; the CSV holds teacher-supplied metadata
+// plus this best-effort role snapshot, so this writes identity + role only and
+// never fabricates name/email/section from the GitHub profile. Never removes
+// rows (CSV-only rows are drift, not deletions).
 //
-// The diff is recomputed INSIDE the retried closure (re-reading both team and
+// The diff is recomputed INSIDE the retried closure (re-reading both teams and
 // CSV each attempt) so a 409 retry or concurrent edit can't reintroduce or
-// duplicate rows. Uses the same github_id -> username fallback join as the
-// roster view when deciding "missing", so a pre-resolution row with an empty
-// github_id isn't treated as missing (which would append a duplicate).
+// duplicate rows. Uses the same github_id -> username -> email fallback join as
+// the roster view when deciding "missing", so a pre-resolution row with an
+// empty github_id isn't treated as missing (which would append a duplicate).
 export async function syncRosterFromTeam(
   client: GitHubClient,
   input: { org: string; classroom: string },
@@ -863,13 +960,13 @@ export async function syncRosterFromTeam(
   log.info("sync roster from team: started", { org, classroom })
   await assertClassroomNotArchived(client, org, classroom)
 
-  const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+  const slugs = await resolveClassroomTeamSlugs(client, org, classroom)
 
   return withGitConflictRetry(async () => {
-    // Re-read team + CSV on every attempt so the diff is always against the
+    // Re-read teams + CSV on every attempt so the diff is always against the
     // latest state (a concurrent add/edit can't be clobbered or duplicated).
     const [members, ref] = await Promise.all([
-      listTeamMembers(client, org, teamSlug),
+      listClassroomMembersWithRoles(client, org, slugs),
       getBranchRef(client, org),
     ])
     const commit = await getCommit(client, org, ref.object.sha)
@@ -905,7 +1002,27 @@ export async function syncRosterFromTeam(
         !(m.email ? emails.has(m.email.trim().toLowerCase()) : false),
     )
 
-    if (missing.length === 0) {
+    // Refresh the recorded role on existing rows whose team-derived role has
+    // changed (a promotion/demotion, or a first-ever role on a pre-role row).
+    // Matched by id, then login — the same identity join used above. This is
+    // the only in-place edit sync makes; name/email/section stay teacher-owned.
+    const roleById = new Map(members.map((m) => [String(m.id), m.role]))
+    const roleByLogin = new Map(
+      members.map((m) => [m.login.toLowerCase(), m.role]),
+    )
+    let roleChanges = 0
+    const reconciledStudents = currentStudents.map((s) => {
+      const role =
+        (s.github_id ? roleById.get(s.github_id.trim()) : undefined) ??
+        roleByLogin.get(s.username.trim().toLowerCase())
+      if (role && role !== s.role) {
+        roleChanges++
+        return { ...s, role }
+      }
+      return s
+    })
+
+    if (missing.length === 0 && roleChanges === 0) {
       log.info("sync roster from team: completed (up to date)", {
         org,
         classroom,
@@ -913,10 +1030,11 @@ export async function syncRosterFromTeam(
       return { addedUsernames: [], noop: true }
     }
 
-    // Identity-only rows: username + github_id. Name/email/section are left
-    // blank for the teacher to provide (via Edit or a roster upload). The team
-    // decides enrollment; the CSV holds only teacher-supplied metadata, so we
-    // never fabricate profile fields from the GitHub account here.
+    // Identity + role rows: username + github_id + role. Name/email/section are
+    // left blank for the teacher to provide (via Edit or a roster upload). The
+    // teams decide enrollment and role; the CSV holds only teacher-supplied
+    // metadata plus this role snapshot, so we never fabricate profile fields
+    // from the GitHub account here.
     const addedRows = missing.map((m) =>
       normalizeStudentRow({
         username: m.login,
@@ -925,10 +1043,11 @@ export async function syncRosterFromTeam(
         email: "",
         section: "",
         github_id: String(m.id),
+        role: m.role,
       }),
     )
 
-    const nextCsv = stringifyStudentsCsv([...currentStudents, ...addedRows])
+    const nextCsv = stringifyStudentsCsv([...reconciledStudents, ...addedRows])
 
     const tree = await createGitTree(client, {
       org,
@@ -946,7 +1065,7 @@ export async function syncRosterFromTeam(
     const newCommit = await createGitCommit(client, {
       org,
       message: prefixCommit(
-        `Sync ${addedRows.length} team member${
+        `Sync ${addedRows.length} member${
           addedRows.length === 1 ? "" : "s"
         } into roster: ${classroom}`,
       ),
@@ -960,11 +1079,99 @@ export async function syncRosterFromTeam(
       org,
       classroom,
       added: addedRows.length,
+      roleChanges,
     })
     return {
       addedUsernames: addedRows.map((r) => r.username),
       noop: false,
     }
+  })
+}
+
+export type MigrateRosterFileResult = {
+  // True when a rename commit was made (legacy students.csv -> roster.csv).
+  migrated: boolean
+}
+
+// Read a config file's bytes, or null on a true 404. A non-404 propagates so a
+// transient API failure is never mistaken for "file absent".
+async function readFileOrNull(
+  client: GitHubClient,
+  org: string,
+  path: string,
+  ref: string,
+): Promise<string | null> {
+  try {
+    return await getRawFile(client, { org, path, ref })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) return null
+    throw err
+  }
+}
+
+// Converge a classroom bootstrapped before the students.csv -> roster.csv
+// rename onto roster.csv, so the file always physically exists. Mirrors the CLI
+// `gh teacher roster migrate`: if only the legacy students.csv is present, write
+// roster.csv with its bytes verbatim and delete students.csv in ONE tree commit.
+// Idempotent: a no-op when roster.csv already exists, and nothing-to-do when
+// neither file is present (a brand-new classroom's roster.csv is created by the
+// team sync instead). Runs inside the conflict-retry loop so a concurrent write
+// (e.g. an interleaved roster edit) is re-read rather than clobbered.
+export async function migrateRosterFile(
+  client: GitHubClient,
+  input: { org: string; classroom: string },
+): Promise<MigrateRosterFileResult> {
+  const { org, classroom } = input
+  const rosterFilePath = rosterPath(classroom)
+  const legacyPath = legacyRosterPath(classroom)
+
+  return withGitConflictRetry(async () => {
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+
+    // Read both files' presence at the same commit. roster.csv present -> the
+    // classroom is already converged (or has both, and roster.csv is canonical);
+    // nothing to migrate.
+    const [rosterBytes, legacyBytes] = await Promise.all([
+      readFileOrNull(client, org, rosterFilePath, ref.object.sha),
+      readFileOrNull(client, org, legacyPath, ref.object.sha),
+    ])
+
+    if (rosterBytes !== null || legacyBytes === null) {
+      // roster.csv already exists, or neither file does — no rename to do.
+      return { migrated: false }
+    }
+
+    // Only the legacy file exists: write roster.csv with its bytes verbatim and
+    // delete students.csv in a single commit (mode 100644; sha:null deletes).
+    const tree = await createGitTree(client, {
+      org,
+      base_tree: commit.tree.sha,
+      tree: [
+        {
+          path: rosterFilePath,
+          mode: "100644",
+          type: "blob",
+          content: legacyBytes,
+        },
+        { path: legacyPath, mode: "100644", type: "blob", sha: null },
+      ],
+    })
+
+    const newCommit = await createGitCommit(client, {
+      org,
+      message: prefixCommit(`Migrate students.csv to roster.csv: ${classroom}`),
+      tree_sha: tree.sha,
+      parents: [ref.object.sha],
+    })
+
+    await updateRef(client, org, newCommit.sha)
+
+    log.info("migrate roster file: renamed students.csv -> roster.csv", {
+      org,
+      classroom,
+    })
+    return { migrated: true }
   })
 }
 
