@@ -327,8 +327,8 @@ const RosterBulkActionsBar = ({
                 <Button
                   size="sm"
                   className="join-item"
-                  aria-label={t("students.uploadRosterTitle")}
-                  title={t("students.uploadRosterTitle")}
+                  aria-label={t("students.uploadTitle")}
+                  title={t("students.uploadTitle")}
                   onClick={addActions.onUploadRoster}
                 >
                   <Upload aria-hidden="true" className="size-4" />

@@ -12,7 +12,7 @@ import { GitHubLink } from "@/components/GitHubLink"
 import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import useGetStudents, { useUpdateRosterCache } from "@/hooks/useGetStudents"
-import { useTeamRoster } from "@/hooks/useTeamRoster"
+import { useTeamRoster, useInvalidateTeamRoster } from "@/hooks/useTeamRoster"
 import { useSuppressedLogins } from "@/hooks/useSuppressedLogins"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -39,6 +39,7 @@ const StudentListContent = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
+  const invalidateTeamRoster = useInvalidateTeamRoster(org, classroom)
   // Session-unenrolled logins, owned here so both the roster (which remembers on
   // unenroll and skips them in the auto-backfills) and the Add modal (which
   // forgets a login on a successful re-enroll) share one set — otherwise a
@@ -162,6 +163,13 @@ const StudentListContent = ({
             suppressedLogins.forget(result.addedStudents.map((s) => s.username))
           }
           invalidateInviteQueries(queryClient, org)
+        }}
+        onEmailSuccess={() => {
+          // Email invites write no roster.csv row; they surface as `pending`
+          // rows via the org pending-invitations list, so refresh those + the
+          // team roster to show them at once.
+          invalidateInviteQueries(queryClient, org)
+          invalidateTeamRoster()
         }}
       />
       <InviteLinksModal

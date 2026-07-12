@@ -847,7 +847,7 @@ const EnrolledStudents = ({
                 </Button>
                 <Button size="sm" onClick={addActions.onUploadRoster}>
                   <Upload aria-hidden="true" className="size-4" />
-                  {t("students.uploadRosterTitle")}
+                  {t("students.uploadTitle")}
                 </Button>
                 <Button size="sm" onClick={addActions.onInviteLinks}>
                   <Send aria-hidden="true" className="size-4" />
