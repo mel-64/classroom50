@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetOrgInvitations from "@/hooks/useGetOrgInvitations"
+import { useOrgRole } from "@/context/orgRole/OrgRoleProvider"
+import { can } from "@/util/capabilities"
 import {
   githubKeys,
   teamMembersQuery,
@@ -101,6 +103,10 @@ export function useTeamRoster(
   students: Student[],
 ): UseTeamRosterResult {
   const client = useGitHubClient()
+  const { orgRole } = useOrgRole()
+  // Team invitations are owner-only (like org invitations). Gate the reads on
+  // the manageOrg capability so a non-owner doesn't fire a guaranteed 403.
+  const isOwner = can("manageOrg", { orgRole })
 
   const { data: classroomJson } = useGetClassroom(org, classroom)
   const teamSlug =
@@ -137,15 +143,21 @@ export function useTeamRoster(
     invitations,
     failedInvitations,
     isLoading: invitesLoading,
+    isError: invitesError,
     isForbidden: invitesForbidden,
   } = useGetOrgInvitations(org)
 
   // Team-scoped pending invitations for the staff teams (owner-only, like org
-  // invitations). 403 marks pending hidden; 404 (uncreated team) -> [].
-  const instructorInvitesQuery = useQuery(
-    teamInvitationsQuery(client, org, instructorSlug),
-  )
-  const taInvitesQuery = useQuery(teamInvitationsQuery(client, org, taSlug))
+  // invitations). Gated on org ownership so a non-owner never fires the 403;
+  // 404 (uncreated team) -> [].
+  const instructorInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, instructorSlug),
+    enabled: Boolean(org && instructorSlug) && isOwner,
+  })
+  const taInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, taSlug),
+    enabled: Boolean(org && taSlug) && isOwner,
+  })
 
   // All active org members (shared cache with the Org Members page). Used only
   // to classify a roster.csv row on no team as in-org (assign a role) vs
@@ -237,7 +249,7 @@ export function useTeamRoster(
   )
 
   // Rows already in the CSV but stale against team membership (blank github_id
-  // or a role that differs from the team's) — the login-only `rliu50` case.
+  // or a role that differs from the team's) — the login-only row case.
   // These need the same sync backfill but aren't "missing", so they must feed
   // the sync trigger separately, else a login-only row would never converge.
   const backfillNeeded = useMemo(
@@ -261,8 +273,17 @@ export function useTeamRoster(
 
   // Any team-member fetch (student or staff) failing for a non-404 reason is a
   // real error — surface it rather than rendering a partial roster as "empty".
-  const isError =
-    membersError || instructorMembersQuery.isError || taMembersQuery.isError
+  // The invitations read counts too when it's READABLE (an owner): a transient
+  // 5xx there returns an empty list that would otherwise render as authoritative
+  // "zero pending" for an owner who does have invites. A non-owner's definitive
+  // 403 is `pendingHidden`, not an error (pending is hidden by design), so it's
+  // excluded.
+  const isError = Boolean(
+    membersError ||
+    instructorMembersQuery.isError ||
+    taMembersQuery.isError ||
+    (!pendingHidden && invitesError),
+  )
 
   // Wait on every team-member fetch (student + staff) so the roster appears
   // atomically rather than flashing empty then popping staff in. The invite

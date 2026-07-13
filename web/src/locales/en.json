@@ -45,7 +45,13 @@
   "error": {
     "title": "Something went wrong",
     "unexpected": "An unexpected error occurred.",
-    "reload": "Reload"
+    "reload": "Reload",
+    "roleResolveFailed": "Couldn't verify your access for this classroom."
+  },
+  "permissionDenied": {
+    "title": "You don't have permission",
+    "message": "This action needs a higher role than yours in this classroom. If your role recently changed, try going back.",
+    "back": "Back to classroom"
   },
   "missingParams": {
     "message": "This page is missing a required parameter."
@@ -1299,6 +1305,12 @@
   },
   "classes": {
     "createTitle": "Create Classroom",
+    "claimInstructor": {
+      "message": "You own this organization but aren't on this classroom's instructor team, so you're seeing it as a student. Add yourself to manage it.",
+      "action": "Add yourself as instructor",
+      "success": "You're now an instructor of this classroom.",
+      "failed": "Couldn't add you as instructor: {{message}}"
+    },
     "missingOrg": "Missing organization.",
     "missingOrgOrClassroom": "Missing organization or classroom.",
     "couldNotLoad": "Could not load classroom data.",

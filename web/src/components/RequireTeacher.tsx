@@ -1,18 +1,23 @@
 import { type ReactNode } from "react"
 import { useParams } from "@tanstack/react-router"
-import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
-import { useClassroomRole, isInstructorRole } from "@/hooks/useClassroomRole"
-import { useGithubAuth } from "@/auth/useGithubAuth"
+import { useTranslation } from "react-i18next"
+import { useConfigRepoAccess } from "@/hooks/useConfigRepoAccess"
+import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
+import { useOrgRole } from "@/context/orgRole/OrgRoleProvider"
+import { can } from "@/util/capabilities"
 import NotFound from "@/components/NotFound"
 import RoleResolvingFallback from "@/components/RoleResolvingFallback"
+import { QueryErrorAlert } from "@/components/QueryErrorAlert"
 
 // What a guarded surface requires:
-// - "staff": any classroom staff (owner/instructor/ta) — for classroom CONTENT
-//   (roster, authoring, submissions). Backed by config-repo access.
-// - "instructor": owner OR instructor of THIS classroom (excludes TAs) — for
-//   classroom SETTINGS. Needs a `$classroom` route param.
-// - "owner": org admin only — for ORG-wide settings/setup, where TA and
-//   instructor can't be distinguished without a classroom context.
+// - "staff": any classroom staff (instructor/ta) — for classroom CONTENT
+//   (roster, authoring, submissions). Backed by config-repo access. On an
+//   org-level surface (no $classroom, e.g. Published) this is the org-scoped
+//   config-repo verdict; on a classroom surface it reads the shared context.
+// - "instructor": instructor of THIS classroom (excludes TAs) — for classroom
+//   SETTINGS. Reads the classroom context. Needs a $classroom route.
+// - "owner": org admin only — for ORG-wide settings/setup. Reads the org-role
+//   context. Independent of any classroom team (KTD-4).
 export type RequireRole = "staff" | "instructor" | "owner"
 
 // Gate page content by role. While the role resolves we show a spinner (never
@@ -26,44 +31,127 @@ const RequireTeacher = ({
   children: ReactNode
   allow?: RequireRole
 }) => {
-  if (allow === "staff") return <RequireStaff>{children}</RequireStaff>
-  return <RequireElevated allow={allow}>{children}</RequireElevated>
+  if (allow === "owner") return <RequireOwner>{children}</RequireOwner>
+  if (allow === "instructor")
+    return <RequireInstructor>{children}</RequireInstructor>
+  return <RequireStaff>{children}</RequireStaff>
 }
 
-// Staff gate: any config-repo access (owner/instructor/ta). Used for classroom
-// content TAs may see.
-const RequireStaff = ({ children }: { children: ReactNode }) => {
-  const { org } = useParams({ strict: false })
-  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
-
-  if (!roleResolved) return <RoleResolvingFallback />
-  if (!showTeacherUi) return <NotFound />
-  return <>{children}</>
-}
-
-// Elevated gate: "instructor" (owner OR instructor of this classroom) or
-// "owner" (org admin). Resolves the full classroom role; TAs are excluded.
-const RequireElevated = ({
+// Shared gate shape: while the role read is in flight show a spinner (never
+// flash a 404 at a real teacher); if the read SETTLED IN ERROR (retries
+// exhausted, role still unresolved) show a retryable error instead of an
+// indefinite spinner; then render children or NotFound. Each Require* wrapper
+// computes its own `resolved`/`permitted` from the role signal it reads, and
+// classroom gates pass `errored`/`onRetry` from the context.
+const RoleGate = ({
+  resolved,
+  permitted,
+  errored = false,
+  onRetry,
   children,
-  allow,
 }: {
+  resolved: boolean
+  permitted: boolean
+  errored?: boolean
+  onRetry?: () => void
   children: ReactNode
-  allow: "instructor" | "owner"
 }) => {
-  const { org, classroom } = useParams({ strict: false })
-  const { user } = useGithubAuth()
-  const { role, isLoading } = useClassroomRole(org, classroom, user?.login)
-
-  // `unresolved` means a signal is still in flight or hit a transient error —
-  // hold the spinner rather than flash NotFound at a real instructor/owner.
-  if (isLoading || role === "unresolved") return <RoleResolvingFallback />
-
-  // "instructor" allows owner OR instructor; "owner" is owner-only.
-  const permitted =
-    allow === "owner" ? role === "owner" : isInstructorRole(role)
-
+  const { t } = useTranslation()
+  if (errored && onRetry) {
+    return (
+      <QueryErrorAlert
+        message={t("error.roleResolveFailed")}
+        onRetry={onRetry}
+        className="m-4"
+      />
+    )
+  }
+  if (!resolved) return <RoleResolvingFallback />
   if (!permitted) return <NotFound />
   return <>{children}</>
+}
+
+// Staff gate. On a classroom surface, read the shared classroom context; on an
+// org-level surface (no classroom), fall back to the org-scoped config-repo
+// verdict, which needs no classroom.
+const RequireStaff = ({ children }: { children: ReactNode }) => {
+  const { classroom } = useParams({ strict: false })
+  if (classroom)
+    return <RequireClassroomStaff>{children}</RequireClassroomStaff>
+  return <RequireOrgStaff>{children}</RequireOrgStaff>
+}
+
+const RequireClassroomStaff = ({ children }: { children: ReactNode }) => {
+  const { role, roleResolved, isError, retry } = useClassroomRoleContext()
+  return (
+    <RoleGate
+      resolved={roleResolved}
+      permitted={can("viewClassroomStaffContent", {
+        classroomRole: role,
+      })}
+      errored={isError}
+      onRetry={retry}
+    >
+      {children}
+    </RoleGate>
+  )
+}
+
+const RequireOrgStaff = ({ children }: { children: ReactNode }) => {
+  const { org } = useParams({ strict: false })
+  const { showTeacherUi, roleResolved, isError, refetch } =
+    useConfigRepoAccess(org)
+  return (
+    <RoleGate
+      resolved={roleResolved}
+      permitted={can("viewOrgStaffContent", {
+        orgStaff: showTeacherUi,
+      })}
+      errored={isError}
+      onRetry={refetch}
+    >
+      {children}
+    </RoleGate>
+  )
+}
+
+// Instructor gate: instructor of this classroom (TAs excluded). An org owner is
+// permitted only when they are on the classroom instructor team — org-admin
+// status alone no longer grants classroom-instructor access (KTD-4). Gate on
+// `roleResolved` (the fine role short-circuits to instructor on the instructor
+// read alone) — NOT `!isLoading`, which would hold a confirmed instructor on
+// the spinner while the irrelevant ta/student reads finish.
+const RequireInstructor = ({ children }: { children: ReactNode }) => {
+  const { role, roleResolved, isError, retry } = useClassroomRoleContext()
+  return (
+    <RoleGate
+      resolved={roleResolved}
+      permitted={can("editClassroomSettings", {
+        classroomRole: role,
+      })}
+      errored={isError}
+      onRetry={retry}
+    >
+      {children}
+    </RoleGate>
+  )
+}
+
+// Owner gate: org admin, read from the org-role context. Org-wide, independent
+// of any classroom. A settled transient membership error surfaces a retryable
+// error instead of an indefinite spinner (mirrors the classroom gates).
+const RequireOwner = ({ children }: { children: ReactNode }) => {
+  const { orgRole, isError, retry } = useOrgRole()
+  return (
+    <RoleGate
+      resolved={orgRole !== "unresolved"}
+      permitted={can("manageOrg", { orgRole })}
+      errored={isError}
+      onRetry={retry}
+    >
+      {children}
+    </RoleGate>
+  )
 }
 
 export default RequireTeacher

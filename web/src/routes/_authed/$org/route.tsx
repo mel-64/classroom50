@@ -9,6 +9,8 @@ import {
 import { Spinner } from "@/components/Spinner"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { useOrgClassroom50Status } from "@/hooks/useOrgClassroom50Status"
+import { OrgRoleProvider, useOrgRole } from "@/context/orgRole/OrgRoleProvider"
+import { can } from "@/util/capabilities"
 
 export const Route = createFileRoute("/_authed/$org")({
   component: OrgLayout,
@@ -20,6 +22,15 @@ export const Route = createFileRoute("/_authed/$org")({
 // config repo is expected for them, so gating would lock them out of their org.
 function OrgLayout() {
   const { org } = useParams({ from: "/_authed/$org" })
+  return (
+    <OrgRoleProvider org={org}>
+      <OrgLayoutInner />
+    </OrgRoleProvider>
+  )
+}
+
+function OrgLayoutInner() {
+  const { org } = useParams({ from: "/_authed/$org" })
   // Match the setup route by matched-route id, not a pathname suffix: a suffix
   // check (endsWith("/setup")) both collides with any path segment named
   // "setup" (e.g. an assignment slug) and silently breaks if the route is ever
@@ -28,9 +39,11 @@ function OrgLayout() {
     select: (s) => s.matches.some((m) => m.routeId === "/_authed/$org/setup/"),
   })
 
-  const { data: membership, isLoading: loadingMembership } =
-    useGetOwnOrgMembership(org)
-  const isAdmin = membership?.role === "admin"
+  const { isLoading: loadingMembership } = useGetOwnOrgMembership(org)
+  // Gate on the org-role capability (provider mounted by OrgLayout) rather than
+  // re-deriving the admin literal from membership.
+  const { orgRole } = useOrgRole()
+  const isAdmin = can("manageOrg", { orgRole })
 
   const { data: repoStatus, isLoading: loadingRepo } =
     useOrgClassroom50Status(org)
