@@ -178,3 +178,45 @@ func TestManualHardeningSteps(t *testing.T) {
 		}
 	}
 }
+
+func TestOrgDefaultBranchRecommendation(t *testing.T) {
+	cases := []struct {
+		name string
+		live map[string]any
+		want string
+	}{
+		{"master recommends switching", map[string]any{"default_repository_branch": "master"}, "master"},
+		{"develop recommends switching", map[string]any{"default_repository_branch": "develop"}, "develop"},
+		{"main is fine", map[string]any{"default_repository_branch": "main"}, ""},
+		{"missing field is fine", map[string]any{}, ""},
+		{"empty string is fine", map[string]any{"default_repository_branch": ""}, ""},
+		{"non-string is fine", map[string]any{"default_repository_branch": 42}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OrgDefaultBranchRecommendation(tc.live); got != tc.want {
+				t.Errorf("OrgDefaultBranchRecommendation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfigRepoDefaultBranchRecommendation(t *testing.T) {
+	cases := []struct {
+		name   string
+		branch string
+		want   string
+	}{
+		{"master recommends renaming", "master", "master"},
+		{"develop recommends renaming", "develop", "develop"},
+		{"main is fine", "main", ""},
+		{"empty is fine", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ConfigRepoDefaultBranchRecommendation(tc.branch); got != tc.want {
+				t.Errorf("ConfigRepoDefaultBranchRecommendation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -7,7 +7,12 @@ import {
   PASS_THRESHOLD_MIN,
   assertAssignmentMode,
 } from "@/types/classroom"
-import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
+import {
+  getBranchRef,
+  getClassroomJson,
+  getCommit,
+  getConfigRepoBranch,
+} from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
@@ -555,10 +560,11 @@ export async function editAssignment(
   // The archive guard is independent of the org ref read, so run them
   // concurrently — Promise.all rejects on the first rejection, so an archived
   // classroom still fails closed before any write.
-  const [, ref] = await Promise.all([
+  const [, configBranch] = await Promise.all([
     assertClassroomNotArchived(client, org, classroom),
-    getBranchRef(client, org),
+    getConfigRepoBranch(client, org),
   ])
+  const ref = await getBranchRef(client, org, configBranch)
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -620,7 +626,12 @@ export async function editAssignment(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
-  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+  const updatedRef = await updateRef(
+    client,
+    input.org,
+    newCommit.sha,
+    configBranch,
+  )
 
   // Grant the (possibly changed) in-org private template a team read — a
   // non-fatal warning, never thrown (the edit already committed). needsTeamGrant
@@ -989,11 +1000,13 @@ export async function createAssignment(
   // The archive guard, entry build, and org ref read are independent, so run
   // them concurrently — Promise.all rejects on the first rejection, so an
   // archived classroom still fails closed before any write.
-  const [, { entry: assignmentBody, needsTeamGrant }, ref] = await Promise.all([
-    assertClassroomNotArchived(client, input.org, input.classroom),
-    buildAssignmentEntry(client, input),
-    getBranchRef(client, input.org),
-  ])
+  const [, { entry: assignmentBody, needsTeamGrant }, configBranch] =
+    await Promise.all([
+      assertClassroomNotArchived(client, input.org, input.classroom),
+      buildAssignmentEntry(client, input),
+      getConfigRepoBranch(client, input.org),
+    ])
+  const ref = await getBranchRef(client, input.org, configBranch)
 
   const commit = await getCommit(client, input.org, ref.object.sha)
 
@@ -1037,7 +1050,12 @@ export async function createAssignment(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
-  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+  const updatedRef = await updateRef(
+    client,
+    input.org,
+    newCommit.sha,
+    configBranch,
+  )
 
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && assignmentBody.template) {
@@ -1433,13 +1451,14 @@ export async function copyAssignmentToClassroom(
   // run them concurrently — one fewer serial round-trip per retry attempt.
   // Promise.all rejects on the first rejection, so an archived classroom or bad
   // template throws before any write.
-  const [, repo, ref] = await Promise.all([
+  const [, repo, configBranch] = await Promise.all([
     assertClassroomNotArchived(client, org, targetClassroom),
     entry.template
       ? getRepo(client, entry.template.owner, entry.template.repo)
       : Promise.resolve(null),
-    getBranchRef(client, org),
+    getConfigRepoBranch(client, org),
   ])
+  const ref = await getBranchRef(client, org, configBranch)
 
   // Re-check the template live (mirrors create): public/missing -> no grant;
   // private in-org -> needs grant; private out-of-org -> refuse.
@@ -1524,7 +1543,7 @@ export async function copyAssignmentToClassroom(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
-  const updatedRef = await updateRef(client, org, newCommit.sha)
+  const updatedRef = await updateRef(client, org, newCommit.sha, configBranch)
 
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && entry.template) {
@@ -1650,10 +1669,11 @@ export async function deleteAssignment(
 
   // Refuse a delete into an archived classroom (write-path guard); run the
   // check concurrently with the ref read.
-  const [, ref] = await Promise.all([
+  const [, configBranch] = await Promise.all([
     assertClassroomNotArchived(client, org, classroom),
-    getBranchRef(client, org),
+    getConfigRepoBranch(client, org),
   ])
+  const ref = await getBranchRef(client, org, configBranch)
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -1697,7 +1717,12 @@ export async function deleteAssignment(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
-  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+  const updatedRef = await updateRef(
+    client,
+    input.org,
+    newCommit.sha,
+    configBranch,
+  )
 
   return {
     previousCommitSha: ref.object.sha,
@@ -1806,17 +1831,21 @@ function pagesAutograderUrl(params: {
   return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
 }
 
-function defaultAutograderWorkflow(org: string) {
+function defaultAutograderWorkflow(
+  org: string,
+  branch: string,
+  configBranch: string,
+) {
   return `name: Autograde
 
 on:
   push:
-    branches: [main]
+    branches: ["${branch}"]
     tags: ["submit/*"]
 
 jobs:
   grade:
-    uses: "${org}/classroom50/.github/workflows/autograde-runner.yaml@main"
+    uses: "${org}/classroom50/.github/workflows/autograde-runner.yaml@${configBranch}"
     permissions:
       contents: write
       statuses: write
@@ -1827,25 +1856,61 @@ jobs:
 `
 }
 
+// Whether an autograder name uses the built-in default shim (templated by
+// branch here) vs a teacher-authored one fetched from Pages (branch-agnostic).
+function isDefaultAutograder(autograder?: string): boolean {
+  return !autograder || autograder === "default"
+}
+
+// The config repo's default branch, for the default shim's reusable-workflow
+// `uses:` ref. On a read failure, fall back to `fallbackBranch` (the assignment
+// repo's own branch) rather than a hardcoded `main` — a wrong `@main` ref would
+// 404 the runner and silently skip grading on a master-default org. A 404
+// (getRepo returns null) or empty value falls back to `main`.
+async function resolveConfigRepoDefaultBranch(
+  client: GitHubClient,
+  org: string,
+  fallbackBranch: string,
+): Promise<string> {
+  try {
+    const repo = await getRepo(client, org, "classroom50")
+    return repo?.default_branch || "main"
+  } catch {
+    return fallbackBranch
+  }
+}
+
 export async function resolveAutograderWorkflow(params: {
   org: string
   classroom: string
   autograder?: string
   secret?: string
+  // The assignment repo's default branch (the shim's push trigger) and the
+  // config repo's default branch (the reusable-workflow ref). Only used for the
+  // built-in default shim; teacher-authored autograders are branch-agnostic.
+  branch?: string
+  configBranch?: string
 }): Promise<string> {
-  const { org, classroom, autograder, secret } = params
-  if (!autograder || autograder === "default") {
-    return defaultAutograderWorkflow(org)
+  const { org, classroom, autograder, secret, branch, configBranch } = params
+  if (isDefaultAutograder(autograder)) {
+    return defaultAutograderWorkflow(
+      org,
+      branch || "main",
+      configBranch || "main",
+    )
   }
+  // Narrowed: isDefaultAutograder returns true for undefined/"default", so a
+  // non-default autograder name is a non-empty string here.
+  const autograderName = autograder as string
 
   const workflow = await fetchTextWithFriendlyErrors(
-    pagesAutograderUrl({ org, classroom, name: autograder, secret }),
-    `autograder ${autograder}`,
+    pagesAutograderUrl({ org, classroom, name: autograderName, secret }),
+    `autograder ${autograderName}`,
   )
 
   if (!workflow.includes("jobs:")) {
     throw new Error(
-      `Autograder ${autograder} may be malformed YAML. Ask your instructor to check the file in the config repo.`,
+      `Autograder ${autograderName} may be malformed YAML. Ask your instructor to check the file in the config repo.`,
     )
   }
 
@@ -1885,11 +1950,32 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
   branch: string
   metadataYaml: string
   autogradeYaml: string
+  // Rebuild the autograde shim for the branch that actually materialized. The
+  // default shim's push-trigger branch must match the generated repo's real
+  // default branch, which is only known after GitHub's async template copy
+  // settles (see below). Omitted for branch-agnostic (teacher-authored) shims.
+  rerenderShimForBranch?: (branch: string) => string
 }) {
-  const { client, owner, repo, branch, metadataYaml, autogradeYaml } = params
+  const {
+    client,
+    owner,
+    repo,
+    branch,
+    metadataYaml,
+    autogradeYaml,
+    rerenderShimForBranch,
+  } = params
 
   await withFreshRepoRetry(async () => {
-    const ref = await getBranchRefRepo(client, owner, repo, branch)
+    // A freshly template-generated repo's real branch (copied from the template,
+    // e.g. `master`) only materializes after GitHub finishes the async copy —
+    // until then `default_branch` transiently reports the org default (`main`)
+    // and no ref exists. Re-resolve the live default branch each attempt so we
+    // commit to the branch that actually appears, not a pre-guessed `main` that
+    // may never exist. Fall back to the caller's branch while it's still empty.
+    const live = await getRepo(client, owner, repo)
+    const targetBranch = live?.default_branch || branch
+    const ref = await getBranchRefRepo(client, owner, repo, targetBranch)
     const parentSha = ref.object.sha
     const currentCommit = await getCommitByRepo(client, owner, repo, parentSha)
     const baseTreeSha = currentCommit.tree?.sha
@@ -1898,13 +1984,20 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
       throw freshRepoNotReadyError(owner, repo)
     }
 
+    // Re-render the default shim's push trigger for the branch that actually
+    // materialized (targetBranch), so autograde fires on the repo's real
+    // default branch rather than a transiently-reported `main`.
+    const shim = rerenderShimForBranch
+      ? rerenderShimForBranch(targetBranch)
+      : autogradeYaml
+
     const tree = await createTreeForAssignment({
       client,
       owner,
       repo,
       baseTreeSha,
       metadataYaml,
-      autogradeYaml,
+      autogradeYaml: shim,
     })
 
     const commit = await createCommitForAssignment({
@@ -1922,7 +2015,7 @@ async function commitAcceptFilesWithFreshRepoRetry(params: {
       client,
       owner,
       repo,
-      branch,
+      branch: targetBranch,
       commitSha: commit.sha,
     })
   })
@@ -1945,6 +2038,7 @@ async function provisionAcceptedRepo(params: {
   branch: string
   metadataYaml: string
   autogradeYaml: string
+  rerenderShimForBranch?: (branch: string) => string
   onStepUpdate?: OnAcceptStepUpdate
 }) {
   const {
@@ -1956,6 +2050,7 @@ async function provisionAcceptedRepo(params: {
     branch,
     metadataYaml,
     autogradeYaml,
+    rerenderShimForBranch,
     onStepUpdate,
   } = params
 
@@ -1997,6 +2092,7 @@ async function provisionAcceptedRepo(params: {
         branch,
         metadataYaml,
         autogradeYaml,
+        rerenderShimForBranch,
       }),
   )
 }
@@ -2078,7 +2174,7 @@ export async function acceptAssignment(params: {
     }
   }
 
-  const autogradeYaml = await withAcceptStep(
+  let autogradeYaml = await withAcceptStep(
     {
       id: "autograder",
       label: "Resolving the autograder",
@@ -2092,6 +2188,9 @@ export async function acceptAssignment(params: {
         classroom,
         autograder: assignment.autograder,
         secret,
+        // Preliminary branch; the default shim is re-rendered post-create with
+        // the assignment repo's actual default branch (below).
+        branch: sourceBranch || "main",
       }),
   )
 
@@ -2132,6 +2231,31 @@ export async function acceptAssignment(params: {
         fallbackBranch: sourceBranch || "main",
       }),
   )
+
+  // The default shim's push-trigger branch must match the assignment repo's
+  // actual default branch (which GitHub, not the template, decides — a `main`
+  // template generated into a `master`-default org yields a `master` repo), and
+  // its reusable-workflow `uses:` ref must match the config repo's branch. Both
+  // are only knowable after the repo exists, so re-render here.
+  //
+  // The generated repo's real branch lags GitHub's async template copy, so the
+  // branch resolved here may still be the transient `main`. rerenderShim lets
+  // the commit step rebuild the shim once the true branch materializes.
+  let rerenderShim: ((branch: string) => string) | undefined
+  if (isDefaultAutograder(assignment.autograder)) {
+    const resolvedBranch =
+      created.kind === "fallback-empty"
+        ? created.branch
+        : created.repo.default_branch || sourceBranch || "main"
+    const configBranch = await resolveConfigRepoDefaultBranch(
+      client,
+      org,
+      resolvedBranch,
+    )
+    autogradeYaml = defaultAutograderWorkflow(org, resolvedBranch, configBranch)
+    rerenderShim = (branch: string) =>
+      defaultAutograderWorkflow(org, branch, configBranch)
+  }
 
   if (created.kind === "already-accepted") {
     // The repo exists, but a prior accept may have failed AFTER creating it but
@@ -2211,6 +2335,7 @@ export async function acceptAssignment(params: {
       branch: created.repo.default_branch || sourceBranch,
       metadataYaml,
       autogradeYaml,
+      rerenderShimForBranch: rerenderShim,
       onStepUpdate,
     })
 
@@ -2245,6 +2370,7 @@ export async function acceptAssignment(params: {
     branch: targetBranch,
     metadataYaml,
     autogradeYaml,
+    rerenderShimForBranch: rerenderShim,
     onStepUpdate,
   })
 

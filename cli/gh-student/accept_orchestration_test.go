@@ -37,8 +37,9 @@ func TestCreateTemplatedPrivateAssignmentRepoInOrg(t *testing.T) {
 		mux.HandleFunc("/repos/cs50/hello-template/generate", func(w http.ResponseWriter, r *http.Request) {
 			generated = true
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"full_name": "o/cs-principles-hello-alice",
-				"html_url":  "https://github.com/o/cs-principles-hello-alice",
+				"full_name":      "o/cs-principles-hello-alice",
+				"html_url":       "https://github.com/o/cs-principles-hello-alice",
+				"default_branch": "main",
 			})
 		})
 		mux.HandleFunc("/repos/o/cs-principles-hello-alice", func(w http.ResponseWriter, r *http.Request) {
@@ -46,27 +47,109 @@ func TestCreateTemplatedPrivateAssignmentRepoInOrg(t *testing.T) {
 				patched = true
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"full_name": "o/cs-principles-hello-alice",
-				"html_url":  "https://github.com/o/cs-principles-hello-alice",
+				"full_name":      "o/cs-principles-hello-alice",
+				"html_url":       "https://github.com/o/cs-principles-hello-alice",
+				"default_branch": "main",
 			})
+		})
+		mux.HandleFunc("/repos/o/cs-principles-hello-alice/branches", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "main"}})
 		})
 		server := httptest.NewServer(mux)
 		t.Cleanup(server.Close)
 		client := newTestRESTClient(t, server)
 
 		var out bytes.Buffer
-		htmlURL, fullName, already, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
+		htmlURL, fullName, branch, already, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if already {
 			t.Error("alreadyExisted = true, want false on a fresh create")
 		}
+		if branch != "main" {
+			t.Errorf("branch = %q, want main", branch)
+		}
 		if !generated || !patched {
 			t.Errorf("generated=%v patched=%v, want both true", generated, patched)
 		}
 		if fullName != "o/cs-principles-hello-alice" || !strings.Contains(htmlURL, "cs-principles-hello-alice") {
 			t.Errorf("got (%q, %q), want the generated repo coordinates", htmlURL, fullName)
+		}
+	})
+
+	t.Run("master-default org: generated repo's branch (not the template's) is returned", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/repos/cs50/hello-template/generate", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"full_name":      "o/cs-principles-hello-alice",
+				"html_url":       "https://github.com/o/cs-principles-hello-alice",
+				"default_branch": "master",
+			})
+		})
+		mux.HandleFunc("/repos/o/cs-principles-hello-alice", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"full_name":      "o/cs-principles-hello-alice",
+				"html_url":       "https://github.com/o/cs-principles-hello-alice",
+				"default_branch": "master",
+			})
+		})
+		mux.HandleFunc("/repos/o/cs-principles-hello-alice/branches", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "master"}})
+		})
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+
+		var out bytes.Buffer
+		_, _, branch, _, err := createTemplatedPrivateAssignmentRepoInOrg(newTestRESTClient(t, server), ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branch != "master" {
+			t.Errorf("branch = %q, want master (the generated repo's default branch)", branch)
+		}
+	})
+
+	t.Run("stale default_branch: settles to the branch that materializes", func(t *testing.T) {
+		var branchesGets int
+		mux := http.NewServeMux()
+		mux.HandleFunc("/repos/cs50/hello-template/generate", func(w http.ResponseWriter, r *http.Request) {
+			// Generate echoes the transient org default `main`, but the template
+			// really produces `master`.
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"full_name":      "o/cs-principles-hello-alice",
+				"html_url":       "https://github.com/o/cs-principles-hello-alice",
+				"default_branch": "main",
+			})
+		})
+		mux.HandleFunc("/repos/o/cs-principles-hello-alice/branches", func(w http.ResponseWriter, _ *http.Request) {
+			branchesGets++
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "master"}})
+		})
+		mux.HandleFunc("/repos/o/cs-principles-hello-alice", func(w http.ResponseWriter, r *http.Request) {
+			body := map[string]string{
+				"full_name": "o/cs-principles-hello-alice",
+				"html_url":  "https://github.com/o/cs-principles-hello-alice",
+			}
+			if r.Method == http.MethodGet {
+				// The settled repo reports the real branch.
+				body["default_branch"] = "master"
+			}
+			_ = json.NewEncoder(w).Encode(body)
+		})
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+
+		var out bytes.Buffer
+		_, _, branch, _, err := createTemplatedPrivateAssignmentRepoInOrg(newTestRESTClient(t, server), ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branchesGets == 0 {
+			t.Error("expected the settle-resolver to poll the branches endpoint")
+		}
+		if branch != "master" {
+			t.Errorf("branch = %q, want master (the branch that materialized, not the stale main echo)", branch)
 		}
 	})
 
@@ -92,7 +175,7 @@ func TestCreateTemplatedPrivateAssignmentRepoInOrg(t *testing.T) {
 		client := newTestRESTClient(t, server)
 
 		var out bytes.Buffer
-		_, fullName, already, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
+		_, fullName, _, already, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -117,7 +200,7 @@ func TestCreateTemplatedPrivateAssignmentRepoInOrg(t *testing.T) {
 		client := newTestRESTClient(t, server)
 
 		var out bytes.Buffer
-		_, _, _, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
+		_, _, _, _, err := createTemplatedPrivateAssignmentRepoInOrg(client, ui.NewForced(&out, false), false, "alice", "cs-principles", "hello", "o", tmpl)
 		if err == nil || !strings.Contains(err.Error(), "not accessible to you") {
 			t.Fatalf("err = %v, want the cross-org 'not accessible' message", err)
 		}

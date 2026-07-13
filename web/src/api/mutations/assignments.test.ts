@@ -5,11 +5,13 @@ import {
   assertAssignmentModeCoherent,
   buildReusedEntry,
   copyAssignmentToClassroom,
+  createAssignmentRepo,
   editAssignment,
   founderPermission,
   nextAvailableSlug,
   permissionSatisfies,
   preserveUnmanagedAssignmentKeys,
+  resolveAutograderWorkflow,
   resolveTemplate,
   verifyTemplateAccess,
 } from "./assignments"
@@ -363,6 +365,9 @@ describe("editAssignment (preserved-entry integration)", () => {
 
     const request = vi.fn(async (url: string, init?: { method?: string }) => {
       const method = init?.method ?? "GET"
+      if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
       if (method === "GET" && url.includes("/git/ref/heads/main")) {
         return { object: { sha: "refsha" } }
       }
@@ -502,6 +507,9 @@ describe("editAssignment (preserved-entry integration)", () => {
     let capturedContent = ""
     const request = vi.fn(async (url: string, init?: { method?: string }) => {
       const method = init?.method ?? "GET"
+      if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
       if (method === "GET" && url.includes("/git/ref/heads/main")) {
         return { object: { sha: "refsha" } }
       }
@@ -644,6 +652,8 @@ describe("editAssignment (preserved-entry integration)", () => {
     const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64")
 
     const request = vi.fn(async (url: string) => {
+      if (/\/repos\/[^/]+\/classroom50$/.test(url))
+        return { default_branch: "main" }
       if (url.includes("/git/ref/heads/main")) return { object: { sha: "s" } }
       if (url.includes("/git/commits/s")) return { tree: { sha: "t" } }
       if (url.includes("/contents/cs50/assignments.json")) {
@@ -713,6 +723,8 @@ describe("copyAssignmentToClassroom (reuse fork guard)", () => {
   // guard throws before any commit, so no write routes are needed.
   function makeClient(repo: unknown): GitHubClient {
     const request = vi.fn(async (url: string) => {
+      if (/\/repos\/[^/]+\/classroom50$/.test(url))
+        return { default_branch: "main" }
       if (url.includes("/git/ref/heads/main")) return { object: { sha: "s" } }
       if (url.includes("/repos/")) return repo
       throw new Error(`unexpected request: ${url}`)
@@ -1297,5 +1309,140 @@ describe("addFounderCollaborator — grant + read-back verification", () => {
         permission: "push",
       }),
     ).rejects.toThrow(/"push"/)
+  })
+})
+
+// createAssignmentRepo returns the POST .../generate response verbatim. The
+// generated repo's real branch is resolved later (in the commit retry), because
+// the template copy is async — right after generate, default_branch is still a
+// transient value and no ref exists yet.
+describe("createAssignmentRepo", () => {
+  it("returns the generated repo from the generate response", async () => {
+    const paths: string[] = []
+    const client: GitHubClient = {
+      request: <T>(path: string, opts?: { method?: string }) => {
+        paths.push(`${opts?.method ?? "GET"} ${path}`)
+        if (path.endsWith("/generate")) {
+          return Promise.resolve({
+            name: "hw1-alice",
+            default_branch: "main",
+          } as T)
+        }
+        return Promise.reject(new Error(`unexpected: ${path}`))
+      },
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+
+    const result = await createAssignmentRepo({
+      client,
+      templateOwner: "acme",
+      templateRepo: "master-template",
+      owner: "acme",
+      name: "hw1-alice",
+      fallbackBranch: "main",
+    })
+
+    expect(result.kind).toBe("generated")
+    expect(result.repo.name).toBe("hw1-alice")
+    // No extra confirming GET — the generate response is used directly.
+    expect(paths).toEqual(["POST /repos/acme/master-template/generate"])
+  })
+
+  it("returns already-accepted on a 422 (repo exists)", async () => {
+    const client: GitHubClient = {
+      request: <T>(path: string) => {
+        if (path.endsWith("/generate"))
+          return Promise.reject(
+            new GitHubAPIError({
+              status: 422,
+              url: path,
+              message: "Unprocessable",
+              body: null,
+              rateLimit: {
+                limit: null,
+                remaining: null,
+                used: null,
+                reset: null,
+                resource: null,
+                retryAfter: null,
+              },
+            }),
+          ) as Promise<T>
+        return Promise.resolve({
+          name: "hw1-alice",
+          default_branch: "master",
+        } as T)
+      },
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+
+    const result = await createAssignmentRepo({
+      client,
+      templateOwner: "acme",
+      templateRepo: "starter",
+      owner: "acme",
+      name: "hw1-alice",
+      fallbackBranch: "main",
+    })
+
+    expect(result.kind).toBe("already-accepted")
+    expect(result.repo.default_branch).toBe("master")
+  })
+})
+
+// The default autograder shim is templated by the assignment repo's default
+// branch (its push trigger) and the config repo's branch (its reusable-workflow
+// ref), so autograde fires on a master-default repo and the @<branch> ref
+// resolves even if the config-repo rename to main did not land.
+describe("resolveAutograderWorkflow default shim branch templating", () => {
+  it("templates the push-trigger branch and the runner ref (master)", async () => {
+    const yaml = await resolveAutograderWorkflow({
+      org: "cs50",
+      classroom: "cs101",
+      autograder: "default",
+      branch: "master",
+      configBranch: "master",
+    })
+    expect(yaml).toContain('branches: ["master"]')
+    expect(yaml).toContain(
+      'uses: "cs50/classroom50/.github/workflows/autograde-runner.yaml@master"',
+    )
+  })
+
+  it("defaults to main when no branch is supplied", async () => {
+    const yaml = await resolveAutograderWorkflow({
+      org: "cs50",
+      classroom: "cs101",
+      autograder: "default",
+    })
+    expect(yaml).toContain('branches: ["main"]')
+    expect(yaml).toContain("autograde-runner.yaml@main")
+  })
+
+  it("quotes a YAML-hostile branch name so it stays a string", async () => {
+    // An unquoted `branches: [off]` would parse as boolean false; quoting keeps
+    // it a branch name. Matches the CLI embed's quoted form.
+    const yaml = await resolveAutograderWorkflow({
+      org: "cs50",
+      classroom: "cs101",
+      autograder: "default",
+      branch: "off",
+      configBranch: "main",
+    })
+    expect(yaml).toContain('branches: ["off"]')
+  })
+
+  it("does not fetch from Pages for the default autograder", async () => {
+    // Passing no client proves the default path never makes a network call
+    // (a Pages fetch would dereference the undefined client and throw).
+    await expect(
+      resolveAutograderWorkflow({
+        org: "cs50",
+        classroom: "cs101",
+        autograder: undefined,
+        branch: "main",
+        configBranch: "main",
+      }),
+    ).resolves.toContain('branches: ["main"]')
   })
 })
