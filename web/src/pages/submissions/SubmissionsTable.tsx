@@ -6,7 +6,6 @@ import {
   RefreshCw,
   ScrollText,
   SearchX,
-  UsersRound,
 } from "lucide-react"
 import { Fragment, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -22,13 +21,21 @@ import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
 import { Badge, Button, Modal } from "@/components/ui"
-import { nonSubmitterStatus, scoreTone } from "@/pages/submissions/dashboard"
+import { scoreTone } from "@/pages/submissions/dashboard"
+import type { GroupRepo } from "@/pages/submissions/dashboard"
+import {
+  ActionIconLink,
+  GroupActionControls,
+  GroupMembers,
+  GroupRepoRow,
+  NonSubmitterRow,
+  identitySubtitle,
+} from "@/pages/submissions/SubmissionsRows"
 import { ConfirmModal } from "@/components/modals"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
-import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import type { Student } from "@/types/classroom"
 import { EnterDiv } from "@/lib/motionComponents"
@@ -38,15 +45,6 @@ const formatDateTime = (datetime: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   })
-
-// Secondary avatar line: the GitHub login plus the section (e.g.
-// "octocat · Period 3"), dropping whichever piece is missing. The login is
-// omitted when `name` is empty — Avatar's primary line already falls back to
-// the login there, so repeating it in the subtitle would duplicate it.
-const identitySubtitle = (name?: string, login?: string, section?: string) => {
-  const showLogin = name?.trim() ? login?.trim() : undefined
-  return [showLogin, section?.trim()].filter(Boolean).join(" · ") || undefined
-}
 
 // Score chip via the shared scoreTone recipe (one mapping for table + history):
 // success/error tone for graded rows, neutral ghost for ungraded.
@@ -73,100 +71,7 @@ const ScoreBadge = ({
   )
 }
 
-// Per-row status chip for a roster student with no submission: distinguishes
-// accepted-but-not-submitted, never-accepted, and (group) no-group from a flat
-// "Not submitted", so a teacher can nudge accepters vs chase non-accepters.
-const NonSubmitterStatusBadge = ({
-  username,
-  isGroup,
-  acceptedUsernames,
-}: {
-  username: string
-  isGroup: boolean
-  acceptedUsernames?: Set<string>
-}) => {
-  const { t } = useTranslation()
-  const status = nonSubmitterStatus(username, { isGroup, acceptedUsernames })
-  switch (status) {
-    case "accepted-not-submitted":
-      return (
-        <Badge tone="warning" className="whitespace-nowrap">
-          {t("submissions.table.acceptedAwaiting")}
-        </Badge>
-      )
-    case "not-accepted":
-      return (
-        <Badge ghost className="whitespace-nowrap">
-          {t("submissions.table.notAccepted")}
-        </Badge>
-      )
-    case "no-group":
-      return (
-        <Badge
-          ghost
-          className="whitespace-nowrap"
-          title={t("submissions.table.noGroupTitle")}
-        >
-          {t("submissions.table.noGroup")}
-        </Badge>
-      )
-    default:
-      return (
-        <Badge ghost className="whitespace-nowrap">
-          {t("submissions.table.notSubmitted")}
-        </Badge>
-      )
-  }
-}
-
-// Icon action in the Actions cell: an external link when a URL is present, else
-// a dimmed non-clickable button (with a "no … yet" label) to keep the row
-// aligned. Both render through the shared ghost-square Button recipe.
 type IconComponent = React.ComponentType<{ className?: string }>
-
-const ActionIconLink = ({
-  href,
-  icon: Icon,
-  label,
-  title,
-  emptyLabel,
-  emptyTitle,
-}: {
-  href: string | null | undefined
-  icon: IconComponent
-  label: string
-  title: string
-  emptyLabel: string
-  emptyTitle: string
-}) =>
-  href ? (
-    <Button
-      as="a"
-      variant="ghost"
-      size="sm"
-      shape="square"
-      className="text-base-content/70"
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={label}
-      title={title}
-    >
-      <Icon className="size-4" />
-    </Button>
-  ) : (
-    <Button
-      variant="ghost"
-      size="sm"
-      shape="square"
-      className="text-base-content/30"
-      disabled
-      aria-label={emptyLabel}
-      title={emptyTitle}
-    >
-      <Icon className="size-4" />
-    </Button>
-  )
 
 // Inline commit/details link in the expanded history row: external link when a
 // URL is present, else dimmed non-clickable text (label shown beside the icon,
@@ -196,87 +101,6 @@ const HistoryLink = ({
       {label}
     </span>
   )
-
-// Compact group identity: shared repo + stacked avatars. Renders from the
-// scores.json `usernames` snapshot and never fetches (enabled: false) to avoid a
-// per-row GitHub call; reads the shared collaborators cache so avatars upgrade to
-// live data once the Members modal populates it.
-const MAX_VISIBLE_AVATARS = 4
-
-const GroupMembers = ({
-  org,
-  repoName,
-  usernames,
-  students,
-  repoHref,
-  repoLabel,
-}: {
-  org: string
-  repoName: string
-  usernames: string[]
-  students: Student[]
-  repoHref: string
-  repoLabel: string
-}) => {
-  const { t } = useTranslation()
-  // enabled: false — reads the cache the Members modal populates, never fetches.
-  const { data: liveCollaborators } = useGetRepoCollaborators(org, repoName, {
-    enabled: false,
-  })
-  const memberLogins =
-    liveCollaborators && liveCollaborators.length > 0
-      ? liveCollaborators.map((c) => c.login)
-      : usernames
-
-  const visible = memberLogins.slice(0, MAX_VISIBLE_AVATARS)
-  const overflow = memberLogins.length - visible.length
-
-  return (
-    <div className="flex flex-col gap-2">
-      <a
-        className="flex items-center gap-1.5 link link-hover w-fit font-medium"
-        href={repoHref}
-        target="_blank"
-        rel="noreferrer"
-        title={t("submissions.table.openGroupRepo")}
-      >
-        <GitHub aria-hidden="true" className="size-4 shrink-0" />
-        <span className="font-mono text-sm">{repoLabel}</span>
-      </a>
-
-      <div className="avatar-group -space-x-3">
-        {visible.map((username) => {
-          const name = getName(username, students)
-          return (
-            <div
-              key={username}
-              className="avatar avatar-placeholder"
-              title={name ? `${name} (${username})` : username}
-            >
-              <div className="bg-base-200 text-primary rounded-full w-7 border-2 border-base-100">
-                <span className="text-xs">
-                  {getInitials(username, students) ||
-                    username.at(0)?.toUpperCase()}
-                </span>
-              </div>
-            </div>
-          )
-        })}
-
-        {overflow > 0 && (
-          <div
-            className="avatar avatar-placeholder"
-            title={memberLogins.slice(MAX_VISIBLE_AVATARS).join(", ")}
-          >
-            <div className="bg-neutral text-neutral-content rounded-full w-7 border-2 border-base-100">
-              <span className="text-xs">+{overflow}</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
 // Review action: links to the open Feedback PR (opened by the autograde
 // workflow) when one exists, else opens an info modal. The PR is the source of
@@ -552,6 +376,7 @@ const SubmissionsTable = ({
   scores,
   students,
   nonSubmitters = [],
+  unsubmittedGroupRepos = [],
   isGroup = false,
   org,
   classroom,
@@ -566,6 +391,9 @@ const SubmissionsTable = ({
   scores: SubmissionRow[]
   students: Student[]
   nonSubmitters?: Student[]
+  // Group repos that exist but have no submission yet (group assignments only).
+  // Rendered as extra rows so teachers see teams that formed before any push.
+  unsubmittedGroupRepos?: GroupRepo[]
   isGroup?: boolean
   org: string
   classroom: string
@@ -638,51 +466,53 @@ const SubmissionsTable = ({
             </tr>
           </thead>
           <tbody>
-            {!scores?.length && !nonSubmitters.length && (
-              <tr>
-                <td colSpan={5} className="py-10 text-center">
-                  <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
-                    {filtered ? (
-                      <>
-                        <SearchX
-                          aria-hidden="true"
-                          className="size-8 text-base-content/40"
-                        />
-                        <p className="font-medium">
-                          {t("submissions.table.emptyFilteredTitle")}
-                        </p>
-                        <p className="text-sm text-base-content/70">
-                          {t("submissions.table.emptyFilteredBody")}
-                        </p>
-                        {onClearFilters && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="mt-1"
-                            onClick={onClearFilters}
-                          >
-                            {t("submissions.table.emptyClearFilters")}
-                          </Button>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <Inbox
-                          aria-hidden="true"
-                          className="size-8 text-base-content/40"
-                        />
-                        <p className="font-medium">
-                          {t("submissions.table.emptyNoDataTitle")}
-                        </p>
-                        <p className="text-sm text-base-content/70">
-                          {t("submissions.table.emptyNoDataBody")}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            )}
+            {!scores?.length &&
+              !nonSubmitters.length &&
+              !unsubmittedGroupRepos.length && (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center">
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                      {filtered ? (
+                        <>
+                          <SearchX
+                            aria-hidden="true"
+                            className="size-8 text-base-content/40"
+                          />
+                          <p className="font-medium">
+                            {t("submissions.table.emptyFilteredTitle")}
+                          </p>
+                          <p className="text-sm text-base-content/70">
+                            {t("submissions.table.emptyFilteredBody")}
+                          </p>
+                          {onClearFilters && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mt-1"
+                              onClick={onClearFilters}
+                            >
+                              {t("submissions.table.emptyClearFilters")}
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Inbox
+                            aria-hidden="true"
+                            className="size-8 text-base-content/40"
+                          />
+                          <p className="font-medium">
+                            {t("submissions.table.emptyNoDataTitle")}
+                          </p>
+                          <p className="text-sm text-base-content/70">
+                            {t("submissions.table.emptyNoDataBody")}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
             {scores.map(
               ({
                 usernames,
@@ -794,33 +624,26 @@ const SubmissionsTable = ({
                       <td>
                         <div className="flex items-center gap-1">
                           {isGroup && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              shape="square"
-                              className="text-base-content/70"
-                              onClick={() => setManageOwner(rest.owner)}
-                              aria-label={t("submissions.table.membersAria")}
-                              title={t("submissions.table.members")}
-                            >
-                              <UsersRound
-                                aria-hidden="true"
-                                className="size-4"
-                              />
-                            </Button>
+                            <GroupActionControls
+                              repo={repo}
+                              repoHref={repoHref}
+                              onManage={() => setManageOwner(rest.owner)}
+                            />
                           )}
-                          <ActionIconLink
-                            href={repoHref}
-                            icon={GitHub}
-                            label={t("submissions.table.openRepoLabel", {
-                              repo,
-                            })}
-                            title={t("submissions.table.viewRepo")}
-                            emptyLabel={t("submissions.table.openRepoLabel", {
-                              repo,
-                            })}
-                            emptyTitle={t("submissions.table.viewRepo")}
-                          />
+                          {!isGroup && (
+                            <ActionIconLink
+                              href={repoHref}
+                              icon={GitHub}
+                              label={t("submissions.table.openRepoLabel", {
+                                repo,
+                              })}
+                              title={t("submissions.table.viewRepo")}
+                              emptyLabel={t("submissions.table.openRepoLabel", {
+                                repo,
+                              })}
+                              emptyTitle={t("submissions.table.viewRepo")}
+                            />
+                          )}
                           <ActionIconLink
                             href={safeHttpUrl(rest.commit)}
                             icon={GitCommitHorizontal}
@@ -870,38 +693,29 @@ const SubmissionsTable = ({
               },
             )}
             {nonSubmitters.map((student) => (
-              <tr
+              <NonSubmitterRow
                 key={`missing-${student.username || student.email || student.github_id}`}
-                className="opacity-60"
-              >
-                <td>
-                  <Avatar
-                    name={getName(student.username, students)}
-                    initials={getInitials(student.username, students)}
-                    github={student.username || student.email}
-                    subtitle={identitySubtitle(
-                      getName(student.username, students),
-                      student.username,
-                      student.section,
-                    )}
-                    onClick={
-                      student.username
-                        ? () => setProfileUsername(student.username)
-                        : undefined
-                    }
-                  />
-                </td>
-                <td>
-                  <NonSubmitterStatusBadge
-                    username={student.username}
-                    isGroup={isGroup}
-                    acceptedUsernames={acceptedUsernames}
-                  />
-                </td>
-                <td>—</td>
-                <td>—</td>
-                <td>—</td>
-              </tr>
+                student={student}
+                students={students}
+                isGroup={isGroup}
+                acceptedUsernames={acceptedUsernames}
+                org={org}
+                classroom={classroom}
+                assignment={assignment}
+                onProfile={setProfileUsername}
+              />
+            ))}
+            {unsubmittedGroupRepos.map(({ owner, repoName }) => (
+              <GroupRepoRow
+                key={`group-${repoName}`}
+                org={org}
+                classroom={classroom}
+                assignment={assignment}
+                owner={owner}
+                repoName={repoName}
+                students={students}
+                onManage={() => setManageOwner(owner)}
+              />
             ))}
           </tbody>
         </table>

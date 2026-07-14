@@ -12,10 +12,12 @@ import {
   buildSectionLookup,
   computeStats,
   distinctSections,
+  existingGroupRepos,
   filterAndSortRows,
   filterNonSubmitters,
   hasAccepted,
   nonSubmitterStatus,
+  reconcileNonSubmitters,
   rosterScopedRows,
   rowMatchesQuery,
   rowOnRoster,
@@ -375,6 +377,112 @@ describe("acceptedUsernames / hasAccepted / acceptedRosterCount", () => {
   it("counts roster students who accepted", () => {
     const set = acceptedUsernames(repos, "cs101", "hw1", roster)
     expect(acceptedRosterCount(roster, set)).toBe(2)
+  })
+})
+
+describe("existingGroupRepos", () => {
+  const repos = [
+    repo("cs101-hw1-alice"),
+    repo("cs101-hw1-bob-team"),
+    repo("cs101-hw2-alice"),
+    repo("cs101-hw1"),
+    repo("unrelated-repo"),
+  ]
+
+  it("lists group repos for the exact classroom+assignment, keyed by founder", () => {
+    const out = existingGroupRepos(repos, "cs101", "hw1")
+    expect(out.map((r) => r.owner).sort()).toEqual(["alice", "bob-team"])
+  })
+
+  it("returns the repo name alongside the founder", () => {
+    const out = existingGroupRepos([repo("cs101-hw1-alice")], "cs101", "hw1")
+    expect(out).toEqual([{ owner: "alice", repoName: "cs101-hw1-alice" }])
+  })
+
+  it("rejects a slug-extending sibling assignment's repos (hw1 vs hw1-bonus)", () => {
+    const out = existingGroupRepos(
+      [repo("cs101-hw1-alice"), repo("cs101-hw1-bonus-alice")],
+      "cs101",
+      "hw1",
+      ["hw1", "hw1-bonus"],
+    )
+    // Without the sibling guard, `bonus-alice` would leak in as a phantom row.
+    expect(out.map((r) => r.owner)).toEqual(["alice"])
+  })
+
+  it("keeps a sibling repo when the sibling slug isn't a prefix extension", () => {
+    // `hw1b` is not `hw1-<something>`, so it never shares the `cs101-hw1-` prefix.
+    const out = existingGroupRepos([repo("cs101-hw1-alice")], "cs101", "hw1", [
+      "hw1",
+      "hw1b",
+    ])
+    expect(out.map((r) => r.owner)).toEqual(["alice"])
+  })
+
+  it("rejects a bare `<classroom>-<assignment>-` with an empty owner segment", () => {
+    const out = existingGroupRepos([repo("cs101-hw1-")], "cs101", "hw1")
+    expect(out).toEqual([])
+  })
+
+  it("is case-insensitive on the repo name and founder", () => {
+    const out = existingGroupRepos(
+      [repo("CS101-HW1-TeamRocket")],
+      "cs101",
+      "hw1",
+    )
+    expect(out).toEqual([
+      { owner: "teamrocket", repoName: "cs101-hw1-teamrocket" },
+    ])
+  })
+
+  it("does not match a numeric-adjacent slug (hw1 vs hw10)", () => {
+    const out = existingGroupRepos([repo("cs101-hw10-team")], "cs101", "hw1")
+    expect(out).toEqual([])
+  })
+
+  it("returns an empty list for null/undefined repos", () => {
+    expect(existingGroupRepos(null, "cs101", "hw1")).toEqual([])
+    expect(existingGroupRepos(undefined, "cs101", "hw1")).toEqual([])
+  })
+})
+
+describe("reconcileNonSubmitters", () => {
+  const roster = [
+    student({ username: "alice" }),
+    student({ username: "bob" }),
+    student({ username: "carol" }),
+  ]
+
+  it("excludes students credited on a score row", () => {
+    const out = reconcileNonSubmitters(
+      roster,
+      [{ usernames: ["alice"] }],
+      new Set(),
+    )
+    expect(out.map((s) => s.username).sort()).toEqual(["bob", "carol"])
+  })
+
+  it("excludes a group-repo member so they aren't double-listed as no-group (#245)", () => {
+    // bob is a teammate on a formed-but-unsubmitted group repo (no score row
+    // yet); he must not surface as "no group".
+    const out = reconcileNonSubmitters(roster, [], new Set(["bob"]))
+    expect(out.map((s) => s.username).sort()).toEqual(["alice", "carol"])
+  })
+
+  it("re-lists a teammate as no-group when the member set is empty (fetch failed)", () => {
+    // Guards the failure-mode contract: an empty groupRepoMembers (e.g. the
+    // bounded fetch errored) degrades to listing everyone uncredited.
+    const out = reconcileNonSubmitters(roster, [], new Set())
+    expect(out.map((s) => s.username).sort()).toEqual(["alice", "bob", "carol"])
+  })
+
+  it("matches credit and membership case-insensitively", () => {
+    const out = reconcileNonSubmitters(
+      [student({ username: "Alice" }), student({ username: "Bob" })],
+      [{ usernames: ["ALICE"] }],
+      new Set(["bob"]),
+    )
+    expect(out).toEqual([])
   })
 })
 

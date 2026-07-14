@@ -199,7 +199,8 @@ export const DEFAULT_SORT: SubmissionSort = "recent"
 // a `<classroom>-<assignment>-` prefix: prefix-stripping over-matches a sibling
 // whose slug extends this one (assignment "hw" would capture `cs-hw-bonus-alice`
 // from "hw-bonus"), polluting the set and risking a 404 when the modal rebuilds
-// a URL. (See docs/solutions/.../forward-only-cross-binary-repo-name-contract.md.)
+// a URL. (existingGroupRepos below must reverse-parse and so guards this
+// explicitly against the sibling assignment list.)
 //
 // Group assignments are excluded (repo named after the owner, not each member),
 // so callers offer the accepted filter for individual assignments only.
@@ -226,6 +227,68 @@ export function acceptedUsernames(
 // Whether a student (by username) has accepted, given the derived set.
 export function hasAccepted(username: string, accepted: Set<string>): boolean {
   return accepted.has(username.trim().toLowerCase())
+}
+
+// An existing group repo derived from the org repo list, keyed by its founder
+// (the `<owner>` segment of `<classroom>-<assignment>-<owner>`).
+export type GroupRepo = { owner: string; repoName: string }
+
+// Group repos that exist for the assignment. Unlike individual acceptance, the
+// founder logins aren't known up front (group repos are named after whoever
+// created the group), so we must reverse-parse the `<classroom>-<assignment>-`
+// prefix rather than forward-construct per student. Prefix-stripping alone
+// over-matches a sibling whose slug extends this one (assignment "hw1" capturing
+// `cs101-hw1-bonus-alice` from "hw1-bonus"), so reject any repo that belongs to
+// a longer sibling assignment: `siblingSlugs` is the classroom's other slugs, and
+// a repo under `<classroom>-<sibling>-` where `<sibling>` extends `<assignment>-`
+// is that sibling's, not ours. Empty owner segments (a bare
+// `<classroom>-<assignment>-`) are rejected.
+export function existingGroupRepos(
+  repos: GitHubRepo[] | null | undefined,
+  classroom: string,
+  assignment: string,
+  siblingSlugs: string[] = [],
+): GroupRepo[] {
+  if (!repos) return []
+  const prefix = `${classroom}-${assignment}-`.toLowerCase()
+  // Prefixes of sibling assignments whose slug strictly extends this one; a repo
+  // under any of these was created for the sibling, not this assignment.
+  const overlapPrefixes = siblingSlugs
+    .map((slug) => slug.toLowerCase())
+    .filter((slug) => slug !== assignment.toLowerCase())
+    .map((slug) => `${classroom}-${slug}-`.toLowerCase())
+    .filter((siblingPrefix) => siblingPrefix.startsWith(prefix))
+  const out: GroupRepo[] = []
+  for (const repo of repos) {
+    const name = repo.name.toLowerCase()
+    if (!name.startsWith(prefix)) continue
+    if (overlapPrefixes.some((sibling) => name.startsWith(sibling))) continue
+    const owner = name.slice(prefix.length)
+    if (!owner) continue
+    out.push({ owner, repoName: name })
+  }
+  return out
+}
+
+// Roster students with no submission, with group-repo members excluded (#245).
+// "Credited" = login appears in any score row's `usernames` (member_usernames
+// for groups, else [owner]). A login in `groupRepoMembers` (an existing group
+// repo's founder or a fetched collaborator) is also excluded — they already
+// appear as that group's repo row, so listing them as "no group" too would
+// double-count them. Pure derivation extracted from SubmissionsPage so the
+// reconciliation is unit-testable.
+export function reconcileNonSubmitters(
+  students: Student[],
+  scoreRows: { usernames: string[] }[],
+  groupRepoMembers: Set<string>,
+): Student[] {
+  const credited = new Set(
+    scoreRows.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
+  )
+  return students.filter((student) => {
+    const login = student.username.toLowerCase()
+    return !credited.has(login) && !groupRepoMembers.has(login)
+  })
 }
 
 // Per-row status for a roster student with no submission row. Distinguishes the

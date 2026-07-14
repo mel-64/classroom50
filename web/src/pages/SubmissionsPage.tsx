@@ -27,9 +27,11 @@ import {
   classAverage,
   computeStats,
   distinctSections,
+  existingGroupRepos,
   filterAndSortRows,
   filterNonSubmitters,
   hasAccepted,
+  reconcileNonSubmitters,
   rosterScopedRows,
   rowInSection,
   selectActiveWorkflowAction,
@@ -44,12 +46,14 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
 import { rowToStudent } from "@/util/teamRoster"
+import { getName } from "@/util/students"
 import { hasStudentEnrollment } from "@/util/rosterRoles"
 import type { Student } from "@/types/classroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
 import { QueryErrorAlert } from "@/components/QueryErrorAlert"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
+import { useGroupRepoMemberLogins } from "@/hooks/useGroupRepoMembers"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import { RegradeCoordinatorProvider } from "@/context/regrade/RegradeCoordinator"
@@ -188,6 +192,10 @@ const SubmissionsPageContent = () => {
     return rosterReady ? rosterScopedRows(rows, students) : rows
   }, [scoresData, assignment, rosterReady, students])
 
+  // Org repo list drives repo-existence signals (individual acceptance below and
+  // group-repo enumeration here).
+  const { data: orgRepos } = useGetOrgRepos(org ?? "")
+
   // Repos whose latest submission landed after the deadline. `late` is computed
   // upstream (collect_scores.py) from push time, not grade time.
   const lateCount = scoresInfo.filter((row) => row.late).length
@@ -200,23 +208,59 @@ const SubmissionsPageContent = () => {
     ? formatRelativeToNow(dueDeadlineInstant(dueDate) ?? new Date(dueDate))
     : null
 
+  // Group repos that already exist for this assignment, derived from the org
+  // repo list (empty for individual assignments). Named after the founder, so
+  // the `owner` segment is a roster login when the founder is enrolled. Sibling
+  // assignment slugs are passed so a repo of a slug-extending sibling
+  // ("hw1-bonus" under "hw1") isn't mis-attributed here. Computed once so both
+  // the non-submitter list (to avoid double-listing a member who has a repo) and
+  // the group-repo rows below share one derivation.
+  const siblingSlugs = useMemo(
+    () => (assignmentData?.assignments ?? []).map((a) => a.slug),
+    [assignmentData],
+  )
+  const groupRepoList = useMemo(
+    () =>
+      isGroupAssignment
+        ? existingGroupRepos(
+            orgRepos,
+            classroom ?? "",
+            assignment ?? "",
+            siblingSlugs,
+          )
+        : [],
+    [isGroupAssignment, orgRepos, classroom, assignment, siblingSlugs],
+  )
+  // Members of every existing group repo, fetched (bounded) and reconciled so
+  // the "no group" list is accurate on load: the union of founders (known from
+  // the repo name) plus each repo's collaborators means a teammate on a
+  // formed-but-unsubmitted group isn't also listed as "no group" (#245). The
+  // fetch is throttled and shares the collaborators cache with the rows/modal.
+  const groupRepoMembers = useGroupRepoMemberLogins(org ?? "", groupRepoList)
+  const groupRepoFounders = useMemo(
+    () =>
+      new Set([
+        ...groupRepoList.map((repo) => repo.owner),
+        ...groupRepoMembers,
+      ]),
+    [groupRepoList, groupRepoMembers],
+  )
+
   // Roster students with no submission. "Credited" = login appears in any row's
   // `usernames` (member_usernames for groups, else [owner]), so group teammates
   // aren't falsely flagged. For groups, uncredited students surface as
   // "No group · not submitted" (see #174) — a student who never joined a
   // submitting group has no repo, so the row makes the omission explicit
-  // instead of vanishing. Gated on scores having loaded — until then scoresInfo
-  // is empty and would flag the whole roster.
+  // instead of vanishing. A member of an existing group repo (its founder, or
+  // any cached collaborator) is excluded here — they already appear as that
+  // group's row (#245), so listing them as "no group" too would double-count
+  // them. Gated on scores having loaded — until then scoresInfo is empty and
+  // would flag the whole roster.
   const scoresLoaded = scoresData !== undefined
   const nonSubmitters = useMemo(() => {
     if (!scoresLoaded) return []
-    const credited = new Set(
-      scoresInfo.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
-    )
-    return students.filter(
-      (student) => !credited.has(student.username.toLowerCase()),
-    )
-  }, [scoresLoaded, scoresInfo, students])
+    return reconcileNonSubmitters(students, scoresInfo, groupRepoFounders)
+  }, [scoresLoaded, scoresInfo, students, groupRepoFounders])
 
   // Dashboard controls — all client-side over already-loaded data.
   const [query, setQuery] = useState("")
@@ -241,13 +285,26 @@ const SubmissionsPageContent = () => {
 
   // Deterministic acceptance from the org repo list (see acceptedUsernames);
   // individual assignments only, so gated on acceptedAvailable.
-  const { data: orgRepos } = useGetOrgRepos(org ?? "")
   const acceptedSet = useMemo(
     () =>
       acceptedUsernames(orgRepos, classroom ?? "", assignment ?? "", students),
     [orgRepos, classroom, assignment, students],
   )
   const acceptedAvailable = !isGroupAssignment && orgRepos != null
+
+  // Group repos that exist but have no submission yet: for group assignments the
+  // repo is named after the founder (not each member), so acceptance can't be
+  // derived per student — instead surface every group repo from the org list
+  // (#245) so teachers can see teams that formed before anyone pushes. Submitted
+  // groups already show as score rows, so drop them here.
+  const submittedGroupOwners = useMemo(
+    () => new Set(scoresInfo.map((row) => row.owner.toLowerCase())),
+    [scoresInfo],
+  )
+  const unsubmittedGroupRepos = useMemo(
+    () => groupRepoList.filter((repo) => !submittedGroupOwners.has(repo.owner)),
+    [groupRepoList, submittedGroupOwners],
+  )
 
   // Section filtering: distinct sections for the dropdown, plus a username ->
   // section lookup so submitted rows (which carry only logins) can be matched.
@@ -363,6 +420,21 @@ const SubmissionsPageContent = () => {
         : [],
     [effectiveFilters, nonSubmitters, query, acceptedSet],
   )
+
+  // Group repos without a submission, gated like non-submitters (hidden while a
+  // narrowing filter other than "not submitted" is active) and matched against
+  // the search by founder login or roster name. Section isn't filtered — a group
+  // repo carries no single section.
+  const visibleGroupRepos = useMemo(() => {
+    if (!showsNonSubmitters(effectiveFilters)) return []
+    const q = query.trim().toLowerCase()
+    if (!q) return unsubmittedGroupRepos
+    return unsubmittedGroupRepos.filter((repo) => {
+      if (repo.owner.includes(q)) return true
+      const name = getName(repo.owner, students).toLowerCase()
+      return name.length > 0 && name.includes(q)
+    })
+  }, [effectiveFilters, query, unsubmittedGroupRepos, students])
 
   const collectScores = useTriggerScoreCollection(org)
   const regradeAll = useTriggerRegrade({ org, classroom, assignment })
@@ -687,6 +759,7 @@ const SubmissionsPageContent = () => {
         scores={visibleRows}
         students={students}
         nonSubmitters={visibleNonSubmitters}
+        unsubmittedGroupRepos={visibleGroupRepos}
         isGroup={isGroupAssignment}
         org={org}
         classroom={classroom}
