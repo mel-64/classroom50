@@ -17,6 +17,7 @@ import {
   ensureClassroomTeam,
   ensureStaffTeams,
   addUserToTeam,
+  removeUserFromTeam,
   isDeletableClassroomTeamRef,
   isNonFastForward,
   updateRef,
@@ -79,6 +80,38 @@ export async function createClassroomFiles(
         creator: input.creator,
       })
       // Non-fatal; surface nothing — the classroom still scaffolds.
+    }
+  }
+
+  // The creator must never hold a student or TA role — mixed roles aren't
+  // allowed, and the team-driven roster would otherwise count the owner as an
+  // enrolled student/TA. GitHub silently adds the creator as a maintainer of
+  // every team the create POST makes, so drop them from the students and TA
+  // teams unconditionally: the drop is deliberately NOT gated on whether we
+  // created vs adopted the team — an owner sitting on an adopted students/TA
+  // team is exactly the mixed-role state we're clearing. Best-effort and
+  // idempotent (404 = already absent); a failure just leaves them on a team,
+  // where the roster's per-role badges surface it for manual cleanup.
+  if (input.creator) {
+    const dropSlugs = [team.slug, teams.ta?.slug].filter(
+      (slug): slug is string => Boolean(slug),
+    )
+    for (const teamSlug of dropSlugs) {
+      try {
+        await removeUserFromTeam(client, {
+          org: input.org,
+          teamSlug,
+          username: input.creator,
+        })
+      } catch {
+        log.warn("create classroom: dropping creator from team failed", {
+          org: input.org,
+          classroom: input.classroom,
+          creator: input.creator,
+          teamSlug,
+        })
+        // Non-fatal; the classroom still scaffolds.
+      }
     }
   }
 

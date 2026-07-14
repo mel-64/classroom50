@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { assertClassroomNotArchived } from "./classrooms"
+import { assertClassroomNotArchived, createClassroomFiles } from "./classrooms"
 import { GitHubAPIError, type GitHubRateLimit } from "@/hooks/github/errors"
-import type { GitHubClient } from "@/hooks/github/client"
+import type { GitHubClient, GitHubRequestOptions } from "@/hooks/github/client"
 
 // assertClassroomNotArchived is the authoritative write-path guard fanned out
 // across ~11 assignment + roster mutations, so its branch matrix is
@@ -102,5 +102,149 @@ describe("assertClassroomNotArchived", () => {
       assertClassroomNotArchived(client, "acme", "cs101"),
     ).rejects.toThrow(/couldn't verify/i)
     expect(client.requestRaw).toHaveBeenCalledTimes(2)
+  })
+})
+
+// createClassroomFiles provisions three secret teams (students, instructor, ta).
+// GitHub auto-adds the authenticated creator as a maintainer of every team it
+// creates, so the flow must drop the creator from the students + ta teams
+// (leaving them only on instructor) — else the team-driven roster counts the
+// owner as an enrolled student/TA. These tests route client.request by
+// path+method, record the membership DELETEs, and assert exactly which teams the
+// creator is removed from.
+describe("createClassroomFiles creator team cleanup", () => {
+  // A routing client that satisfies the whole create flow (team create + grant +
+  // membership PUT/DELETE, then the git scaffolding calls). `onDelete` records
+  // each membership DELETE; `deleteThrows` makes every DELETE reject so the
+  // best-effort path can be exercised.
+  const routingClient = (opts: {
+    onDelete: (path: string) => void
+    deleteThrows?: boolean
+    // When true, the students-team create POST returns 422 so the flow adopts a
+    // pre-existing team (created: false) instead of creating it.
+    adoptStudentsTeam?: boolean
+  }): GitHubClient => {
+    const request = vi.fn(
+      async (path: string, options?: GitHubRequestOptions) => {
+        const method = options?.method ?? "GET"
+
+        if (method === "DELETE" && path.includes("/memberships/")) {
+          opts.onDelete(path)
+          if (opts.deleteThrows) throw apiError(403)
+          return undefined
+        }
+        // Adopt path: the students-team GET returns the pre-existing secret team.
+        if (
+          method === "GET" &&
+          /\/orgs\/[^/]+\/teams\/classroom50-cs101$/.test(path)
+        ) {
+          return { id: 7, slug: "classroom50-cs101", privacy: "secret" }
+        }
+        // Team create/adopt -> { id, slug } derived from the POSTed name. When
+        // adoptStudentsTeam is set, the students team POST 422s (already exists).
+        if (method === "POST" && /\/orgs\/[^/]+\/teams$/.test(path)) {
+          const name = (options?.body as { name?: string })?.name ?? "team"
+          if (opts.adoptStudentsTeam && name === "classroom50-cs101") {
+            throw apiError(422)
+          }
+          return { id: 1, slug: name }
+        }
+        // Config-repo read (getConfigRepoBranch).
+        if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(path)) {
+          return { default_branch: "main" }
+        }
+        // Branch ref (getBranchRef).
+        if (path.includes("/git/ref/heads/")) {
+          return { object: { sha: "base-sha" } }
+        }
+        // Commit (getCommit).
+        if (path.includes("/git/commits/")) {
+          return { tree: { sha: "tree-sha" } }
+        }
+        // createTree.
+        if (method === "POST" && path.endsWith("/git/trees")) {
+          return { sha: "new-tree-sha" }
+        }
+        // createCommit.
+        if (method === "POST" && path.endsWith("/git/commits")) {
+          return { sha: "new-commit-sha" }
+        }
+        // updateRef.
+        if (method === "PATCH" && path.includes("/git/refs/heads/")) {
+          return { object: { sha: "new-commit-sha" } }
+        }
+        // Repo-grant PUT, instructor membership PUT, and anything else.
+        return undefined
+      },
+    )
+    return { request, requestRaw: vi.fn() } as unknown as GitHubClient
+  }
+
+  const input = {
+    org: "acme",
+    classroom: "cs101",
+    term: "2026",
+    creator: "prof",
+  }
+
+  it("removes the creator from the students and ta teams but never instructor", async () => {
+    const deleted: string[] = []
+    const client = routingClient({ onDelete: (p) => deleted.push(p) })
+
+    await createClassroomFiles(client, input)
+
+    expect(deleted).toContain(
+      "/orgs/acme/teams/classroom50-cs101/memberships/prof",
+    )
+    expect(deleted).toContain(
+      "/orgs/acme/teams/classroom50-cs101-ta/memberships/prof",
+    )
+    expect(deleted).not.toContain(
+      "/orgs/acme/teams/classroom50-cs101-instructor/memberships/prof",
+    )
+  })
+
+  it("still completes when a creator-drop DELETE fails (best-effort)", async () => {
+    const deleted: string[] = []
+    const client = routingClient({
+      onDelete: (p) => deleted.push(p),
+      deleteThrows: true,
+    })
+
+    await expect(createClassroomFiles(client, input)).resolves.toMatchObject({
+      newCommitSha: "new-commit-sha",
+    })
+    // Both drops were attempted even though each threw.
+    expect(deleted).toHaveLength(2)
+  })
+
+  it("does not attempt any creator drop when no creator is supplied", async () => {
+    const deleted: string[] = []
+    const client = routingClient({ onDelete: (p) => deleted.push(p) })
+
+    await createClassroomFiles(client, { ...input, creator: undefined })
+
+    expect(deleted).toHaveLength(0)
+  })
+
+  it("still drops the creator from an ADOPTED students team (mixed roles aren't allowed)", async () => {
+    // The students team already exists (POST 422 -> adopt). Mixed roles are
+    // disallowed, so the creator must be dropped regardless of whether we
+    // created or adopted the team — the drop is intentionally not gated on the
+    // created flag.
+    const deleted: string[] = []
+    const client = routingClient({
+      onDelete: (p) => deleted.push(p),
+      adoptStudentsTeam: true,
+    })
+
+    await createClassroomFiles(client, input)
+
+    expect(deleted).toContain(
+      "/orgs/acme/teams/classroom50-cs101/memberships/prof",
+    )
+    expect(deleted).toContain(
+      "/orgs/acme/teams/classroom50-cs101-ta/memberships/prof",
+    )
   })
 })

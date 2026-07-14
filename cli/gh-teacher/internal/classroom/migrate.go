@@ -235,10 +235,14 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 
 	// Create (or adopt) staff teams + config-repo write grant + instructor
 	// seed, same as `classroom add`.
-	staffTeams, err := seedStaffTeams(client, errOut, plan.TargetOrg, plan.ShortName)
+	staffTeams, login, err := seedStaffTeams(client, errOut, plan.TargetOrg, plan.ShortName)
 	if err != nil {
 		return err
 	}
+
+	// Drop the acting teacher from the students + TA teams so their only role is
+	// instructor — mixed roles aren't allowed, same as `classroom add`.
+	dropCreatorFromNonInstructorTeams(client, errOut, plan.TargetOrg, login, team.Slug, staffTeams)
 
 	build := func(parentSHA string) (map[string]string, error) {
 		exists, err := configrepo.ContentsExists(client, plan.TargetOrg, configrepo.ConfigRepoName, plan.ShortName, parentSHA)
