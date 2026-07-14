@@ -22,7 +22,8 @@ import type { StaffRole } from "@/types/classroom"
 import { isClassroomArchived, STAFF_ROLES } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
-import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
+import { checkPages, repairOrgDefaults } from "./orgChecks"
+import { CONFIG_REPO, DEFAULT_BRANCH } from "@/util/configRepo"
 import { prefixCommit } from "@/util/commit"
 import { repairRulesets } from "./rulesets"
 import { buildSkeletonFiles, type SkeletonFile } from "@/skeleton/skeleton"
@@ -33,10 +34,8 @@ import { LOG_SCOPE_GITHUB_SETUP } from "@/lib/logScopes"
 const logWorkflows = logger.scope("github:workflows")
 const logSetup = logger.scope(LOG_SCOPE_GITHUB_SETUP)
 
-// The branch Classroom 50 standardizes the config repo (and its skeleton
-// workflows/Pages/branch protection) on. New config repos are normalized to
-// this via a guarded rename.
-const CONFIG_REPO_BRANCH = "main"
+// The branch a config repo's default is renamed TO when normalizing it.
+const CONFIG_REPO_BRANCH = DEFAULT_BRANCH
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -148,7 +147,7 @@ export function createTree(
 ) {
   const { base_tree, org, classroom, name, term, team, teams } = input
   return client.request<GitHubCreateTree>(
-    `/repos/${org}/classroom50/git/trees`,
+    `/repos/${org}/${CONFIG_REPO}/git/trees`,
     {
       method: "POST",
       body: createClassroomBody(
@@ -233,7 +232,7 @@ export function createCommit(
 ) {
   const { classroom, tree_sha, org, parents, message } = input
   return client.request<GitHubCreateCommit>(
-    `/repos/${org}/classroom50/git/commits`,
+    `/repos/${org}/${CONFIG_REPO}/git/commits`,
     {
       method: "POST",
       body: {
@@ -299,10 +298,10 @@ export function updateRef(
   client: GitHubClient,
   org: string,
   sha: string,
-  branch = "main",
+  branch = DEFAULT_BRANCH,
 ) {
   return client.request<GitHubMoveBranch>(
-    `/repos/${org}/classroom50/git/refs/heads/${encodeURIComponent(branch)}`,
+    `/repos/${org}/${CONFIG_REPO}/git/refs/heads/${encodeURIComponent(branch)}`,
     {
       method: "PATCH",
       body: {
@@ -364,7 +363,7 @@ export function createGitTree(client: GitHubClient, input: CreateGitTreeInput) {
   const { org, base_tree, tree } = input
 
   return client.request<GitHubCreateTree>(
-    `/repos/${org}/classroom50/git/trees`,
+    `/repos/${org}/${CONFIG_REPO}/git/trees`,
     {
       method: "POST",
       body: {
@@ -388,7 +387,7 @@ export function createGitCommit(
   const { org, message, tree_sha, parents } = input
 
   return client.request<GitHubCreateCommit>(
-    `/repos/${org}/classroom50/git/commits`,
+    `/repos/${org}/${CONFIG_REPO}/git/commits`,
     {
       method: "POST",
       body: {
@@ -1147,7 +1146,7 @@ export async function createOrgRepo(client: GitHubClient, org: string) {
   return client.request<GitHubRepo>(`/orgs/${org}/repos`, {
     method: "POST",
     body: {
-      name: "classroom50",
+      name: CONFIG_REPO,
       private: true,
       auto_init: true,
       description:
@@ -1205,7 +1204,7 @@ async function normalizeConfigRepoBranch(
 }
 
 export async function ensureClassroom50Repo(client: GitHubClient, org: string) {
-  const existing = await getRepo(client, org, "classroom50")
+  const existing = await getRepo(client, org, CONFIG_REPO)
 
   if (existing) {
     const repo = await normalizeConfigRepoBranch(client, org, existing, false)
@@ -1229,7 +1228,7 @@ export async function renameConfigRepoToMain(
   org: string,
 ): Promise<{ renamed: boolean; from: string }> {
   const current =
-    (await getRepo(client, org, "classroom50"))?.default_branch || "main"
+    (await getRepo(client, org, CONFIG_REPO))?.default_branch || DEFAULT_BRANCH
   if (current === CONFIG_REPO_BRANCH) {
     return { renamed: false, from: current }
   }
@@ -1434,7 +1433,7 @@ export async function ensureSkeletonFiles(
 
     const tree = await createTreeRepo(client, {
       org,
-      repo: "classroom50",
+      repo: CONFIG_REPO,
       base_tree: commit.tree.sha,
       tree: stillStale.map((file) => ({
         path: file.path,
@@ -1446,7 +1445,7 @@ export async function ensureSkeletonFiles(
 
     const newCommit = await createCommitRepo(client, {
       org,
-      repo: "classroom50",
+      repo: CONFIG_REPO,
       message: prefixCommit("Bootstrap or refresh Classroom 50 skeleton"),
       tree: tree.sha,
       parents: [commit.sha],
@@ -1456,7 +1455,7 @@ export async function ensureSkeletonFiles(
       await updateRefForRepo({
         client,
         owner: org,
-        repo: "classroom50",
+        repo: CONFIG_REPO,
         branch: configBranch,
         commitSha: newCommit.sha,
       })
@@ -1499,7 +1498,7 @@ export type EnsurePagesResult = {
 }
 
 function expectedPagesUrl(org: string): string {
-  return `https://${org}.github.io/classroom50/`
+  return `https://${org}.github.io/${CONFIG_REPO}/`
 }
 
 function pagesSettingsUrl(owner: string, repo: string): string {
@@ -1583,7 +1582,7 @@ async function setPagesPublic(
 export async function ensurePages(
   client: GitHubClient,
   org: string,
-  repo = "classroom50",
+  repo = CONFIG_REPO,
 ): Promise<EnsurePagesResult> {
   const enableResult = await enableWorkflowPages(client, org, repo)
   const visibilityResult = await setPagesPublic(client, org, repo)
@@ -1675,7 +1674,7 @@ export async function getRepoWorkflowPermissions(
 export async function ensureWorkflowPermissions(
   client: GitHubClient,
   owner: string,
-  repo = "classroom50",
+  repo = CONFIG_REPO,
 ): Promise<EnsureWorkflowPermissionsResult> {
   try {
     await setRepoWorkflowPermissions(client, owner, repo)
@@ -1767,7 +1766,7 @@ export type EnsureReusableWorkflowAccessResult =
 export async function ensureReusableWorkflowAccess(
   client: GitHubClient,
   owner: string,
-  repo = "classroom50",
+  repo = CONFIG_REPO,
 ): Promise<EnsureReusableWorkflowAccessResult> {
   const settingsUrl = actionsSettingsUrl(owner, repo)
 
@@ -1883,7 +1882,7 @@ export type EnsureBranchProtectionResult =
 export async function ensureBranchProtection(
   client: GitHubClient,
   owner: string,
-  repo = "classroom50",
+  repo = CONFIG_REPO,
   branch?: string,
 ): Promise<EnsureBranchProtectionResult> {
   const settingsUrl = branchSettingsUrl(owner, repo)
@@ -2016,7 +2015,7 @@ export async function validateServiceToken(
     // admin === can administer).
     repo = await tokenClient.request<{
       permissions?: { push?: boolean; admin?: boolean }
-    }>(`/repos/${org}/classroom50`)
+    }>(`/repos/${org}/${CONFIG_REPO}`)
   } catch (err) {
     if (err instanceof GitHubAPIError) {
       if (err.status === 401) {
@@ -2027,13 +2026,13 @@ export async function validateServiceToken(
       }
       if (err.status === 403) {
         throw new Error(
-          `This token can't access ${org}/classroom50 (403). ${scopeHint}`,
+          `This token can't access ${org}/${CONFIG_REPO} (403). ${scopeHint}`,
           { cause: err },
         )
       }
       if (err.status === 404) {
         throw new Error(
-          `Couldn't find a classroom50 repository in ${org} (404). Check that the organization is correct and that setup has been run for it — this isn't necessarily a problem with the token itself.`,
+          `Couldn't find a ${CONFIG_REPO} repository in ${org} (404). Check that the organization is correct and that setup has been run for it — this isn't necessarily a problem with the token itself.`,
           { cause: err },
         )
       }
@@ -2047,7 +2046,7 @@ export async function validateServiceToken(
       )
     }
     throw new Error(
-      `Couldn't verify the token against ${org}/classroom50: ${getErrorMessage(
+      `Couldn't verify the token against ${org}/${CONFIG_REPO}: ${getErrorMessage(
         err,
       )}`,
       { cause: err },
@@ -2059,7 +2058,7 @@ export async function validateServiceToken(
   // it with the same actionable scope hint.
   if (!repo.permissions?.push) {
     throw new Error(
-      `This token can read ${org}/classroom50 but lacks write access — collecting scores needs read, but regrading needs write. ${scopeHint}`,
+      `This token can read ${org}/${CONFIG_REPO} but lacks write access — collecting scores needs read, but regrading needs write. ${scopeHint}`,
     )
   }
 
@@ -2067,7 +2066,7 @@ export async function validateServiceToken(
   // Administration (not implied by Contents); reject an admin-less token here.
   if (!repo.permissions?.admin) {
     throw new Error(
-      `This token can read and write ${org}/classroom50 but lacks admin access — collecting scores grants staff teams (e.g. TAs) read access to student repos, which needs Administration: write. ${scopeHint}`,
+      `This token can read and write ${org}/${CONFIG_REPO} but lacks admin access — collecting scores grants staff teams (e.g. TAs) read access to student repos, which needs Administration: write. ${scopeHint}`,
     )
   }
 
@@ -2094,7 +2093,7 @@ export async function validateServiceToken(
       (err.status === 403 || err.status === 404)
     ) {
       throw new Error(
-        `This token can read ${org}/classroom50 but can't read the org's members — collecting scores is team-driven and lists the classroom team, which needs Organization permissions → Members: Read. ${scopeHint}`,
+        `This token can read ${org}/${CONFIG_REPO} but can't read the org's members — collecting scores is team-driven and lists the classroom team, which needs Organization permissions → Members: Read. ${scopeHint}`,
         { cause: err },
       )
     }
@@ -2131,23 +2130,23 @@ export async function triggerScoreCollection(
 ): Promise<{ sinceRunId: number | null }> {
   if (!org) throw new Error("org must be specified to collect scores")
 
-  const repo = await getRepo(client, org, "classroom50")
+  const repo = await getRepo(client, org, CONFIG_REPO)
   if (!repo) {
     throw new Error(
-      `${org}/classroom50 not found; run setup for this org first`,
+      `${org}/${CONFIG_REPO} not found; run setup for this org first`,
     )
   }
-  const ref = repo.default_branch || "main"
+  const ref = repo.default_branch || DEFAULT_BRANCH
 
   // Snapshot the newest dispatch run id before the POST. Run ids are monotonic,
   // so the run this POST creates is the oldest dispatch run whose id exceeds it.
   const baseline = await client.request<{ workflow_runs: { id: number }[] }>(
-    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+    `/repos/${org}/${CONFIG_REPO}/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
   )
   const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
 
   await client.request(
-    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/dispatches`,
+    `/repos/${org}/${CONFIG_REPO}/actions/workflows/${COLLECT_SCORES_WORKFLOW}/dispatches`,
     {
       method: "POST",
       body: {
@@ -2198,17 +2197,17 @@ export async function triggerRegrade(
   // run ids are monotonic, so the run this POST creates is the oldest dispatch
   // run whose id exceeds the snapshot.
   const [repo, baseline] = await Promise.all([
-    getRepo(client, org, "classroom50"),
+    getRepo(client, org, CONFIG_REPO),
     client.request<{ workflow_runs: { id: number }[] }>(
-      `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
+      `/repos/${org}/${CONFIG_REPO}/actions/workflows/${REGRADE_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`,
     ),
   ])
   if (!repo) {
     throw new Error(
-      `${org}/classroom50 not found; run setup for this org first`,
+      `${org}/${CONFIG_REPO} not found; run setup for this org first`,
     )
   }
-  const ref = repo.default_branch || "main"
+  const ref = repo.default_branch || DEFAULT_BRANCH
   const sinceRunId = baseline.workflow_runs?.[0]?.id ?? null
 
   // The workflow's `owner` input is optional; only send it when scoping to a
@@ -2217,7 +2216,7 @@ export async function triggerRegrade(
   if (owner) inputs.owner = owner
 
   await client.request(
-    `/repos/${org}/classroom50/actions/workflows/${REGRADE_WORKFLOW}/dispatches`,
+    `/repos/${org}/${CONFIG_REPO}/actions/workflows/${REGRADE_WORKFLOW}/dispatches`,
     {
       method: "POST",
       body: { ref, inputs },
@@ -2244,7 +2243,7 @@ export async function rerunFailedRun(
 ): Promise<void> {
   logWorkflows.info("re-running failed jobs", { org, runId })
   await client.request(
-    `/repos/${org}/classroom50/actions/runs/${runId}/rerun-failed-jobs`,
+    `/repos/${org}/${CONFIG_REPO}/actions/runs/${runId}/rerun-failed-jobs`,
     { method: "POST" },
   )
 }
@@ -2568,10 +2567,10 @@ export async function initClassroom50({
 
   const buildResult = (status: "error" | "complete") => ({
     org,
-    repo: "classroom50",
+    repo: CONFIG_REPO,
     ...results,
     status,
-    pagesUrl: `https://${org}.github.io/classroom50/`,
+    pagesUrl: `https://${org}.github.io/${CONFIG_REPO}/`,
   })
 
   results.orgDefaults = await tryStep({
@@ -2637,19 +2636,19 @@ export async function initClassroom50({
   results.pages = await tryStep({
     id: "pages",
     onStepUpdate,
-    fn: () => ensurePages(client, org, "classroom50"),
+    fn: () => ensurePages(client, org, CONFIG_REPO),
   })
 
   results.workflowPermissions = await tryStep({
     id: "workflowPermissions",
     onStepUpdate,
-    fn: () => ensureWorkflowPermissions(client, org, "classroom50"),
+    fn: () => ensureWorkflowPermissions(client, org, CONFIG_REPO),
   })
 
   results.reusableWorkflowAccess = await tryStep({
     id: "reusableWorkflowAccess",
     onStepUpdate,
-    fn: () => ensureReusableWorkflowAccess(client, org, "classroom50"),
+    fn: () => ensureReusableWorkflowAccess(client, org, CONFIG_REPO),
   })
 
   results.branchProtection = await tryStep({
@@ -2657,7 +2656,7 @@ export async function initClassroom50({
     onStepUpdate,
     // No branch: ensureBranchProtection resolves the config repo's actual
     // default branch, since org policy can seed it as `master`.
-    fn: () => ensureBranchProtection(client, org, "classroom50"),
+    fn: () => ensureBranchProtection(client, org, CONFIG_REPO),
   })
 
   results.rulesets = await tryStep({
@@ -2727,7 +2726,7 @@ export async function createBlob(
   },
 ) {
   return client.request<GitHubBlob>(
-    `/repos/${input.org}/classroom50/git/blobs`,
+    `/repos/${input.org}/${CONFIG_REPO}/git/blobs`,
     {
       method: "POST",
       body: {
@@ -2752,7 +2751,7 @@ export async function createTreeFromEntries(
   },
 ) {
   return client.request<GitHubTree>(
-    `/repos/${input.org}/classroom50/git/trees`,
+    `/repos/${input.org}/${CONFIG_REPO}/git/trees`,
     {
       method: "POST",
       body: {

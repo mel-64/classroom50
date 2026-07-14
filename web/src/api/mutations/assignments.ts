@@ -14,6 +14,7 @@ import {
   getConfigRepoBranch,
 } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
+import { CONFIG_REPO, DEFAULT_BRANCH } from "@/util/configRepo"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
@@ -523,7 +524,7 @@ async function contentsPathExists(
   org: string,
   path: string,
 ): Promise<boolean> {
-  return repoContentsPathExists(client, org, "classroom50", path)
+  return repoContentsPathExists(client, org, CONFIG_REPO, path)
 }
 
 // Check whether a path exists in an arbitrary repo. 404 -> false, 200 -> true.
@@ -668,7 +669,7 @@ async function ensureDeclarativeTestsWritable(
   const materializeScript = ".github/scripts/materialize_tests.py"
   if (!(await contentsPathExists(client, org, materializeScript))) {
     throw new Error(
-      `${org}/classroom50 is missing ${materializeScript}, so autograding tests would never run. ` +
+      `${org}/${CONFIG_REPO} is missing ${materializeScript}, so autograding tests would never run. ` +
         "Re-initialize the organization (or run `gh teacher init`) to update the config repo, then retry.",
     )
   }
@@ -1223,8 +1224,8 @@ async function createEmptyAssignmentRepo(params: {
   }
 
   // Commit onto the repo's real default branch (GitHub picks it for an
-  // auto_init repo); fall back to the requested branch, then "main".
-  const targetBranch = repo.default_branch || branch || "main"
+  // auto_init repo); fall back to the requested branch, then DEFAULT_BRANCH.
+  const targetBranch = repo.default_branch || branch || DEFAULT_BRANCH
   return {
     kind: "fallback-empty",
     repo: {
@@ -1828,7 +1829,7 @@ function pagesAutograderUrl(params: {
 }) {
   const { org, classroom, name, secret } = params
   const segment = classroomPagesSegment(classroom, secret)
-  return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
+  return `https://${org}.github.io/${CONFIG_REPO}/${segment}/autograders/${name}.yaml`
 }
 
 function defaultAutograderWorkflow(
@@ -1845,7 +1846,7 @@ on:
 
 jobs:
   grade:
-    uses: "${org}/classroom50/.github/workflows/autograde-runner.yaml@${configBranch}"
+    uses: "${org}/${CONFIG_REPO}/.github/workflows/autograde-runner.yaml@${configBranch}"
     permissions:
       contents: write
       statuses: write
@@ -1873,8 +1874,8 @@ async function resolveConfigRepoDefaultBranch(
   fallbackBranch: string,
 ): Promise<string> {
   try {
-    const repo = await getRepo(client, org, "classroom50")
-    return repo?.default_branch || "main"
+    const repo = await getRepo(client, org, CONFIG_REPO)
+    return repo?.default_branch || DEFAULT_BRANCH
   } catch {
     return fallbackBranch
   }
@@ -1895,8 +1896,8 @@ export async function resolveAutograderWorkflow(params: {
   if (isDefaultAutograder(autograder)) {
     return defaultAutograderWorkflow(
       org,
-      branch || "main",
-      configBranch || "main",
+      branch || DEFAULT_BRANCH,
+      configBranch || DEFAULT_BRANCH,
     )
   }
   // Narrowed: isDefaultAutograder returns true for undefined/"default", so a
