@@ -16,6 +16,7 @@ import {
 } from "@/lib/classroomListPrefs"
 import { useListPrefsState } from "@/lib/listPrefs"
 import { ClassroomCard, ClassroomRow } from "@/pages/classes/ClassroomCard"
+import { StudentCountProbes } from "@/pages/classes/StudentCountProbes"
 
 type ClassFilter = "active" | "archived" | "all"
 
@@ -42,10 +43,23 @@ const ClassroomList = ({
   const [termFilter, setTermFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
 
-  const summaries = useClassroomSummaries(
-    org,
-    dirs,
-    sortKey === "student-count",
+  const summaries = useClassroomSummaries(org, dirs)
+
+  // Role-aware student counts for the sort, collected via keyed probes (see
+  // StudentCountProbes) only while the student-count sort is active. Kept in a
+  // path-keyed record and read by the comparator, so filtering/search operate on
+  // the base summary shape (which has no count) and only the sort consults it.
+  const sortByStudents = sortKey === "student-count"
+  const [studentCounts, setStudentCounts] = useState<
+    Record<string, number | undefined>
+  >({})
+  const handleStudentCount = useCallback(
+    (path: string, count: number | undefined) => {
+      setStudentCounts((prev) =>
+        prev[path] === count ? prev : { ...prev, [path]: count },
+      )
+    },
+    [],
   )
 
   // Distinct non-empty terms across the (resolved) classrooms, for the term
@@ -93,11 +107,12 @@ const ClassroomList = ({
           (a, b) => (a.term ?? "").localeCompare(b.term ?? "") || byName(a, b),
         )
       case "student-count":
-        // Known counts high-to-low; unresolved/unknown pinned to the bottom in
-        // stable name order so rows don't reshuffle as rosters resolve.
+        // Known counts high-to-low; unresolved/unknown (or errored, reported as
+        // undefined by the probe) pinned to the bottom in stable name order so
+        // rows don't reshuffle as rosters resolve.
         return list.sort((a, b) => {
-          const ca = a.studentCount
-          const cb = b.studentCount
+          const ca = studentCounts[a.path]
+          const cb = studentCounts[b.path]
           if (ca !== undefined && cb !== undefined)
             return cb - ca || byName(a, b)
           if (ca !== undefined) return -1
@@ -108,7 +123,7 @@ const ClassroomList = ({
       default:
         return list.sort(byName)
     }
-  }, [filtered, sortKey])
+  }, [filtered, sortKey, studentCounts])
 
   // While a card is "busy" (its menu or a destructive confirm modal is open),
   // freeze the rendered order so an async re-sort (e.g. a roster resolving under
@@ -131,6 +146,13 @@ const ClassroomList = ({
 
   return (
     <div className="space-y-4">
+      {sortByStudents && (
+        <StudentCountProbes
+          org={org}
+          paths={filtered.map((s) => s.path)}
+          onCount={handleStudentCount}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300 bg-base-100 p-2">
         <label className="input input-sm input-bordered flex min-w-48 flex-1 items-center gap-2">
           <Search aria-hidden="true" className="size-4 text-base-content/50" />

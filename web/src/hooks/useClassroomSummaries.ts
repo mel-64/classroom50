@@ -1,14 +1,9 @@
 import { useQueries } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { csvFileQuery, jsonFileQuery } from "@/hooks/github/queries"
-import { rosterPath, legacyRosterPath } from "@/util/rosterPath"
+import { jsonFileQuery } from "@/hooks/github/queries"
 import type { GitHubFileListing } from "@/hooks/github/types"
-import {
-  isClassroomArchived,
-  type Classroom,
-  type Student,
-} from "@/types/classroom"
+import { isClassroomArchived, type Classroom } from "@/types/classroom"
 
 export type ClassroomSummary = {
   // The classroom directory slug. Always present, even when classroom.json
@@ -20,27 +15,27 @@ export type ClassroomSummary = {
   // Archived lifecycle derived from classroom.json's `active` flag via
   // isClassroomArchived; an unresolved/errored read is treated as active.
   archived: boolean
-  // studentCount undefined while pending/unreadable (or when counts aren't
-  // requested); callers pin undefined to the bottom in name order.
-  studentCount?: number
   // Distinct from a resolved-but-empty classroom.json read.
   loading: boolean
 }
 
-// Lifts each classroom's classroom.json (and optionally its roster) to the
-// parent so the My Classrooms list can search/sort/filter before rendering.
-// Reuses useGetClassroom's jsonFileQuery cache keys and useGetStudents'
-// csvFileQuery keys, so no duplicate requests vs. the per-card reads. Roster
-// fetches are gated behind `withStudentCounts` (only true when the
-// student-count sort is active) to avoid an unnecessary fan-out otherwise.
+// Lifts each classroom's classroom.json to the parent so the My Classrooms list
+// can search/sort/filter before rendering the cards. Reuses useGetClassroom's
+// jsonFileQuery cache keys, so no duplicate requests vs. the per-card reads.
 //
-// jsonFileQuery/csvFileQuery use retry:false, so a dir with a missing/malformed
+// The student-count sort's per-classroom counts are NOT fetched here: that sort
+// needs an authoritative role-aware count (useStudentCount), and calling a hook
+// per dir in this hook would violate the Rules of Hooks when the classroom list
+// grows/shrinks without a remount. ClassroomList collects those counts via
+// keyed probe components instead and merges them in (see StudentCountProbes and
+// useStudentCount).
+//
+// jsonFileQuery uses retry:false, so a dir with a missing/malformed
 // classroom.json resolves to data===undefined: we keep {path} and mark the rest
 // optional rather than dropping a real classroom from the list.
 const useClassroomSummaries = (
   org: string | undefined,
   dirs: GitHubFileListing[],
-  withStudentCounts: boolean,
 ): ClassroomSummary[] => {
   const client = useGitHubClient()
 
@@ -55,30 +50,14 @@ const useClassroomSummaries = (
     ),
   })
 
-  const rosterResults = useQueries({
-    queries: dirs.map((dir) => ({
-      ...csvFileQuery<Student>(
-        client,
-        org ?? "",
-        "classroom50",
-        rosterPath(dir.path),
-        undefined,
-        legacyRosterPath(dir.path),
-      ),
-      enabled: withStudentCounts && Boolean(org && dir.path),
-    })),
-  })
-
   return dirs.map((dir, i) => {
     const cl = classroomResults[i]?.data
-    const roster = rosterResults[i]?.data
     return {
       path: dir.path,
       name: cl?.name,
       short_name: cl?.short_name,
       term: cl?.term,
       archived: isClassroomArchived(cl ?? {}),
-      studentCount: withStudentCounts ? roster?.length : undefined,
       loading: classroomResults[i]?.isPending ?? false,
     }
   })
