@@ -1,6 +1,9 @@
 package contract
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,6 +53,70 @@ func TestContractLiterals(t *testing.T) {
 	for _, tc := range cases {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q (cross-binary contract drift — update every language copy in lockstep)", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// TestAssignmentRepoName pins the lowercasing of all three segments and the
+// prefix/name relationship (owner is recoverable by stripping the prefix).
+// Cross-language agreement with the Python mirrors is enforced separately by
+// TestAssignmentRepoName_SharedFixtureParity.
+func TestAssignmentRepoName(t *testing.T) {
+	if got := AssignmentRepoPrefix("CS101", "HW1"); got != "cs101-hw1-" {
+		t.Errorf("AssignmentRepoPrefix = %q, want %q", got, "cs101-hw1-")
+	}
+	if got := AssignmentRepoName("CS101", "HW1", "Alice"); got != "cs101-hw1-alice" {
+		t.Errorf("AssignmentRepoName = %q, want %q", got, "cs101-hw1-alice")
+	}
+	// Name must be exactly Prefix + lowercased username, so a consumer that
+	// strips the prefix recovers the owner.
+	prefix := AssignmentRepoPrefix("cs101", "hw1")
+	name := AssignmentRepoName("cs101", "hw1", "bob")
+	if !strings.HasPrefix(name, prefix) {
+		t.Errorf("AssignmentRepoName %q does not start with AssignmentRepoPrefix %q", name, prefix)
+	}
+	if owner := strings.TrimPrefix(name, prefix); owner != "bob" {
+		t.Errorf("owner recovered from %q = %q, want %q", name, owner, "bob")
+	}
+}
+
+// sharedRepoNameCasesPath locates the cross-language golden fixture, also
+// consumed by the Python mirror tests (runner.py, collect_scores.py,
+// regrade_repos.py), relative to this package.
+const sharedRepoNameCasesPath = "../testdata/assignment_repo_name_cases.json"
+
+// TestAssignmentRepoName_SharedFixtureParity runs the shared golden cases so the
+// Go formula and the by-value Python mirrors can't drift: a one-sided edit fails
+// on the other language's copy of these same cases.
+func TestAssignmentRepoName_SharedFixtureParity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Clean(sharedRepoNameCasesPath))
+	if err != nil {
+		t.Fatalf("read shared fixture: %v", err)
+	}
+	var doc struct {
+		Cases []struct {
+			Classroom  string `json:"classroom"`
+			Assignment string `json:"assignment"`
+			Username   string `json:"username"`
+			Name       string `json:"name"`
+			Owner      string `json:"owner"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse shared fixture: %v", err)
+	}
+	if len(doc.Cases) == 0 {
+		t.Fatal("shared fixture has no cases")
+	}
+	for _, c := range doc.Cases {
+		if got := AssignmentRepoName(c.Classroom, c.Assignment, c.Username); got != c.Name {
+			t.Errorf("AssignmentRepoName(%q,%q,%q) = %q, want %q",
+				c.Classroom, c.Assignment, c.Username, got, c.Name)
+		}
+		// owner is the tail the Python mirror recovers by stripping the prefix.
+		prefix := AssignmentRepoPrefix(c.Classroom, c.Assignment)
+		if owner := strings.TrimPrefix(c.Name, prefix); owner != c.Owner {
+			t.Errorf("owner recovered from %q = %q, want %q", c.Name, owner, c.Owner)
 		}
 	}
 }

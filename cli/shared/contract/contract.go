@@ -14,6 +14,11 @@
 // but the cross-language check stays manual.
 package contract
 
+import (
+	"fmt"
+	"strings"
+)
+
 const (
 	// ConfigRepoName is the per-org classroom config repo. Hardcoded across
 	// student repos and the collect-scores workflow — part of the public contract.
@@ -102,4 +107,25 @@ func RequiredOAuthScopes() []string {
 // preserved verbatim.
 func PrefixCommit(message string) string {
 	return CommitPrefix + " " + message
+}
+
+// AssignmentRepoPrefix is the single source of the assignment-repo name prefix
+// `<classroom>-<assignment>-` (all lowercased). Both the producer
+// (AssignmentRepoName) and consumers that strip it to recover the owner derive
+// from this, so the `<classroom>-<assignment>-<owner>` shape can only change in
+// one place. Cross-binary with NO compile-time link — keep byte-identical with
+// the Python mirrors: runner.py::username_from_repo, and assignment_repo_name in
+// collect_scores.py and regrade_repos.py. A drift here silently makes
+// `gh teacher download` return zero repos and misidentifies every submission.
+func AssignmentRepoPrefix(classroom, assignment string) string {
+	return fmt.Sprintf("%s-%s-",
+		strings.ToLower(classroom),
+		strings.ToLower(assignment),
+	)
+}
+
+// AssignmentRepoName is the canonical lowercased
+// `<classroom>-<assignment>-<username>` assignment-repo name.
+func AssignmentRepoName(classroom, assignment, username string) string {
+	return AssignmentRepoPrefix(classroom, assignment) + strings.ToLower(username)
 }
