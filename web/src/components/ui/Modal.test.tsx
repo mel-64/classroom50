@@ -119,6 +119,15 @@ describe("Modal", () => {
     )
     expect(dialog.open).toBe(true)
 
+    // The lock should continue to hold the dialog even if the parent flips
+    // open back to true while closeDisabled remains active.
+    rerender(
+      <Modal open closeDisabled aria-label="dlg">
+        x
+      </Modal>,
+    )
+    expect(dialog.open).toBe(true)
+
     // Once the submit finishes and the lock releases, the pending open=false
     // takes effect and the dialog closes.
     rerender(
@@ -127,6 +136,34 @@ describe("Modal", () => {
       </Modal>,
     )
     expect(dialog.open).toBe(false)
+  })
+
+  it("defers onClose until the closeDisabled lock releases", () => {
+    const onClose = vi.fn()
+    const { container, rerender } = render(
+      <Modal open closeDisabled onClose={onClose} aria-label="dlg">
+        x
+      </Modal>,
+    )
+    const dialog = container.querySelector("dialog") as HTMLDialogElement
+    expect(dialog.open).toBe(true)
+    expect(onClose).not.toHaveBeenCalled()
+
+    rerender(
+      <Modal open={false} closeDisabled onClose={onClose} aria-label="dlg">
+        x
+      </Modal>,
+    )
+    expect(dialog.open).toBe(true)
+    expect(onClose).not.toHaveBeenCalled()
+
+    rerender(
+      <Modal open={false} onClose={onClose} aria-label="dlg">
+        x
+      </Modal>,
+    )
+    expect(dialog.open).toBe(false)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it("stays closed in ref-driven mode until opened imperatively, and wires dialogRef", () => {

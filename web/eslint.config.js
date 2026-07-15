@@ -8,6 +8,10 @@ import { createTypeScriptImportResolver } from "eslint-import-resolver-typescrip
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
 import { defineConfig, globalIgnores } from "eslint/config"
+import {
+  buttonFormSelector,
+  buttonFormMessage,
+} from "./src/eslint/buttonFormRule.ts"
 
 export default defineConfig([
   globalIgnores(["dist"]),
@@ -102,10 +106,8 @@ export default defineConfig([
           // Two deliberate limits: matches <form> AND `<Card as="form">` (the
           // app uses the latter); same-file lexical only, so a <Button> in a
           // child component rendered inside a form isn't reachable here.
-          selector:
-            ":matches(JSXElement[openingElement.name.name='form'], JSXElement:has(JSXAttribute[name.name='as'][value.value='form'])) JSXOpeningElement[name.name='Button']:not(:has(JSXAttribute[name.name=/^(type|as|href)$/]))",
-          message:
-            'A <Button> inside a <form> needs an explicit `type`: add type="submit" for the submit action or type="button" for a click handler. The <Button> default is "button", which silently disables implicit form submit.',
+          selector: buttonFormSelector,
+          message: buttonFormMessage,
         },
       ],
     },
