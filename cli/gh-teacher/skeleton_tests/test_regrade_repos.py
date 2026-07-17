@@ -772,3 +772,91 @@ def test_auth_stripping_redirect_drops_authorization_cross_host():
 def _http_error(code: int, *, body: dict | None = None) -> urllib.error.HTTPError:
     fp = io.BytesIO(json.dumps(body).encode("utf-8")) if body is not None else None
     return urllib.error.HTTPError(url="https://api", code=code, msg="x", hdrs=None, fp=fp)
+
+
+# empty_repo skip -------------------------------------------------------------
+
+
+def test_is_empty_repo_is_strict_boolean_true():
+    # Must be byte-identical in meaning to collect_scores.is_empty_repo and the
+    # runner guard: only the literal True is empty_repo, so a non-boolean from a
+    # hand-edited manifest is NOT treated as bare (matching Go bool / TS ===
+    # true). A truthiness check here would let regrade silently no-op on a
+    # non-boolean the other readers would still grade.
+    assert rr.is_empty_repo({"empty_repo": True}) is True
+    assert rr.is_empty_repo({"empty_repo": False}) is False
+    assert rr.is_empty_repo({}) is False
+    for non_bool in ("true", "yes", 1, [1], {"x": 1}):
+        assert rr.is_empty_repo({"empty_repo": non_bool}) is False, non_bool
+
+
+def test_load_roster_empty_repo_raises_sentinel(monkeypatch, tmp_path):
+    # An empty_repo assignment raises EmptyRepoAssignment BEFORE the team
+    # listing — bare repos carry no autograde workflow, so there is nothing to
+    # re-run and the first-grade fallback would push useless submit/* tags.
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(
+        json.dumps(
+            {
+                "schema": rr.ASSIGNMENTS_SCHEMA_V1,
+                "assignments": [
+                    {
+                        "slug": "actions-lab",
+                        "name": "Actions Lab",
+                        "mode": "individual",
+                        "autograder": "default",
+                        "empty_repo": True,
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        rr, "list_team_member_logins", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+    with pytest.raises(rr.EmptyRepoAssignment):
+        rr.load_roster(cdir, "actions-lab", "https://api", "cs50org", "tok")
+
+
+def test_load_roster_empty_repo_false_proceeds(monkeypatch, tmp_path):
+    # An explicit empty_repo: false (the GUI may write it) is NOT a skip.
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(
+        json.dumps(
+            {
+                "schema": rr.ASSIGNMENTS_SCHEMA_V1,
+                "assignments": [
+                    {
+                        "slug": "hello",
+                        "name": "Hello",
+                        "mode": "individual",
+                        "autograder": "default",
+                        "empty_repo": False,
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(rr, "list_team_member_logins", lambda *a, **k: ["alice"])
+    assert rr.load_roster(cdir, "hello", "https://api", "cs50org", "tok") == ["alice"]
+
+
+def test_main_empty_repo_assignment_is_successful_noop(monkeypatch, capsys):
+    # main() converts the sentinel into exit 0 with an explanatory line — a
+    # manual regrade.yaml dispatch against an empty_repo assignment must not
+    # show a red X the teacher can't act on.
+    _set_main_env(monkeypatch)
+
+    def raise_empty(*a, **k):
+        raise rr.EmptyRepoAssignment("hello")
+
+    monkeypatch.setattr(rr, "load_roster", raise_empty)
+    monkeypatch.setattr(
+        rr, "regrade_repo", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+    assert rr.main() == 0
+    out = capsys.readouterr().out
+    assert "empty_repo" in out
+    assert "nothing to regrade" in out

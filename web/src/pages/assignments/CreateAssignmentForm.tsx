@@ -91,7 +91,13 @@ const CreateAssignmentForm = ({
           </Card.Body>
         </Card>
 
-        <AutogradingTestsPane form={form} />
+        {/* Declarative tests can never run in a bare repo (no autograde
+            workflow), so the whole pane is hidden while empty_repo is on. */}
+        <form.Subscribe selector={(state) => state.values.empty_repo}>
+          {(emptyRepo) =>
+            emptyRepo ? null : <AutogradingTestsPane form={form} />
+          }
+        </form.Subscribe>
       </fieldset>
       <div className="divider" />
       <div className="card-actions justify-end p-2">

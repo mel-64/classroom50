@@ -363,11 +363,33 @@ def load_roster_metadata(classroom_dir: pathlib.Path) -> dict[str, dict[str, str
 # Per-classroom collection ----------------------------------------------------
 
 
+def is_empty_repo(entry: dict[str, Any]) -> bool:
+    """True only when empty_repo is the boolean `true`. The wire contract is a
+    JSON boolean (schema type "boolean"; Go decodes into a strict `bool`), so a
+    non-boolean value from a hand-edited manifest is not empty_repo — matching
+    the Go and TypeScript readers (TS uses `=== true`). Every Python reader
+    (collect/regrade/runner) MUST use this predicate so all tools agree."""
+    return entry.get("empty_repo") is True
+
+
 def valid_assignment_slugs(assignments: dict[str, Any]) -> list[str]:
-    """Slugs worth collecting: non-empty strings, in manifest order. main()'s
-    zero-submission guard counts these; the collect loop applies the same
-    predicate inline (it also needs each entry's `due`), so both agree on what
-    counts as collectable."""
+    """Slugs worth collecting: non-empty strings, in manifest order, excluding
+    empty_repo assignments (their bare repos never autograde, so polling them
+    would only produce dead gradebook rows). main()'s zero-submission guard
+    counts these; the collect loop applies the same predicate inline (it also
+    needs each entry's `due`), so both agree on what counts as collectable."""
+    slugs: list[str] = []
+    for entry in assignments.get("assignments") or []:
+        slug = entry.get("slug")
+        if isinstance(slug, str) and slug and not is_empty_repo(entry):
+            slugs.append(slug)
+    return slugs
+
+
+def all_assignment_slugs(assignments: dict[str, Any]) -> list[str]:
+    """Every valid slug including empty_repo assignments. Staff access grants
+    use this instead of valid_assignment_slugs: a bare repo never autogrades,
+    but TAs still need read on it to review the student-built work."""
     slugs: list[str] = []
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
@@ -450,6 +472,14 @@ def collect_classroom(
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
         if not isinstance(slug, str) or not slug:
+            continue
+        # empty_repo assignments never autograde — same predicate as
+        # valid_assignment_slugs, kept in lockstep.
+        if is_empty_repo(entry):
+            print(
+                f"{classroom_short}/{slug}: empty_repo assignment — autograding "
+                f"is disabled; skipping collection"
+            )
             continue
 
         due_raw = entry.get("due")
@@ -747,7 +777,10 @@ def grant_classroom_team_access(
     if not grant_slugs:
         return
 
-    slugs = valid_assignment_slugs(assignments)
+    # ALL slugs, not just the collectable subset: empty_repo assignments are
+    # skipped by collection but their student repos still exist and staff
+    # still need access to review them.
+    slugs = all_assignment_slugs(assignments)
     if not slugs:
         return
 

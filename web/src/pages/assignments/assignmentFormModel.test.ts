@@ -39,6 +39,7 @@ const base: CreateAssignmentFormValues = {
   due_date: "",
   max_group_size: 2,
   feedback_pr: true,
+  empty_repo: false,
   runtime_env: "hosted",
   runs_on: "",
   container_image: "",
@@ -250,5 +251,25 @@ describe("toSubmitValues — runtime field clearing", () => {
     expect(out.runtime_apt).toBe("")
     expect(out.container_image).toBe("python:3.12")
     expect(out.container_user).toBe("root")
+  })
+
+  it("clears every grading-adjacent field for an empty repo", () => {
+    const out = toSubmitValues({
+      ...base,
+      empty_repo: true,
+      template_repo: "acme/starter",
+      feedback_pr: true,
+      setup_command: "make setup",
+      allowed_files: "*\n!hello.py",
+      pass_threshold_enabled: true,
+      tests: [{ name: "t", run: "pytest", points: 1 } as never],
+    })
+    expect(out.empty_repo).toBe(true)
+    expect(out.template_repo).toBe("")
+    expect(out.feedback_pr).toBe(false)
+    expect(out.setup_command).toBe("")
+    expect(out.allowed_files).toBe("")
+    expect(out.pass_threshold_enabled).toBe(false)
+    expect(out.tests).toEqual([])
   })
 })

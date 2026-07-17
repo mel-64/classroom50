@@ -131,6 +131,42 @@ type AcceptAssignmentResult = {
   cloneCommand: string
 }
 
+// The tracked "access" step: patch the repo surface + grant the founder role
+// (both idempotent upserts). Throws on failure so the checklist surfaces the
+// recovery guidance — shared by the templated setup path and the bare-accept
+// fresh-create path so that recovery copy lives in one place.
+function grantFounderAccessStep(params: {
+  client: GitHubClient
+  org: string
+  repo: string
+  username: string
+  mode: AssignmentMode
+  isOwner: boolean
+  onStepUpdate?: OnAcceptStepUpdate
+}) {
+  const { client, org, repo, username, mode, isOwner, onStepUpdate } = params
+  return withAcceptStep(
+    {
+      id: "access",
+      label: "Granting you access to your repository",
+      actions: `Your repository ${org}/${repo} was created, but adding you (${username}) as a collaborator failed. This usually means your GitHub username changed or you left ${org}. Confirm you're a member of ${org}, then use "Re-run setup".`,
+      doneMessage: "Granted you access to your repository",
+      onStepUpdate,
+    },
+    async () => {
+      await patchRepoSurface(client, org, repo)
+      await addFounderCollaborator({
+        client,
+        owner: org,
+        repo,
+        username,
+        permission: founderPermission(mode),
+        isOwner,
+      })
+    },
+  )
+}
+
 // Provision (or heal) a just-created student repo — grant the founder role,
 // land the control files. Idempotent, so safe to re-run mid-flow.
 async function provisionAcceptedRepo(params: {
@@ -160,26 +196,15 @@ async function provisionAcceptedRepo(params: {
     onStepUpdate,
   } = params
 
-  await withAcceptStep(
-    {
-      id: "access",
-      label: "Granting you access to your repository",
-      actions: `Your repository ${org}/${repo.name} was created, but adding you (${username}) as a collaborator failed. This usually means your GitHub username changed or you left ${org}. Confirm you're a member of ${org}, then use "Re-run setup".`,
-      doneMessage: "Granted you access to your repository",
-      onStepUpdate,
-    },
-    async () => {
-      await patchRepoSurface(client, org, repo.name)
-      await addFounderCollaborator({
-        client,
-        owner: org,
-        repo: repo.name,
-        username,
-        permission: founderPermission(mode),
-        isOwner,
-      })
-    },
-  )
+  await grantFounderAccessStep({
+    client,
+    org,
+    repo: repo.name,
+    username,
+    mode,
+    isOwner,
+    onStepUpdate,
+  })
 
   // Land the metadata + autograde shim, retrying through GitHub's post-generate
   // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
@@ -272,6 +297,21 @@ export async function acceptAssignment(params: {
   const sourceRepo = assignment.template?.repo
   const sourceBranch = assignment.template?.branch ?? "main"
 
+  // empty_repo assignment: the repo is created bare (no commits) and NO
+  // control files are ever committed, so the autograder resolution and the
+  // whole setup step are skipped. Mirrors the CLI's acceptIntoBareRepo.
+  const isEmptyRepo = assignment.empty_repo === true
+
+  // empty_repo and template are mutually exclusive at write time, but the
+  // published manifest is not re-validated, so a hand-edited entry can carry
+  // both. Fail closed rather than half-apply (template content with no
+  // control files). Mirrors the CLI's guard.
+  if (isEmptyRepo && assignment.template) {
+    throw new Error(
+      `Assignment "${assignmentSlug}" sets both empty_repo and a template — the entry is invalid; ask your instructor to re-run assignment setup.`,
+    )
+  }
+
   // Best-effort: resolve the template owner's immutable id (org or user). Never
   // fail accept over this — a missing id is recorded as null.
   let sourceOwnerId: number | null = null
@@ -287,25 +327,37 @@ export async function acceptAssignment(params: {
     }
   }
 
-  let autogradeYaml = await withAcceptStep(
-    {
+  // A bare (empty_repo) repo carries no autograde workflow — mark the step
+  // complete (as skipped) so the checklist doesn't look stuck, and never fetch
+  // the shim.
+  let autogradeYaml = isEmptyRepo
+    ? ""
+    : await withAcceptStep(
+        {
+          id: "autograder",
+          label: "Resolving the autograder",
+          actions: `Couldn't resolve the autograder for "${assignmentSlug}". Ask your instructor to confirm it's published, then accept again.`,
+          doneMessage: "Resolved the autograder",
+          onStepUpdate,
+        },
+        () =>
+          resolveAutograderWorkflow({
+            org,
+            classroom,
+            autograder: assignment.autograder,
+            secret,
+            // Preliminary branch; the default shim is re-rendered post-create
+            // with the assignment repo's actual default branch (below).
+            branch: sourceBranch || "main",
+          }),
+      )
+  if (isEmptyRepo) {
+    onStepUpdate?.({
       id: "autograder",
-      label: "Resolving the autograder",
-      actions: `Couldn't resolve the autograder for "${assignmentSlug}". Ask your instructor to confirm it's published, then accept again.`,
-      doneMessage: "Resolved the autograder",
-      onStepUpdate,
-    },
-    () =>
-      resolveAutograderWorkflow({
-        org,
-        classroom,
-        autograder: assignment.autograder,
-        secret,
-        // Preliminary branch; the default shim is re-rendered post-create with
-        // the assignment repo's actual default branch (below).
-        branch: sourceBranch || "main",
-      }),
-  )
+      status: "complete",
+      message: "Autograding is disabled for this assignment",
+    })
+  }
 
   const studentRepoNameValue = studentRepoName(
     classroom,
@@ -342,8 +394,73 @@ export async function acceptAssignment(params: {
         owner: org,
         name: studentRepoNameValue,
         fallbackBranch: sourceBranch || "main",
+        bare: isEmptyRepo,
       }),
   )
+
+  // Bare (empty_repo) path: no control files exist or are ever committed, so
+  // the marker probe below is meaningless — an existing repo IS an accepted
+  // repo. The only provisioning is the surface patch + founder grant (both
+  // idempotent upserts — same least-privilege rule as the normal path), re-run
+  // unconditionally to heal a prior accept that died between create and grant.
+  // The "setup" step is marked complete (as skipped) so the checklist doesn't
+  // look stuck.
+  if (isEmptyRepo) {
+    const alreadyAccepted = created.kind === "already-accepted"
+    if (alreadyAccepted) {
+      // Healthy already-accepted bare repo: reconcile the founder role
+      // best-effort, matching the templated already-accepted path. A bare
+      // repo's only provisioning IS this grant, so a transient failure must
+      // not fail a re-run that previously succeeded.
+      onStepUpdate?.({
+        id: "repo",
+        status: "complete",
+        message: `Repository already exists: ${org}/${created.repo.name}`,
+      })
+      try {
+        await patchRepoSurface(client, org, created.repo.name)
+        await addFounderCollaborator({
+          client,
+          owner: org,
+          repo: created.repo.name,
+          username,
+          permission: founderPermission(assignment.mode),
+          isOwner,
+        })
+      } catch (err) {
+        log.debug("accept: best-effort role reconcile failed (non-fatal)", {
+          org,
+          repo: created.repo.name,
+          err,
+        })
+      }
+      onStepUpdate?.({ id: "access", status: "complete" })
+    } else {
+      // Fresh create: the grant hard-fails (an un-granted repo is a broken
+      // accept the student can't push to), inside the throwing step so the
+      // checklist surfaces the error and its recovery guidance.
+      await grantFounderAccessStep({
+        client,
+        org,
+        repo: created.repo.name,
+        username,
+        mode: assignment.mode,
+        isOwner,
+        onStepUpdate,
+      })
+    }
+    onStepUpdate?.({
+      id: "setup",
+      status: "complete",
+      message: "No setup needed — this assignment uses an empty repository",
+    })
+
+    return {
+      status: alreadyAccepted ? "already-accepted" : "created",
+      repo: created.repo,
+      cloneCommand: `git clone ${created.repo.ssh_url}`,
+    }
+  }
 
   // The default shim's push-trigger branch must match the assignment repo's
   // actual default branch (which GitHub, not the template, decides — a `main`

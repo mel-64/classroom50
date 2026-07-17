@@ -172,18 +172,27 @@ export const DetailsSection = ({
           )}
         </form.Field>
 
-        <div className="mt-4">
-          <form.Field name="template_repo">
-            {(field) => (
-              <TemplateField
-                field={field}
-                org={org}
-                classroom={classroom}
-                slug={slug}
-              />
-            )}
-          </form.Field>
-        </div>
+        {/* An empty repo starts with no content, so the template picker is
+            hidden while the toggle is on (the submit path clears the value
+            too). */}
+        <form.Subscribe selector={(state) => state.values.empty_repo}>
+          {(emptyRepo) =>
+            emptyRepo ? null : (
+              <div className="mt-4">
+                <form.Field name="template_repo">
+                  {(field) => (
+                    <TemplateField
+                      field={field}
+                      org={org}
+                      classroom={classroom}
+                      slug={slug}
+                    />
+                  )}
+                </form.Field>
+              </div>
+            )
+          }
+        </form.Subscribe>
 
         <div className="divider my-2" />
         <h3 className="text-lg font-bold pb-2">
@@ -281,16 +290,57 @@ export const DetailsSection = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            <form.Field name="feedback_pr">
+            {/* An empty repo has no baseline commit, so the Feedback PR is
+                structurally off: render the toggle locked-off (not hidden) so
+                the trade-off stays visible. */}
+            <form.Subscribe selector={(state) => state.values.empty_repo}>
+              {(emptyRepo) => (
+                <form.Field name="feedback_pr">
+                  {(field) => (
+                    <div
+                      className={
+                        emptyRepo ? "pointer-events-none opacity-50" : ""
+                      }
+                      aria-disabled={emptyRepo}
+                    >
+                      <ToggleRow
+                        id={field.name}
+                        checked={emptyRepo ? false : field.state.value}
+                        onChange={(checked) => field.handleChange(checked)}
+                        onBlur={field.handleBlur}
+                        label={t("assignments.form.feedbackPr")}
+                        help={
+                          emptyRepo
+                            ? t("assignments.form.feedbackPrEmptyRepoHelp")
+                            : t("assignments.form.feedbackPrHelp")
+                        }
+                      />
+                    </div>
+                  )}
+                </form.Field>
+              )}
+            </form.Subscribe>
+
+            {/* Immutable after creation: locked in edit mode. */}
+            <form.Field name="empty_repo">
               {(field) => (
-                <ToggleRow
-                  id={field.name}
-                  checked={field.state.value}
-                  onChange={(checked) => field.handleChange(checked)}
-                  onBlur={field.handleBlur}
-                  label={t("assignments.form.feedbackPr")}
-                  help={t("assignments.form.feedbackPrHelp")}
-                />
+                <div
+                  className={edit ? "pointer-events-none opacity-50" : ""}
+                  aria-disabled={edit}
+                >
+                  <ToggleRow
+                    id={field.name}
+                    checked={field.state.value}
+                    onChange={(checked) => field.handleChange(checked)}
+                    onBlur={field.handleBlur}
+                    label={t("assignments.form.emptyRepo")}
+                    help={
+                      edit
+                        ? `${t("assignments.form.emptyRepoHelp")} ${t("assignments.form.emptyRepoLocked")}`
+                        : t("assignments.form.emptyRepoHelp")
+                    }
+                  />
+                </div>
               )}
             </form.Field>
 

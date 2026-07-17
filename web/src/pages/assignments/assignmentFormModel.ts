@@ -52,6 +52,12 @@ export type CreateAssignmentFormValues = {
   due_date: string
   max_group_size: number
   feedback_pr: boolean
+  // Truly bare student repos: no starter content, no control files, autograding
+  // and the Feedback PR off. Immutable after creation (the edit form renders it
+  // locked). While checked, the template/autograding/advanced grading sections
+  // are hidden and their values cleared on submit, mirroring runtime_env's
+  // conditional-clear idiom.
+  empty_repo: boolean
   // UI-only: which runtime environment the teacher is configuring. Selects
   // which fields render and get written; never sent to the wire. "hosted" uses
   // a GitHub Actions runner (runs-on + apt); "container" grades inside a Docker
@@ -221,15 +227,21 @@ export function toSubmitValues(
   value: CreateAssignmentFormValues,
 ): CreateAssignmentFormValues {
   const isContainer = value.runtime_env === "container"
+  // An empty repo never autogrades, so every grading-adjacent field is cleared
+  // on submit — the sections are hidden while the toggle is on, and a stale
+  // value from before toggling must not reach the wire (the mutation layer
+  // rejects the combination).
+  const isEmptyRepo = value.empty_repo
   return {
     name: value.name.trim(),
     slug: slugify(value.slug),
     description: value.description.trim(),
     mode: value.mode,
-    template_repo: value.template_repo.trim(),
+    template_repo: isEmptyRepo ? "" : value.template_repo.trim(),
     due_date: value.due_date.trim(),
     max_group_size: value.max_group_size,
-    feedback_pr: value.feedback_pr,
+    feedback_pr: isEmptyRepo ? false : value.feedback_pr,
+    empty_repo: isEmptyRepo,
     runtime_env: value.runtime_env,
     runs_on: value.runs_on.trim(),
     container_image: isContainer ? value.container_image.trim() : "",
@@ -240,11 +252,11 @@ export function toSubmitValues(
     runtime_go: value.runtime_go.trim(),
     runtime_rust: value.runtime_rust.trim(),
     runtime_apt: isContainer ? "" : value.runtime_apt.trim(),
-    setup_command: value.setup_command.trim(),
-    allowed_files: value.allowed_files,
-    pass_threshold_enabled: value.pass_threshold_enabled,
+    setup_command: isEmptyRepo ? "" : value.setup_command.trim(),
+    allowed_files: isEmptyRepo ? "" : value.allowed_files,
+    pass_threshold_enabled: isEmptyRepo ? false : value.pass_threshold_enabled,
     pass_threshold: Number(value.pass_threshold),
-    tests: value.tests,
+    tests: isEmptyRepo ? [] : value.tests,
   }
 }
 
@@ -264,6 +276,7 @@ export const useAssignmentForm = (
       due_date: utcIsoToDatetimeLocalValue(defaultValues?.due_date),
       max_group_size: defaultValues?.max_group_size || 2,
       feedback_pr: defaultValues?.feedback_pr ?? true,
+      empty_repo: defaultValues?.empty_repo ?? false,
       runtime_env: defaultValues?.runtime_env || "hosted",
       runs_on: defaultValues?.runs_on || "",
       container_image: defaultValues?.container_image || "",
@@ -323,6 +336,7 @@ export const assignmentToFormValues = (
     due_date: utcIsoToDatetimeLocalValue(assignment.due),
     max_group_size: assignment.max_group_size ?? 2,
     feedback_pr: assignment.feedback_pr ?? true,
+    empty_repo: assignment.empty_repo ?? false,
     // A stored container block means the assignment was configured in container
     // mode; otherwise it's the hosted runner (the default).
     runtime_env: assignment.runtime?.container ? "container" : "hosted",

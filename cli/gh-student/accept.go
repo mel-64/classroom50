@@ -308,17 +308,27 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		return fmt.Errorf("assignment %q has an incomplete template ref (owner=%q repo=%q branch=%q) — ask your instructor to re-run `gh teacher assignment add`",
 			assignment, entry.Template.Owner, entry.Template.Repo, entry.Template.Branch)
 	}
+	// empty_repo and template are mutually exclusive at write time, but
+	// publish-pages publishes assignments.json verbatim, so a hand-edited
+	// entry can carry both. Fail closed rather than half-apply (the template
+	// fork would generate starter content, then the bare fork would skip every
+	// control file — a templated repo the grading pipeline ignores).
+	if entry.EmptyRepo && entry.Template != nil {
+		return fmt.Errorf("assignment %q sets both empty_repo and a template — the entry is invalid; ask your instructor to re-run `gh teacher assignment add`", assignment)
+	}
 
 	// 2) Resolve the autograder shim. A non-default (Pages-fetched) autograder
 	//    is teacher-authored and resolved up front so a fetch failure doesn't
 	//    leave a half-baked repo. The default (embedded) shim is rendered AFTER
 	//    the repo is created, because its `on: push: branches` must match the
 	//    assignment repo's actual default branch (which GitHub, not the template,
-	//    decides) and its `uses:` ref must match the config repo's branch.
+	//    decides) and its `uses:` ref must match the config repo's branch. An
+	//    empty_repo assignment never carries the shim (nothing is committed at
+	//    all), so skip resolution entirely.
 	autograderName := entry.ResolveAutograder()
 	useDefaultShim := autograderName == contract.DefaultAutograderName
 	var shim string
-	if !useDefaultShim {
+	if !useDefaultShim && !entry.EmptyRepo {
 		workflow, err := assignments.FetchAutograderWorkflow(cmd.Context(), org, classroom, secret, autograderName)
 		if err != nil {
 			return err
@@ -327,11 +337,12 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	}
 
 	// 3) Create the assignment repo (templated → generate; template-less →
-	//    empty auto-init'd). Already-exists is NOT a terminal short-circuit: a
-	//    prior accept may have created the repo but died before landing the
-	//    control files (seeding lag, transient 5xx, Ctrl-C), leaving a repo
-	//    that looks accepted but never autogrades. The probe below heals that.
-	//    Mirrors the GUI's accept.
+	//    empty auto-init'd; empty_repo → bare, no initial commit).
+	//    Already-exists is NOT a terminal short-circuit: a prior accept may
+	//    have created the repo but died before landing the control files
+	//    (seeding lag, transient 5xx, Ctrl-C), leaving a repo that looks
+	//    accepted but never autogrades. The probe below heals that. Mirrors
+	//    the GUI's accept.
 	var (
 		htmlURL        string
 		fullName       string
@@ -363,7 +374,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		}
 	} else {
 		var defaultBranch string
-		htmlURL, fullName, defaultBranch, alreadyExisted, err = createEmptyPrivateAssignmentRepoInOrg(client, u, verbose, username, classroom, assignment, org)
+		htmlURL, fullName, defaultBranch, alreadyExisted, err = createEmptyPrivateAssignmentRepoInOrg(client, u, verbose, username, classroom, assignment, org, !entry.EmptyRepo)
 		commitBranch = defaultBranch
 	}
 	if err != nil {
@@ -376,8 +387,9 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	// `uses:` ref targets the config repo's actual default branch. On a read
 	// failure, fall back to the assignment repo's own branch (commitBranch), not
 	// a hardcoded `main` — a wrong `@main` ref would 404 the runner and silently
-	// skip grading on a master-default org.
-	if useDefaultShim {
+	// skip grading on a master-default org. An empty_repo assignment commits no
+	// shim at all, so skip the render (and its config-branch read).
+	if useDefaultShim && !entry.EmptyRepo {
 		configBranch, cbErr := resolveConfigRepoBranch(client, org)
 		if cbErr != nil {
 			if verbose {
@@ -404,6 +416,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		source:         cfgSource,
 		shim:           shim,
 		autograderName: autograderName,
+		emptyRepo:      entry.EmptyRepo,
 		fullName:       fullName,
 		htmlURL:        htmlURL,
 		alreadyExisted: alreadyExisted,
@@ -427,8 +440,11 @@ type acceptRepoParams struct {
 	acceptedAt                 string
 	source                     *classroomcfg.Source
 	shim, autograderName       string
-	fullName, htmlURL          string
-	alreadyExisted             bool
+	// emptyRepo selects the bare path: no control files are committed and no
+	// marker probe runs — the only provisioning is the idempotent admin grant.
+	emptyRepo         bool
+	fullName, htmlURL string
+	alreadyExisted    bool
 	// isOwner tolerates an org owner's unavoidable residual admin at the
 	// founder read-back (they can't self-downgrade to push).
 	isOwner   bool
@@ -446,6 +462,14 @@ type acceptRepoParams struct {
 //     the idempotent provisioning to repair it.
 //   - freshly created → provision normally.
 func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writer, p acceptRepoParams) error {
+	// The bare (empty_repo) path never commits control files, so the marker
+	// probe below is meaningless: an existing repo IS an accepted repo. The
+	// only provisioning is the founder grant — an idempotent upsert, so re-run
+	// it unconditionally to heal a prior accept that died between create and
+	// grant.
+	if p.emptyRepo {
+		return acceptIntoBareRepo(client, u, verbose, out, p)
+	}
 	if p.alreadyExisted {
 		provisioned, perr := repoFileExists(client, p.org, p.repoName, classroomcfg.MetadataPath)
 		if perr != nil {
@@ -499,6 +523,43 @@ func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writ
 		return reportAlreadyAccepted(u, out, p.fullName, p.htmlURL)
 	}
 	return reportAccepted(u, out, p.fullName, p.htmlURL)
+}
+
+// acceptIntoBareRepo is acceptIntoRepo's empty_repo twin: no control files, no
+// marker probe, no read-back of a marker. The repo has no commits (auto_init
+// false), so the sole provisioning step is the founder role grant — the same
+// least-privilege rule as the normal path (`push` for individual, `admin` for
+// group). It splits on alreadyExisted like the templated path: a healthy
+// already-accepted repo reconciles the grant best-effort (a transient failure
+// must not fail a re-run), while a fresh create hard-fails the grant and first
+// asserts mode/size coherence.
+func acceptIntoBareRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writer, p acceptRepoParams) error {
+	if p.alreadyExisted {
+		p.createSp.Stop(fmt.Sprintf("Repo already exists: %s", p.fullName))
+
+		// Already accepted: reconcile the role best-effort, matching the
+		// templated already-accepted path. The bare repo is already healthy
+		// (its only provisioning is this grant), so a transient/SSO-403/
+		// left-org failure must not fail a re-run that previously succeeded.
+		if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil && verbose {
+			u.Detail("could not reconcile %s's role on %s/%s (repo already accepted; leaving as-is): %v", p.username, p.org, p.repoName, err)
+		}
+		return reportAlreadyAccepted(u, out, p.fullName, p.htmlURL)
+	}
+	p.createSp.Stop(fmt.Sprintf("Created %s", p.fullName))
+
+	// Fresh create: a group-shaped entry whose mode isn't group would found
+	// the repo under-privileged, so reject incoherent metadata before the
+	// grant — same guard the templated fresh-create path runs.
+	if err := assertModeCoherentForCreate(p.assignment, p.mode, p.maxGroupSize); err != nil {
+		return err
+	}
+
+	if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil {
+		return err
+	}
+
+	return reportBareAccepted(u, out, p.fullName, p.htmlURL)
 }
 
 // provisionAcceptedRepo brings a just-created (or partially-provisioned)
@@ -625,6 +686,18 @@ func is422AlreadyExists(httpErr *githubapi.HTTPError) bool {
 // human-channel progress, so this doesn't duplicate the headline onto stderr.
 func reportAccepted(u *ui.UI, out io.Writer, fullName, htmlURL string) error {
 	_, _ = fmt.Fprintf(out, "Assignment accepted: %s\n\n", fullName)
+	return printCloneInstructions(u, out, htmlURL)
+}
+
+// reportBareAccepted is reportAccepted's empty_repo variant: the repo has no
+// commits, so cloning yields an empty checkout and there is no autograding to
+// mention. Says so explicitly, since a student expecting starter code (or a
+// grade) would otherwise read the emptiness as a broken accept.
+func reportBareAccepted(u *ui.UI, out io.Writer, fullName, htmlURL string) error {
+	_, _ = fmt.Fprintf(out, "Assignment accepted: %s\n\n", fullName)
+	_, _ = fmt.Fprintln(out, "This assignment uses an empty repository: it has no starter files, and")
+	_, _ = fmt.Fprintln(out, "autograding is disabled. Clone it, then create and push your own work.")
+	_, _ = fmt.Fprintln(out)
 	return printCloneInstructions(u, out, htmlURL)
 }
 
@@ -759,20 +832,23 @@ func createTemplatedPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI
 }
 
 // createEmptyPrivateAssignmentRepoInOrg creates an empty private repo for a
-// template-less assignment via POST /orgs/{org}/repos with auto_init:true
-// (mirroring gh-teacher's ensureConfigRepo). auto_init is load-bearing: it
+// template-less assignment via POST /orgs/{org}/repos (mirroring gh-teacher's
+// ensureConfigRepo). autoInit true (the shim-only path) is load-bearing: it
 // gives the repo an initial commit + default branch so the shared
 // WaitForStableBranch poll and the fresh-repo Tree-commit retry both work
-// unchanged. Returns the repo's default_branch so the caller commits the shim
-// onto the right ref. issues/projects/wiki are disabled like the templated
-// path. 422-already-exists → alreadyExisted=true and the PATCH is skipped so
-// re-runs don't disturb an existing repo.
-func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, verbose bool, username, classroom, assignment, org string) (htmlURL, fullName, defaultBranch string, alreadyExisted bool, err error) {
+// unchanged. autoInit false (the empty_repo path) leaves the repo with no
+// commits and no branches at all — the caller must not attempt any commit.
+// Returns the repo's default_branch so the shim caller commits onto the right
+// ref (for a no-auto_init repo it is only GitHub's configured default, which
+// materializes on the student's first push). issues/projects/wiki are disabled
+// like the templated path. 422-already-exists → alreadyExisted=true and the
+// PATCH is skipped so re-runs don't disturb an existing repo.
+func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, verbose bool, username, classroom, assignment, org string, autoInit bool) (htmlURL, fullName, defaultBranch string, alreadyExisted bool, err error) {
 	newRepoName := reponame.Name(classroom, assignment, username)
 	createBody, err := json.Marshal(map[string]any{
 		"name":      newRepoName,
 		"private":   true,
-		"auto_init": true,
+		"auto_init": autoInit,
 	})
 	if err != nil {
 		return "", "", "", false, fmt.Errorf("error encoding json for empty repo: %w", err)
@@ -809,8 +885,12 @@ func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, ve
 	}
 
 	if verbose {
-		u.Detail("created empty private repo %s (template-less), with issues/projects/wiki disabled: %s",
-			updated.FullName, updated.HTMLURL)
+		kind := "empty private repo (template-less)"
+		if !autoInit {
+			kind = "bare private repo (empty_repo, no initial commit)"
+		}
+		u.Detail("created %s %s, with issues/projects/wiki disabled: %s",
+			kind, updated.FullName, updated.HTMLURL)
 	}
 
 	return updated.HTMLURL, updated.FullName, defaultBranchOrMain(updated.DefaultBranch), false, nil
