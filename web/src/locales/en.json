@@ -610,9 +610,55 @@
     "archivedNotice_prefix": "This classroom is archived — new assignments and student accepts are disabled. Unarchive it from",
     "archivedNotice_link": "Classroom settings",
     "archivedNotice_suffix": "to make changes.",
-    "studentHeading": "Classroom assignments",
+    "studentHeading": "Assignments",
     "studentViewAll_prefix": "View all assignments for the",
     "studentViewAll_suffix": "classroom.",
+    "discover": {
+      "accept": "Accept assignment",
+      "notAccepted": "Not accepted",
+      "viewSubmission": "View my submission",
+      "modeIndividual": "Individual",
+      "modeGroup": "Group",
+      "due": "Due {{date}}",
+      "noDue": "No due date",
+      "emptyTitle": "No assignments yet",
+      "emptyBody": "When a teacher publishes assignments for this classroom, they'll appear here.",
+      "protectedNoSecret": "This classroom's assignments open from the invite link your teacher shared. Open that link to accept and see them here.",
+      "toolbar": {
+        "searchPlaceholder": "Search assignments…",
+        "searchAria": "Search assignments",
+        "statusLabel": "Status",
+        "statusAria": "Filter by status",
+        "statusAll": "All",
+        "statusTodo": "To do",
+        "statusAccepted": "Accepted",
+        "typeLabel": "Type",
+        "typeAria": "Filter by type",
+        "typeAll": "All types",
+        "typeIndividual": "Individual",
+        "typeGroup": "Group",
+        "dueLabel": "Due",
+        "dueAria": "Filter by due date",
+        "dueAll": "Any due date",
+        "dueOverdue": "Overdue",
+        "sortLabel": "Sort",
+        "sortAria": "Sort assignments",
+        "sortDueAsc": "Due soonest",
+        "sortDueDesc": "Due latest",
+        "sortNameAsc": "Name (A–Z)",
+        "sortNameDesc": "Name (Z–A)",
+        "clear": "Clear filters",
+        "view": {
+          "label": "View",
+          "gridLabel": "Grid view",
+          "listLabel": "List view"
+        }
+      },
+      "noResults": {
+        "title": "No assignments match your filters",
+        "body": "Try a different search or clear the filters."
+      }
+    },
     "newButton": {
       "assignment": "Assignment",
       "moreOptions": "More assignment options",
@@ -1412,6 +1458,25 @@
       "emptyTitle": "No assignment repos yet",
       "emptyBody": "Repositories you can write to will appear here once assignments have been created for this organization."
     },
+    "student": {
+      "emptyTitle": "No classrooms yet",
+      "emptyBody": "When a teacher adds you to a classroom, it will show up here.",
+      "loadError": "Couldn't load your classrooms.",
+      "retry": "Retry",
+      "toolbar": {
+        "searchPlaceholder": "Search classrooms…",
+        "searchLabel": "Search your classrooms",
+        "sort": {
+          "nameAsc": "Name (A–Z)",
+          "accepted": "Accepted assignments"
+        }
+      },
+      "card": {
+        "noneAccepted": "No assignments accepted yet",
+        "acceptedCount_one": "{{count}} assignment accepted",
+        "acceptedCount_other": "{{count}} assignments accepted"
+      }
+    },
     "form": {
       "basicInfo": "Basic information",
       "name": "Classroom name",
@@ -1733,6 +1798,13 @@
       "notAccepted_suffix": "to get your repository, then push your work to be graded.",
       "noGradedYet": "No graded submission yet. Push a commit to your assignment repository and the autograder will publish your result here.",
       "openMyRepo": "Open my repository",
+      "submitGuide": {
+        "title": "How to submit",
+        "step1": "Clone your assignment repository (once):",
+        "step2": "From inside the repository, submit your work for grading:",
+        "copyClone": "Copy clone command",
+        "copySubmit": "Copy submit command"
+      },
       "releasesIntro": "Each submission opens its graded release on GitHub, with your score and per-test results.",
       "fallbackTitle": "Submission",
       "missingParams": "Missing classroom or assignment information."

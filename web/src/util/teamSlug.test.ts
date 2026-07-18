@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { classroomTeamSlug, parseClassroomTeamSlug } from "./teamSlug"
+import {
+  classroomTeamSlug,
+  parseClassroomTeamSlug,
+  parseStudentClassroomSlug,
+  parseBareClassroomSlug,
+} from "./teamSlug"
 
 // Byte-identity guard: these strings are a cross-tool contract (CLI + schema
 // hand-mirror them). A change here that isn't mirrored breaks membership reads
@@ -54,5 +59,60 @@ describe("parseClassroomTeamSlug", () => {
     // `classroom50-instructor` has an empty middle — not a real per-classroom
     // team, so it must not parse to a staff membership.
     expect(parseClassroomTeamSlug("classroom50-instructor")).toBeNull()
+  })
+})
+
+describe("parseStudentClassroomSlug", () => {
+  it("parses a bare student slug to its classroom", () => {
+    expect(parseStudentClassroomSlug("classroom50-cs101")).toEqual({
+      classroom: "cs101",
+    })
+  })
+
+  it("round-trips the student classroomTeamSlug for a hyphenated name", () => {
+    const slug = classroomTeamSlug("cs-principles", "student")
+    expect(slug).toBe("classroom50-cs-principles")
+    expect(parseStudentClassroomSlug(slug)).toEqual({
+      classroom: "cs-principles",
+    })
+  })
+
+  it("returns null for a staff slug (complement of parseClassroomTeamSlug)", () => {
+    expect(parseStudentClassroomSlug("classroom50-cs101-ta")).toBeNull()
+    expect(parseStudentClassroomSlug("classroom50-cs101-teacher")).toBeNull()
+    expect(parseStudentClassroomSlug("classroom50-cs101-instructor")).toBeNull()
+  })
+
+  it("returns null for a non-classroom slug", () => {
+    expect(parseStudentClassroomSlug("some-other-team")).toBeNull()
+    expect(parseStudentClassroomSlug("classroom50")).toBeNull()
+  })
+
+  it("does not mistake a hyphenated classroom ending in a role-like word", () => {
+    // `classroom50-ml-ta` is ambiguous with a `-ta` staff suffix; the staff
+    // parser owns it, so the student parser must yield null (safe-degrade: a
+    // real ml-ta student team collision would 404 the membership read).
+    expect(parseStudentClassroomSlug("classroom50-ml-ta")).toBeNull()
+  })
+})
+
+describe("parseBareClassroomSlug", () => {
+  it("returns the whole post-prefix segment, ignoring role suffixes", () => {
+    expect(parseBareClassroomSlug("classroom50-cs101")).toEqual({
+      classroom: "cs101",
+    })
+    // Unlike parseStudentClassroomSlug, it does NOT exclude a role-suffixed slug
+    // — this is the whole point: `classroom50-ml-ta` -> `ml-ta`, so the caller
+    // (gated on a bootstrap record) can recover the role-suffixed student
+    // classroom the staff parser would otherwise claim as `ml`.
+    expect(parseBareClassroomSlug("classroom50-ml-ta")).toEqual({
+      classroom: "ml-ta",
+    })
+  })
+
+  it("returns null for a non-classroom slug or empty segment", () => {
+    expect(parseBareClassroomSlug("some-other-team")).toBeNull()
+    expect(parseBareClassroomSlug("classroom50")).toBeNull()
+    expect(parseBareClassroomSlug("classroom50-")).toBeNull()
   })
 })
