@@ -3,7 +3,7 @@ import { type GitHubTeam } from "../types"
 import { GitHubAPIError, tolerateGitHubError } from "../errors"
 import type { StaffRole } from "@/types/classroom"
 import { STAFF_ROLES } from "@/types/classroom"
-import { createTeam } from "../teamWrites"
+import { createTeam, type TeamNotificationSetting } from "../teamWrites"
 import { CONFIG_REPO } from "@/util/configRepo"
 import { classroomTeamSlug } from "@/util/teamSlug"
 
@@ -39,41 +39,62 @@ function isCanonicalTeamShortName(shortName: string): boolean {
 }
 
 // Create (or adopt) a `secret` team by exact name. Idempotent: adopts a
-// same-named team on 422 and reconciles privacy to `secret`. `created: false`
-// means it pre-existed and must NOT be deleted on a create-failure rollback.
-// The shared core the students team and staff teams build on.
+// same-named team on 422, reconciling privacy and notification setting.
+// `created: false` means it pre-existed and must NOT be deleted on a
+// create-failure rollback. The shared core the student and staff teams build on.
 async function ensureSecretTeamByName(
   client: GitHubClient,
   org: string,
   name: string,
+  notify: TeamNotificationSetting,
 ): Promise<ClassroomTeamRef & { created: boolean }> {
   try {
-    const created = await createTeam(client, { org, name, privacy: "secret" })
+    const created = await createTeam(client, {
+      org,
+      name,
+      privacy: "secret",
+      notification_setting: notify,
+    })
     return { id: created.id, slug: created.slug, created: true }
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 422) {
-      const adopted = await adoptSecretTeamByName(client, org, name)
+      const adopted = await adoptSecretTeamByName(client, org, name, notify)
       return { ...adopted, created: false }
     }
     throw err
   }
 }
 
-// Adopt an existing same-named team: read its { id, slug } and reconcile privacy
-// to `secret`. Our names are already slug-safe (guarded upstream), so the name
-// doubles as the lookup slug.
+// Adopt an existing same-named team: read its { id, slug } and reconcile drift
+// (privacy, notification setting). Names are slug-safe (guarded upstream), so
+// the name doubles as the lookup slug.
 async function adoptSecretTeamByName(
   client: GitHubClient,
   org: string,
   name: string,
+  notify: TeamNotificationSetting,
 ): Promise<ClassroomTeamRef> {
   const existing = await client.request<GitHubTeam>(
     `/orgs/${org}/teams/${name}`,
   )
-  if (existing.privacy !== "secret") {
+  const patch: {
+    privacy?: "secret"
+    notification_setting?: TeamNotificationSetting
+  } = {}
+  if (existing.privacy !== "secret") patch.privacy = "secret"
+  // GitHub returns notification_setting only to org members, so an absent value
+  // is "unknown, not read" — skip it rather than PATCH every reconcile. A
+  // concrete value that differs is reconciled on purpose (a student team left
+  // enabled gets disabled — #335).
+  if (
+    existing.notification_setting !== undefined &&
+    existing.notification_setting !== notify
+  )
+    patch.notification_setting = notify
+  if (Object.keys(patch).length > 0) {
     await client.request(`/orgs/${org}/teams/${existing.slug}`, {
       method: "PATCH",
-      body: { privacy: "secret" },
+      body: patch,
     })
   }
   return { id: existing.id, slug: existing.slug }
@@ -98,7 +119,12 @@ export async function ensureClassroomTeam(
   classroom: string,
 ): Promise<ClassroomTeamRef & { created: boolean }> {
   assertCanonicalTeamShortName(classroom)
-  return ensureSecretTeamByName(client, org, classroomTeamSlug(classroom))
+  return ensureSecretTeamByName(
+    client,
+    org,
+    classroomTeamSlug(classroom),
+    "notifications_disabled",
+  )
 }
 
 // The per-classroom staff team refs persisted under classroom.json `teams`.
@@ -120,7 +146,14 @@ export async function ensureClassroomRoleTeam(
   role: StaffRole,
 ): Promise<ClassroomTeamRef & { created: boolean }> {
   assertCanonicalTeamShortName(classroom)
-  return ensureSecretTeamByName(client, org, classroomTeamSlug(classroom, role))
+  // Staff enable notifications (student team stays disabled); see
+  // TeamNotificationSetting.
+  return ensureSecretTeamByName(
+    client,
+    org,
+    classroomTeamSlug(classroom, role),
+    "notifications_enabled",
+  )
 }
 
 // Grant a team `push` (write) on the org's `classroom50` config repo, so its
