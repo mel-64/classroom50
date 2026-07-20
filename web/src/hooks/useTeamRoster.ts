@@ -122,6 +122,8 @@ export function useTeamRoster(
     classroomTeamSlug(classroom, "teacher")
   const taSlug =
     classroomJson?.teams?.ta?.slug || classroomTeamSlug(classroom, "ta")
+  const htaSlug =
+    classroomJson?.teams?.hta?.slug || classroomTeamSlug(classroom, "hta")
 
   const {
     data: members,
@@ -140,8 +142,10 @@ export function useTeamRoster(
     teamMembersQuery(client, org, teacherSlug),
   )
   const taMembersQuery = useQuery(teamMembersQuery(client, org, taSlug))
+  const htaMembersQuery = useQuery(teamMembersQuery(client, org, htaSlug))
   const teacherMembers = teacherMembersQuery.data
   const taMembers = taMembersQuery.data
+  const htaMembers = htaMembersQuery.data
 
   // Student pending invitations, TEAM-SCOPED (owner-only, like the staff teams).
   // GitHub lists a pending invite under a team only when that team was on the
@@ -170,6 +174,10 @@ export function useTeamRoster(
   const taInvitesQuery = useQuery({
     ...teamInvitationsQuery(client, org, taSlug),
     enabled: Boolean(org && taSlug) && isOwner,
+  })
+  const htaInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, htaSlug),
+    enabled: Boolean(org && htaSlug) && isOwner,
   })
 
   const invitations = useMemo(
@@ -214,6 +222,7 @@ export function useTeamRoster(
         invitations: pendingHidden ? [] : invitations,
         staffMembers: {
           teacher: teacherMembers ?? [],
+          hta: htaMembers ?? [],
           ta: taMembers ?? [],
         },
         // Each staff team's pending is independent: an owner who can read org
@@ -224,6 +233,7 @@ export function useTeamRoster(
           ? {}
           : {
               teacher: teacherInvitesQuery.data ?? [],
+              hta: htaInvitesQuery.data ?? [],
               ta: taInvitesQuery.data ?? [],
             },
         students,
@@ -235,9 +245,11 @@ export function useTeamRoster(
     [
       members,
       teacherMembers,
+      htaMembers,
       taMembers,
       invitations,
       teacherInvitesQuery.data,
+      htaInvitesQuery.data,
       taInvitesQuery.data,
       pendingHidden,
       students,
@@ -260,12 +272,13 @@ export function useTeamRoster(
     for (const m of [
       ...(members ?? []),
       ...(teacherMembers ?? []),
+      ...(htaMembers ?? []),
       ...(taMembers ?? []),
     ]) {
       if (!byId.has(m.id)) byId.set(m.id, m)
     }
     return [...byId.values()]
-  }, [members, teacherMembers, taMembers])
+  }, [members, teacherMembers, htaMembers, taMembers])
   const csvMissing = useMemo(
     () => teamMembersMissingFromCsv(allTeamMembers, students),
     [allTeamMembers, students],
@@ -287,10 +300,14 @@ export function useTeamRoster(
     () =>
       rowsNeedingBackfill(
         members ?? [],
-        { teacher: teacherMembers ?? [], ta: taMembers ?? [] },
+        {
+          teacher: teacherMembers ?? [],
+          hta: htaMembers ?? [],
+          ta: taMembers ?? [],
+        },
         students,
       ),
-    [members, teacherMembers, taMembers, students],
+    [members, teacherMembers, htaMembers, taMembers, students],
   )
   const backfillNeededCount = backfillNeeded.length
   // Lowercased logins of the stale rows, so the auto-sync trigger can drop a
@@ -313,6 +330,7 @@ export function useTeamRoster(
   const isError = Boolean(
     membersError ||
     teacherMembersQuery.isError ||
+    htaMembersQuery.isError ||
     taMembersQuery.isError ||
     (!pendingHidden &&
       (studentInvitesQuery.isError || studentFailedInvitesQuery.isError)),
@@ -326,6 +344,7 @@ export function useTeamRoster(
   const isLoading =
     membersLoading ||
     teacherMembersQuery.isLoading ||
+    htaMembersQuery.isLoading ||
     taMembersQuery.isLoading ||
     (!pendingHidden && studentInvitesQuery.isLoading)
 
@@ -344,6 +363,7 @@ export function useTeamRoster(
       student: teamSlug,
       teacher: teacherSlug,
       instructor: teacherSlug,
+      hta: htaSlug,
       ta: taSlug,
     },
     csvMissingCount,
@@ -352,17 +372,19 @@ export function useTeamRoster(
     backfillNeededLogins,
     orgMembersKnown,
     // isError folds in the staff-member fetches too, so a retry must re-run
-    // every team-member query (student + teacher + ta), not just the
+    // every team-member query (student + teacher + hta + ta), not just the
     // student one — otherwise a staff-team failure stays stuck in error. Also
     // refetch the staff invitation queries so a recovered permission/transient
     // failure repopulates pending.
     refetch: () => {
       void refetchMembers()
       void teacherMembersQuery.refetch()
+      void htaMembersQuery.refetch()
       void taMembersQuery.refetch()
       void studentInvitesQuery.refetch()
       void studentFailedInvitesQuery.refetch()
       void teacherInvitesQuery.refetch()
+      void htaInvitesQuery.refetch()
       void taInvitesQuery.refetch()
       void orgMembersQuery.refetch()
     },

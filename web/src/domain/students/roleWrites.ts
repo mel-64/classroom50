@@ -4,7 +4,7 @@ import {
   createGitCommit,
   createGitTree,
   ensureClassroomRoleTeam,
-  grantTeamConfigRepoWrite,
+  grantTeamConfigRepoAccess,
   readOrgMembershipState,
   removeUserFromTeam,
   setOrgMembershipRole,
@@ -157,17 +157,19 @@ export async function resolveRosterUploadPreflight(
   const { org, classroom, rows } = input
   const slugs = await resolveClassroomTeamSlugs(client, org, classroom)
 
-  const [orgMembers, studentMembers, teacherMembers, taMembers] =
+  const [orgMembers, studentMembers, teacherMembers, htaMembers, taMembers] =
     await Promise.all([
       listAllOrgMembers(client, org),
       listTeamMembers(client, org, slugs.student),
       listTeamMembers(client, org, slugs.staff.teacher),
+      listTeamMembers(client, org, slugs.staff.hta),
       listTeamMembers(client, org, slugs.staff.ta),
     ])
 
   const orgSets = memberIdentitySets(orgMembers)
   const studentSets = memberIdentitySets(studentMembers)
   const teacherSets = memberIdentitySets(teacherMembers)
+  const htaSets = memberIdentitySets(htaMembers)
   const taSets = memberIdentitySets(taMembers)
 
   const resolved: ResolvedMembership = {
@@ -177,12 +179,14 @@ export async function resolveRosterUploadPreflight(
       student: studentSets.ids,
       teacher: teacherSets.ids,
       instructor: teacherSets.ids,
+      hta: htaSets.ids,
       ta: taSets.ids,
     },
     teamLoginsByRole: {
       student: studentSets.logins,
       teacher: teacherSets.logins,
       instructor: teacherSets.logins,
+      hta: htaSets.logins,
       ta: taSets.logins,
     },
   }
@@ -227,7 +231,8 @@ export type ApplyClassroomRoleChangeResult = {
 //     half-moved-but-still-owner. If a LATER step fails after this committed,
 //     the error explicitly says the owner was revoked so the caller re-runs.
 //  2) Add to the target team (student -> classroom team; ta/teacher -> the
-//     staff team, created + granted config-repo write if missing), then promote
+//     staff team, created + granted its role's config-repo access — write for
+//     teacher/hta, read-only for ta — if missing), then promote
 //     to org owner when the target is teacher.
 //  3) Remove from EVERY currently-held classroom team that isn't the target
 //     (best-effort — a failed drop is a warning, since the target add + any
@@ -319,7 +324,7 @@ export async function applyClassroomRoleChange(
       })
     } else {
       const team = await ensureClassroomRoleTeam(client, org, classroom, toRole)
-      await grantTeamConfigRepoWrite(client, org, team.slug)
+      await grantTeamConfigRepoAccess(client, org, team.slug, toRole)
       await addUserToTeam(client, {
         org,
         teamSlug: team.slug,
@@ -411,7 +416,7 @@ export async function assignRosterMemberRole(
       ? await resolveClassroomTeamSlug(client, org, classroom)
       : (await ensureClassroomRoleTeam(client, org, classroom, role)).slug
   if (role !== "student") {
-    await grantTeamConfigRepoWrite(client, org, teamSlug)
+    await grantTeamConfigRepoAccess(client, org, teamSlug, role)
   }
 
   await addUserToTeam(client, { org, teamSlug, username, role: "member" })

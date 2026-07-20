@@ -381,6 +381,7 @@ describe("buildTeamRoster — needs-attention (CSV row on no team)", () => {
     expect(enrolledCountsByRole(rows)).toEqual({
       teacher: 0,
       instructor: 0,
+      hta: 0,
       ta: 0,
       student: 1,
     })
@@ -556,6 +557,13 @@ describe("rowsNeedingBackfill", () => {
       csvRow({ github_id: "1", username: "prof", role: "student" }),
     ])
     expect(needing.map((s) => s.username)).toEqual(["prof"])
+  })
+
+  it("flags a stale row for an hta-team member (hta is a first-class staff key)", () => {
+    const needing = rowsNeedingBackfill([], { hta: [member(2, "headta")] }, [
+      csvRow({ github_id: "2", username: "headta", role: "student" }),
+    ])
+    expect(needing.map((s) => s.username)).toEqual(["headta"])
   })
 
   it("does not flag a complete, in-sync row", () => {

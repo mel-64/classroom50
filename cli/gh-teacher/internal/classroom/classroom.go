@@ -216,9 +216,9 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 		return fmt.Errorf("create classroom team: %w", err)
 	}
 
-	// Create (or adopt) the staff teams (teacher, ta), grant each write on
-	// the config repo, and seed the acting teacher as teacher-team maintainer,
-	// mirroring the web.
+	// Create (or adopt) the staff teams (teacher, hta, ta), grant each its
+	// config-repo access (teacher/hta write, ta read-only), and seed the acting
+	// teacher as teacher-team maintainer, mirroring the web.
 	staffTeams, login, err := seedStaffTeams(client, errOut, org, shortName)
 	if err != nil {
 		return err
@@ -261,8 +261,20 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	// stdout: parseable confirmation lines. stderr: advisory hints.
 	_, _ = fmt.Fprintf(out, "%s/%s: added classroom %s (%d files)\n", org, configrepo.ConfigRepoName, shortName, len(files))
 	_, _ = fmt.Fprintf(out, "%s: classroom team %s ready\n", org, team.Slug)
-	if staffTeams != nil && staffTeams.Teacher != nil && staffTeams.TA != nil {
-		_, _ = fmt.Fprintf(out, "%s: staff teams %s, %s ready\n", org, staffTeams.Teacher.Slug, staffTeams.TA.Slug)
+	if staffTeams != nil {
+		// Name every provisioned staff-team slug in rank order (teacher, hta,
+		// ta), skipping any the block didn't record. Built from the refs rather
+		// than a hardcoded teacher/ta pair so a new staff role appears here for
+		// free.
+		var staffSlugs []string
+		for _, ref := range []*configrepo.TeamRef{staffTeams.Teacher, staffTeams.HeadTA, staffTeams.TA} {
+			if ref != nil && ref.Slug != "" {
+				staffSlugs = append(staffSlugs, ref.Slug)
+			}
+		}
+		if len(staffSlugs) > 0 {
+			_, _ = fmt.Fprintf(out, "%s: staff teams %s ready\n", org, strings.Join(staffSlugs, ", "))
+		}
 	}
 	if secret != "" {
 		_, _ = fmt.Fprintf(out, "%s: resources published at an unlisted URL (key %q); share the accept link/command from the assignment page\n", org, secret)
@@ -272,13 +284,13 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	return nil
 }
 
-// seedStaffTeams creates (or adopts) the teacher + ta teams, grants each
-// write on the config repo, and adds the acting teacher as teacher-team
-// maintainer — shared by `classroom add` and `classroom migrate`. Returns the
-// resolved acting login (empty when it couldn't be read) so the caller can drop
-// that same user from the non-teacher teams. The maintainer add is
-// best-effort: a CurrentUser/membership failure warns but doesn't fail creation
-// (the teacher can self-add via the web).
+// seedStaffTeams creates (or adopts) the staff teams (teacher, hta, ta), grants
+// each its config-repo access (teacher/hta write, ta read-only), and adds the
+// acting teacher as teacher-team maintainer — shared by `classroom add` and
+// `classroom migrate`. Returns the resolved acting login (empty when it couldn't
+// be read) so the caller can drop that same user from the non-teacher teams. The
+// maintainer add is best-effort: a CurrentUser/membership failure warns but
+// doesn't fail creation (the teacher can self-add via the web).
 func seedStaffTeams(client githubapi.Client, errOut io.Writer, org, shortName string) (*configrepo.StaffTeamsRef, string, error) {
 	staffTeams, err := configrepo.EnsureStaffTeams(client, org, shortName)
 	if err != nil {
@@ -302,20 +314,26 @@ func seedStaffTeams(client githubapi.Client, errOut io.Writer, org, shortName st
 }
 
 // dropCreatorFromNonTeacherTeams removes the acting teacher from the students
-// team and the TA team so the owner's only role is teacher — mixed roles
-// aren't allowed. Unconditional by design: GitHub auto-adds the creator on teams
-// it creates, and an owner already sitting on an adopted students/TA team is the
-// same mixed-role state we clear, so neither case should be preserved.
-// Best-effort and idempotent (RemoveTeamMembership treats 404 as success): a
-// failure warns but leaves the owner on the team, where the roster's per-role
-// badges surface it. A no-op when the login couldn't be resolved.
+// team and the non-teacher staff teams (TA, head-TA) so the owner's only role is
+// teacher — mixed roles aren't allowed. Unconditional by design: GitHub
+// auto-adds the creator on teams it creates, and an owner already sitting on an
+// adopted students/TA/HTA team is the same mixed-role state we clear, so neither
+// case should be preserved. Best-effort and idempotent (RemoveTeamMembership
+// treats 404 as success): a failure warns but leaves the owner on the team,
+// where the roster's per-role badges surface it. A no-op when the login couldn't
+// be resolved.
 func dropCreatorFromNonTeacherTeams(client githubapi.Client, errOut io.Writer, org, login, studentsSlug string, staffTeams *configrepo.StaffTeamsRef) {
 	if login == "" {
 		return
 	}
 	slugs := []string{studentsSlug}
-	if staffTeams != nil && staffTeams.TA != nil {
-		slugs = append(slugs, staffTeams.TA.Slug)
+	if staffTeams != nil {
+		if staffTeams.HeadTA != nil {
+			slugs = append(slugs, staffTeams.HeadTA.Slug)
+		}
+		if staffTeams.TA != nil {
+			slugs = append(slugs, staffTeams.TA.Slug)
+		}
 	}
 	for _, slug := range slugs {
 		if slug == "" {
