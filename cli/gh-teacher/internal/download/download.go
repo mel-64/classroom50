@@ -838,7 +838,20 @@ func refreshResultJSON(client githubapi.Client, token, apiBase, org, repo, targe
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", resultsAssetName, err)
 	}
-	if err := os.WriteFile(filepath.Join(target, resultsAssetName), historyBytes, 0o644); err != nil {
+
+	// target is a student-controlled working tree: a committed result.json /
+	// results.json symlink (materialized verbatim by git clone) would redirect
+	// these writes. os.Root confines writes to the clone (refusing symlink
+	// escape); writeGuarded replaces any pre-existing entry with a fresh regular
+	// file so an in-clone symlink/hardlink (e.g. to .git/hooks/*, which git would
+	// then execute) or a blocking FIFO can't be written through. GHSA-qx2g-vpwq-466c.
+	root, err := os.OpenRoot(target)
+	if err != nil {
+		return fmt.Errorf("open clone dir %s: %w", target, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	if err := writeGuarded(root, resultsAssetName, historyBytes); err != nil {
 		return err
 	}
 
@@ -846,8 +859,32 @@ func refreshResultJSON(client githubapi.Client, token, apiBase, org, repo, targe
 	// (first history entry with an asset).
 	for _, rec := range history {
 		if len(rec.Result) > 0 {
-			return os.WriteFile(filepath.Join(target, resultAssetName), rec.Result, 0o644)
+			return writeGuarded(root, resultAssetName, rec.Result)
 		}
+	}
+	return nil
+}
+
+// writeGuarded writes data to name inside root, never following or writing
+// through a pre-existing entry at name. os.Root already blocks a path that
+// escapes the clone; removing any existing entry first and creating with
+// O_EXCL closes the in-clone vectors os.Root does not: a symlink to
+// .git/hooks/* (→ code execution as the teacher), a hardlink to such a file
+// (Lstat can't distinguish it from a regular file), and a FIFO/socket/device
+// whose open() would block or misbehave. The result is always a fresh regular
+// file — an honest re-run's stale result.json is replaced as before. See
+// GHSA-qx2g-vpwq-466c.
+func writeGuarded(root *os.Root, name string, data []byte) error {
+	if err := root.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear %s: %w", name, err)
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", name, err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
 	}
 	return nil
 }

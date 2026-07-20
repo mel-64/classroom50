@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
@@ -925,6 +927,180 @@ func TestRefreshResultJSON(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mustWrite writes contents to path, failing the test on error.
+func mustWrite(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// mustSymlink creates newname -> oldname, skipping when the platform can't.
+func mustSymlink(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		if errors.Is(err, errors.ErrUnsupported) {
+			t.Skipf("symlinks unsupported: %v", err)
+		}
+		t.Fatalf("symlink %s -> %s: %v", newname, oldname, err)
+	}
+}
+
+// TestRefreshResultJSON_SymlinkGuard proves the sink never writes through a
+// hostile entry planted at result.json / results.json — the arbitrary-write and
+// DoS vectors in GHSA-qx2g-vpwq-466c. A student owns their repo and can commit
+// either name as a symlink, hardlink, FIFO, or directory; git materializes it on
+// clone. The write must leave any victim (inside or outside the clone) untouched,
+// must not hang, and must end with the sink as a plain regular file (the plant
+// replaced, not followed). `has-result` exercises the result.json write;
+// `no-asset` (a submit tag with no result.json asset) exercises the standalone
+// results.json write.
+func TestRefreshResultJSON_SymlinkGuard(t *testing.T) {
+	var server *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/o/has-result/releases", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"tag_name": "submit/2026-06-02T10-00-00Z",
+			"assets":   []map[string]string{{"name": "result.json", "url": server.URL + "/asset.json"}},
+		}})
+	})
+	mux.HandleFunc("/repos/o/no-asset/releases", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"tag_name": "submit/2026-06-01T14-32-05Z",
+			"assets":   []map[string]string{{"name": "other.txt", "url": "ignored"}},
+		}})
+	})
+	mux.HandleFunc("/asset.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":"classroom50/result/v1","score":99}`))
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	const safe = "SAFE-DO-NOT-OVERWRITE"
+
+	// plant places a hostile entry at <target>/<sink> and returns the victim
+	// path that must stay == safe afterwards, or skips when the OS can't create
+	// that entry type. target already exists; a .git/hooks dir is pre-created.
+	plant := func(t *testing.T, target, sink, kind string) (victim string) {
+		t.Helper()
+		switch kind {
+		case "escaping-symlink":
+			victim = filepath.Join(filepath.Dir(target), "victim.txt")
+			mustWrite(t, victim, safe)
+			mustSymlink(t, filepath.Join("..", "victim.txt"), filepath.Join(target, sink))
+		case "inclone-symlink":
+			victim = filepath.Join(target, ".git", "hooks", "post-checkout")
+			mustWrite(t, victim, safe)
+			mustSymlink(t, filepath.Join(".git", "hooks", "post-checkout"), filepath.Join(target, sink))
+		case "hardlink":
+			// A hardlink shares the victim's inode; a naive write would clobber
+			// .git/hooks/* → RCE. Lstat can't distinguish it from a regular file.
+			victim = filepath.Join(target, ".git", "hooks", "post-checkout")
+			mustWrite(t, victim, safe)
+			if err := os.Link(victim, filepath.Join(target, sink)); err != nil {
+				t.Skipf("hardlink unsupported: %v", err)
+			}
+		case "fifo":
+			// A FIFO would block WriteFile's open() forever, wedging the run.
+			// No external victim; the assertion is that the call returns.
+			mkfifoOrSkip(t, filepath.Join(target, sink))
+			victim = ""
+		default:
+			t.Fatalf("unknown kind %q", kind)
+		}
+		return victim
+	}
+
+	cases := []struct {
+		name string
+		sink string
+		repo string // fixture that drives which write fires
+		kind string
+	}{
+		{"result.json escaping symlink", resultAssetName, "has-result", "escaping-symlink"},
+		{"results.json escaping symlink", resultsAssetName, "no-asset", "escaping-symlink"},
+		{"result.json in-clone symlink to .git", resultAssetName, "has-result", "inclone-symlink"},
+		{"results.json in-clone symlink to .git", resultsAssetName, "no-asset", "inclone-symlink"},
+		{"result.json hardlink to .git hook", resultAssetName, "has-result", "hardlink"},
+		{"results.json hardlink to .git hook", resultsAssetName, "no-asset", "hardlink"},
+		{"result.json FIFO does not hang", resultAssetName, "has-result", "fifo"},
+		{"results.json FIFO does not hang", resultsAssetName, "no-asset", "fifo"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "clone")
+			if err := os.MkdirAll(filepath.Join(target, ".git", "hooks"), 0o755); err != nil {
+				t.Fatalf("mkdir clone: %v", err)
+			}
+			victim := plant(t, target, tc.sink, tc.kind)
+
+			// A hostile sink must not hang the (serial) download loop: bound the
+			// call so a blocking FIFO open fails the test instead of the suite.
+			done := make(chan error, 1)
+			go func() {
+				done <- refreshResultJSON(client, "test-token", server.URL, "o", tc.repo, target)
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("refreshResultJSON errored on a hostile %s: %v", tc.sink, err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("refreshResultJSON hung on a hostile %s (%s) — DoS", tc.sink, tc.kind)
+			}
+
+			// Core security assertion: any victim outside the write is untouched
+			// — the hostile entry was replaced, not written through.
+			if victim != "" {
+				got, readErr := os.ReadFile(victim)
+				if readErr != nil {
+					t.Fatalf("read victim: %v", readErr)
+				}
+				if string(got) != safe {
+					t.Errorf("victim overwritten through the %s: got %q, want %q", tc.kind, got, safe)
+				}
+			}
+
+			// The sink itself must now be a plain regular file (the plant was
+			// neutralized), never still a symlink/FIFO/hardlink.
+			if info, err := os.Lstat(filepath.Join(target, tc.sink)); err != nil {
+				t.Fatalf("lstat sink: %v", err)
+			} else if !info.Mode().IsRegular() {
+				t.Errorf("sink %s is still %v; want a regular file", tc.sink, info.Mode())
+			}
+		})
+	}
+
+	t.Run("both sinks hostile in one clone leaves both victims intact", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "clone")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatalf("mkdir clone: %v", err)
+		}
+		root := filepath.Dir(target)
+		vA := filepath.Join(root, "victimA.txt")
+		vB := filepath.Join(root, "victimB.txt")
+		mustWrite(t, vA, safe)
+		mustWrite(t, vB, safe)
+		mustSymlink(t, filepath.Join("..", "victimA.txt"), filepath.Join(target, resultsAssetName))
+		mustSymlink(t, filepath.Join("..", "victimB.txt"), filepath.Join(target, resultAssetName))
+
+		// has-result writes results.json (first) then result.json; both are
+		// symlinks, so neither victim may change regardless of write ordering.
+		_ = refreshResultJSON(client, "test-token", server.URL, "o", "has-result", target)
+		for _, v := range []string{vA, vB} {
+			got, err := os.ReadFile(v)
+			if err != nil {
+				t.Fatalf("read %s: %v", v, err)
+			}
+			if string(got) != safe {
+				t.Errorf("victim %s overwritten: got %q, want %q", v, got, safe)
+			}
+		}
+	})
 }
 
 func TestListAllSubmitReleases(t *testing.T) {
