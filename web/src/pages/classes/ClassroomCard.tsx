@@ -1,5 +1,5 @@
 import { ConfirmModal } from "@/components/modals"
-import { Button, Card } from "@/components/ui"
+import { Button, Card, EmphasisLtr } from "@/components/ui"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { GitHubAPIError } from "@/github-core/errors"
 import { useArchiveClassroom } from "@/hooks/mutations/useArchiveClassroom"
@@ -24,7 +24,7 @@ import {
   UsersRound,
 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 type ClassroomCardProps = {
   summary: ClassroomSummary
@@ -200,7 +200,7 @@ function ClassroomMenu({
   const deleteMutation = useDeleteClassroom(org, slug)
 
   const menuItem =
-    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200"
+    "flex w-full items-center gap-2 px-3 py-2 text-start text-sm hover:bg-base-200"
 
   return (
     <div ref={containerRef} className="relative">
@@ -234,7 +234,7 @@ function ClassroomMenu({
           ref={menuRef}
           role="menu"
           onKeyDown={onMenuKeyDown}
-          className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-box border border-base-300 bg-base-100 py-1 shadow-lg"
+          className="absolute end-0 z-20 mt-1 w-52 overflow-hidden rounded-box border border-base-300 bg-base-100 py-1 shadow-lg"
         >
           <li role="none">
             <Link
@@ -308,19 +308,13 @@ function ClassroomMenu({
             : t("classes.archiveConfirmTitle")
         }
         description={
-          archived ? (
-            <>
-              {t("classes.unarchiveBody_prefix")}{" "}
-              <span className="font-semibold text-base-content">{slug}</span>{" "}
-              {t("classes.unarchiveBody_suffix")}
-            </>
-          ) : (
-            <>
-              {t("classes.archiveBody_prefix")}{" "}
-              <span className="font-semibold text-base-content">{slug}</span>
-              {t("classes.archiveBody_suffix")}
-            </>
-          )
+          <Trans
+            i18nKey={archived ? "classes.unarchiveBody" : "classes.archiveBody"}
+            values={{ classroom: slug }}
+            components={{
+              classroom: <EmphasisLtr className="text-base-content" />,
+            }}
+          />
         }
         confirmLabel={archived ? t("classes.unarchive") : t("classes.archive")}
         cancelLabel={t("common.cancel")}
@@ -363,13 +357,14 @@ function ClassroomMenu({
         open={deleteOpen}
         title={t("classes.deleteClassroomTitle")}
         description={
-          <>
-            {t("classes.deleteClassroomBody_1")}{" "}
-            <span className="font-semibold text-base-content">{slug}</span>{" "}
-            {t("classes.deleteClassroomBody_2")}{" "}
-            <span className="font-semibold text-base-content">{org}</span>{" "}
-            {t("classes.deleteClassroomBody_3")}
-          </>
+          <Trans
+            i18nKey="classes.deleteClassroomBody"
+            values={{ classroom: slug, org }}
+            components={{
+              classroom: <EmphasisLtr className="text-base-content" />,
+              org: <EmphasisLtr className="text-base-content" />,
+            }}
+          />
         }
         confirmText={`${org}/${slug}`}
         confirmLabel={t("classes.deleteClassroomConfirm")}

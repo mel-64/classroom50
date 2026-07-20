@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import {
@@ -18,6 +18,7 @@ import {
   Input,
   Select,
   Spinner,
+  rtlFlip,
 } from "@/components/ui"
 import PageShell from "@/components/PageShell"
 import PageHeader, { OrgLink } from "@/components/PageHeader"
@@ -375,13 +376,19 @@ const OrgMembersPage = () => {
             title={t("orgMembers.heading")}
             subtitle={
               <>
-                {t("orgMembers.subtitlePrefix")}{" "}
-                <OrgLink
-                  org={org}
-                  href={githubOrgPeopleUrl(org ?? "")}
-                  title={t("common.openOrgOnGitHub", { org })}
-                />{" "}
-                {t("orgMembers.subtitleSuffix")}
+                <Trans
+                  i18nKey="orgMembers.subtitle"
+                  values={{ org: org ?? "" }}
+                  components={{
+                    orgLink: (
+                      <OrgLink
+                        org={org}
+                        href={githubOrgPeopleUrl(org ?? "")}
+                        title={t("common.openOrgOnGitHub", { org })}
+                      />
+                    ),
+                  }}
+                />
                 {org && (
                   <a
                     href={githubOrgPeopleUrl(org)}
@@ -587,7 +594,7 @@ const OrgMembersPage = () => {
                         <ClassificationBadge row={row} isOwner={isOwner(row)} />
                         <ChevronRight
                           aria-hidden="true"
-                          className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70"
+                          className={`size-4 text-base-content/30 transition-transform duration-150 ltr:group-hover/row:translate-x-0.5 rtl:group-hover/row:-translate-x-0.5 group-hover/row:text-base-content/70 ${rtlFlip}`}
                         />
                       </div>
                     </ClickableRow>

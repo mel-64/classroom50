@@ -1,11 +1,11 @@
 import { useId, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { AlertTriangle, ChevronRight, UserPlus, X } from "lucide-react"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
-import { Badge, Button, Modal } from "@/components/ui"
+import { Badge, Button, EmphasisLtr, Modal, rtlFlip } from "@/components/ui"
 import { removeMemberFromOrg } from "@/domain/orgMembers/removeMemberFromOrg"
 import {
   ClassificationBadge,
@@ -181,7 +181,7 @@ const MemberDetailModal = ({
                   <span className="font-medium">
                     {access.classroom}
                     {access.archived ? (
-                      <Badge size="xs" ghost className="ml-2">
+                      <Badge size="xs" ghost className="ms-2">
                         {t("orgMembers.archived")}
                       </Badge>
                     ) : null}
@@ -189,7 +189,7 @@ const MemberDetailModal = ({
                       <Badge
                         size="xs"
                         tone="warning"
-                        className="ml-2 gap-1"
+                        className="ms-2 gap-1"
                         title={t("orgMembers.unprovisionedAccessTitle")}
                       >
                         <AlertTriangle
@@ -208,7 +208,7 @@ const MemberDetailModal = ({
                     ) : null}
                     <ChevronRight
                       aria-hidden="true"
-                      className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/70"
+                      className={`size-4 text-base-content/30 transition-transform duration-150 ltr:group-hover/cls:translate-x-0.5 rtl:group-hover/cls:-translate-x-0.5 group-hover/cls:text-base-content/70 ${rtlFlip}`}
                     />
                   </span>
                 </Link>
@@ -225,11 +225,11 @@ const MemberDetailModal = ({
           row.github_id ? (
             <div className="rounded-box border border-warning/30 bg-warning/5 p-4 text-sm">
               <p className="text-base-content/80">
-                {t("orgMembers.notMemberPrefix", { label })}{" "}
-                <span className="font-semibold">
-                  {t("orgMembers.notMemberEmphasis")}
-                </span>
-                {t("orgMembers.notMemberSuffix")}
+                <Trans
+                  i18nKey="orgMembers.notMember"
+                  values={{ label }}
+                  components={{ emphasis: <span className="font-semibold" /> }}
+                />
               </p>
               <Button
                 variant="primary"
@@ -286,27 +286,29 @@ const MemberDetailModal = ({
           <div className="rounded-box border border-error/30 bg-error/5 p-4 text-sm">
             <p className="text-base-content/80">
               {activeClassrooms.length > 0 ? (
-                <>
-                  {t("orgMembers.confirmUnenrollPrefix", { label })}{" "}
-                  <span className="font-semibold">
-                    {t("orgMembers.confirmClassroomCount", {
-                      count: activeClassrooms.length,
-                    })}
-                  </span>{" "}
-                  {t("orgMembers.confirmUnenrollMid", {
+                <Trans
+                  i18nKey="orgMembers.confirmUnenroll"
+                  count={activeClassrooms.length}
+                  values={{
+                    label,
+                    org,
                     classrooms: activeClassrooms
                       .map((c) => c.classroom)
                       .join(", "),
-                  })}{" "}
-                  <span className="font-semibold">{org}</span>{" "}
-                  {t("orgMembers.confirmUnenrollSuffix")}
-                </>
+                  }}
+                  components={{
+                    count: <span className="font-semibold" />,
+                    org: <EmphasisLtr />,
+                  }}
+                />
               ) : (
-                <>
-                  {t("orgMembers.confirmRemovePrefix", { label })}{" "}
-                  <span className="font-semibold">{org}</span>{" "}
-                  {t("orgMembers.confirmRemoveSuffix")}
-                </>
+                <Trans
+                  i18nKey="orgMembers.confirmRemove"
+                  values={{ label, org }}
+                  components={{
+                    org: <EmphasisLtr />,
+                  }}
+                />
               )}
             </p>
             <div className="mt-3 flex justify-end gap-2">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 import { ConfirmModal } from "@/components/modals"
 import {
@@ -76,15 +76,16 @@ export function SkeletonOverwriteModal({
       description={
         <>
           <p>{t("orgSettings.overwrite.body", { count })}</p>
-          <ul className="mt-2 list-disc space-y-0.5 pl-5 font-mono text-xs">
+          <ul className="mt-2 list-disc space-y-0.5 ps-5 font-mono text-xs">
             {paths?.map((p) => (
               <li key={p}>{p}</li>
             ))}
           </ul>
           <p className="mt-3">
-            {t("orgSettings.overwrite.warning_prefix")}{" "}
-            <strong>{t("orgSettings.overwrite.keepMine")}</strong>{" "}
-            {t("orgSettings.overwrite.warning_suffix")}
+            <Trans
+              i18nKey="orgSettings.overwrite.warning"
+              components={{ keepMine: <strong /> }}
+            />
           </p>
         </>
       }

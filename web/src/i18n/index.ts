@@ -10,7 +10,9 @@ import {
   getStoredLang,
   hydratePacks,
   refreshInstalledPacks,
+  resolveStartupLang,
 } from "./customLocale"
+import { applyDocumentDirection } from "./direction"
 
 // Single i18next instance. English is bundled as the base; custom packs are
 // registered at runtime (see customLocale.ts). No provider needed.
@@ -33,6 +35,22 @@ void i18n.use(initReactI18next).init({
 const installed = hydratePacks()
 const stored = getStoredLang()
 
+// Keep <html dir>/<html lang> in step with the active language. Registered
+// before the changeLanguage chain below so every switch — startup activation,
+// deep links, and user selections — updates document direction. The explicit
+// call seeds the direction for the language that will actually activate — NOT
+// i18n.language, which is still the init default ("en") at this point: seeding
+// from it would flip the anti-flash script's `rtl` back to `ltr` and rely on
+// the changeLanguage below racing paint to restore it. resolveStartupLang also
+// settles the persisted-but-uninstalled case (pack was removed since last
+// visit): the UI will render English, so `ltr` is the correct end state even
+// though the anti-flash script guessed `rtl` from the stale stored code.
+// Skipped without a DOM (node tests import this module).
+if (typeof document !== "undefined") {
+  i18n.on("languageChanged", applyDocumentDirection)
+  applyDocumentDirection(resolveStartupLang(stored, installed))
+}
+
 // Activate the stored language, THEN apply any `?lang=<code>` deep link, in that
 // order. A `?lang=` deep link sets the active language and persists it (it
 // overrides the stored choice going forward, not just for this visit), so it
@@ -42,8 +60,9 @@ const stored = getStoredLang()
 // leaving the screen and localStorage disagreeing. Fire-and-forget the chain so
 // startup isn't blocked; both steps swallow errors, so a shared link is safe.
 void (async () => {
-  if (stored !== BASE_LANG && installed.includes(stored)) {
-    await i18n.changeLanguage(stored)
+  const startupLang = resolveStartupLang(stored, installed)
+  if (startupLang !== BASE_LANG) {
+    await i18n.changeLanguage(startupLang)
   }
   await applyLangFromQuery()
   // Silently pull any newer registry packs (runs last so a just-installed

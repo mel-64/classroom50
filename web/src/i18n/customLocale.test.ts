@@ -15,6 +15,7 @@ import {
   flattenBundle,
   hashBundle,
   inferLangCode,
+  installPack,
   missingKeys,
   normalizeLangCode,
   packSources,
@@ -23,6 +24,7 @@ import {
   prepareFromUrl,
   refreshInstalledPacks,
   resetRegistryCache,
+  resolveStartupLang,
   shareUrlForLang,
   subscribeToPackUpdates,
 } from "./customLocale"
@@ -70,6 +72,48 @@ describe("parseBundle", () => {
   it("rejects input over the byte cap before parsing", () => {
     const huge = JSON.stringify({ k: "a".repeat(MAX_PACK_BYTES + 1) })
     expect(() => parseBundle(huge)).toThrow(/too large/)
+  })
+
+  // <Trans> merges attributes from pack-controlled marker tags onto the mapped
+  // component (pack side wins), so an attribute-bearing tag in a hostile pack
+  // can repoint a trusted link's href. Bare markers only.
+  it("rejects markup tags carrying attributes", () => {
+    for (const hostile of [
+      '{"k":"click <repoLink href=\\"https://evil.example\\">here</repoLink>"}',
+      '{"k":"x <a title=\\"t\\">y</a>"}',
+      '{"k":"x <span onmouseover=x>y</span>"}',
+      // Slash-separated attribute: html-parse-stringify treats `/` as an
+      // attribute separator and extracts a clean href, so this must be rejected
+      // even though there's no space between the tag name and the attribute.
+      '{"k":"click <repoLink/ href=\\"https://evil.example\\">here</repoLink>"}',
+      '{"k":"x <br/ href=\\"https://evil.example\\">y"}',
+      // Whitespace other than a space (newline/tab) between name and attribute.
+      '{"k":"x <a\\nhref=\\"https://evil.example\\">y</a>"}',
+      '{"k":"x <a\\thref=\\"https://evil.example\\">y</a>"}',
+      // A hostile attribute tag following a legitimate bare marker in the same
+      // value must still be caught.
+      '{"k":"<repo>{{repo}}</repo> <a href=\\"https://evil.example\\">x</a>"}',
+    ]) {
+      expect(() => parseBundle(hostile)).toThrow(/attributes/)
+    }
+  })
+
+  it("accepts bare markers including spaced self-closing tags", () => {
+    expect(
+      parseBundle('{"k":"No PR for <repo>{{repo}}</repo> yet <br />"}'),
+    ).toEqual({ k: "No PR for <repo>{{repo}}</repo> yet <br />" })
+  })
+
+  it("accepts non-markup angle brackets and adjacent bare markers", () => {
+    // "<owner>/<repo>" is two bare marker tags; "< 1 day" is not a tag at all.
+    expect(
+      parseBundle(
+        '{"a":"<owner>{{owner}}</owner>/<repo>{{repo}}</repo>","b":"less than < 1 day"}',
+      ),
+    ).toEqual({
+      a: "<owner>{{owner}}</owner>/<repo>{{repo}}</repo>",
+      b: "less than < 1 day",
+    })
   })
 })
 
@@ -732,6 +776,26 @@ describe("refreshInstalledPacks", () => {
     ).toBe(true)
   })
 
+  it("preserves an unknown pack field across a read-modify-write", async () => {
+    // A field written by a newer release (packSchema is .loose()) must survive
+    // an older release rewriting the store, so forward-compat data isn't lost.
+    const store = stubWindow({
+      [PACKS_STORAGE_KEY]: JSON.stringify({
+        de: {
+          code: "de",
+          source: "user",
+          bundle: { "nav.roleStudent": "Studentin" },
+          futureField: { note: "written by a newer release" },
+        },
+      }),
+    })
+    // installPack does a read-modify-write of the whole store (here via a
+    // no-op install of a second pack), which must not strip de's unknown field.
+    installPack("fr", { "nav.roleStudent": "Étudiante" })
+    const packs = readPacks(store) as Record<string, { futureField?: unknown }>
+    expect(packs.de.futureField).toEqual({ note: "written by a newer release" })
+  })
+
   it("leaves a user-sourced pack untouched even when its code is in the registry", async () => {
     const store = stubWindow({
       [PACKS_STORAGE_KEY]: JSON.stringify({
@@ -1028,5 +1092,25 @@ describe("packSources", () => {
   it("returns an empty map when no packs are stored", () => {
     stubStore({})
     expect(packSources()).toEqual({})
+  })
+})
+
+describe("resolveStartupLang", () => {
+  // Direction seeding at startup (i18n/index.ts) reads this BEFORE the
+  // changeLanguage chain runs; these cases pin the contract that the seed and
+  // the chain agree on which language actually activates.
+  it("returns the stored language when its pack is installed", () => {
+    expect(resolveStartupLang("ar", ["ar", "de"])).toBe("ar")
+  })
+
+  it("falls back to the base language when the stored pack is gone", () => {
+    // Persisted-but-uninstalled: the anti-flash script guessed rtl from the
+    // stale stored code, but the UI will render English — ltr is correct.
+    expect(resolveStartupLang("ar", [])).toBe("en")
+    expect(resolveStartupLang("he", ["de"])).toBe("en")
+  })
+
+  it("returns the base language for a stored base-language choice", () => {
+    expect(resolveStartupLang("en", ["ar"])).toBe("en")
   })
 })

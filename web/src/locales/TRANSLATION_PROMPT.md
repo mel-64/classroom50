@@ -39,9 +39,11 @@ Translate the JSON **values** in `en.json` into the target language (locale code
    set of keys** as the input — no omissions, even for values you leave in English.
    Translate only the string values. Return valid JSON with the same shape; every
    leaf value must be a string.
-2. **Never drop, add, rename, or reorder placeholders.** Keep every
+2. **Never drop, add, rename, or alter the text inside placeholders.** Keep every
    `{{placeholder}}` **verbatim** — identical name, identical count per value. They
    are substituted at runtime (usernames, org/repo/classroom names, counts, dates).
+   A placeholder may **move** to wherever the target grammar needs it — position
+   is free, the token itself is not.
    Never translate or alter text inside `{{ }}`.
 3. **Do not translate** GitHub-sourced identifiers or code: usernames,
    org/repo/classroom names, slugs, `classroom50`, branch names like `main`, tokens
@@ -50,36 +52,40 @@ Translate the JSON **values** in `en.json` into the target language (locale code
    like code.
 4. **Plurals:** keys ending in `_one` / `_other` are i18next plural forms. If your
    language has no plural distinction, give both the same translation. If your
-   language needs other forms (`_zero`, `_few`, `_many`, …), add those sibling keys
-   for the same base key — but still never remove the existing ones.
+   language needs other forms (`_zero`, `_few`, `_many`, …), you **must** add those
+   sibling keys for the same base key — i18next does not fall back to your
+   `_other` for a missing category; it renders **English** for those counts
+   (e.g. Arabic without `_few` shows English for counts 3–10). Arabic needs all
+   of `_zero`/`_one`/`_two`/`_few`/`_many`/`_other`; Hebrew needs
+   `_one`/`_two`/`_other`; Russian/Polish/Czech need `_one`/`_few`/`_many`/`_other`.
+   Never remove the existing `_one`/`_other` keys.
 
-## Concatenated sentence fragments — MOST IMPORTANT
+## Inline markup tags — MOST IMPORTANT
 
-Some sentences are **split across sibling keys** and joined at runtime with an
-interpolated value **in between**. Keys ending in `_prefix`, `_from`, `_middle`,
-`_suffix`, `_emphasis`, `_link`, and numbered parts (`_1`, `_2`, `_3`, …) are
-assembled **in order**, with a value (org name, `{{classroom}}`, `classroom50`, a
-link, etc.) inserted at each join.
+Some values contain **HTML-like markers** alongside `{{placeholders}}`, e.g.:
 
-For each such group:
+```json
+"emptyBody": "No Feedback PR has been opened for <repo>{{repo}}</repo> yet."
+```
 
-1. **Reconstruct the full English sentence**, using a marker for each injected
-   value, e.g. `prefix` + `[VALUE]` + `from` + `[VALUE]` + `suffix`.
-2. **Translate the whole sentence naturally** in the target language.
-3. **Split it back** into the same fragments so that, when rejoined with the value
-   at each boundary, it reads grammatically. The value's position is **fixed by the
-   code** and cannot be moved — choose fragment wording that works with the value
-   where it lands.
-4. **Do not repeat a word/verb** across the prefix and suffix (a common error), and
-   don't leave a fragment that only parses in English word order.
-5. If your language would naturally reorder the injected value, adapt the
-   surrounding fragments (particles, prepositions, measure words) so the fixed
-   position still reads correctly. If a clean split is impossible, put the whole
-   phrase in one fragment and leave the other fragment as an empty string (`""`)
-   rather than emit a broken sentence.
+These are react-i18next `<Trans>` component tags: the app replaces each tag pair
+with a styled element (a link, a monospace repo name, an emphasized word) at
+runtime. For each such value:
 
-Read each reassembled group aloud with a sample value substituted to confirm it is
-grammatical.
+1. **Keep every tag verbatim** — same tag names, same open/close/self-closing
+   form, same count, same nesting. Never translate, rename, drop, or add tags
+   (`<repo>` stays `<repo>`, never `<dépôt>`).
+2. **Reorder freely.** Like a bare placeholder, a tagged span can move anywhere
+   in the sentence — put it wherever the target grammar wants it, together with
+   its content.
+3. **Translate the content inside a tag** when it is prose (e.g. link text like
+   `<link>accept it</link>`), but leave it untouched when it is a
+   `{{placeholder}}` or code.
+4. Adapt the surrounding words (particles, prepositions, measure words) to the
+   tagged span's final position so the sentence reads naturally.
+
+Read each translated value aloud with a sample value substituted for the
+placeholder to confirm it is grammatical.
 
 ## GitHub UI label consistency
 
@@ -114,7 +120,7 @@ python verify_locale.py <CODE>.json
 ```
 
 It compares the pack against `en.json` and fails loudly on any missing/extra key,
-non-string value, or placeholder mismatch. Do not ship a pack that does not
-`PASS`. This mirrors the app's own `missingKeys` / `coverage` validation in
+non-string value, placeholder mismatch, or markup-tag mismatch. Do not ship a
+pack that does not `PASS`. This mirrors the app's own `missingKeys` / `coverage` validation in
 [`../i18n/customLocale.ts`](../i18n/customLocale.ts), so a passing pack also
 installs cleanly.

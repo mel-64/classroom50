@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { AnimatedAlert, Button } from "@/components/ui"
+import { AnimatedAlert, Button, rtlFlip } from "@/components/ui"
 import { useLanguage } from "@/hooks/useLanguage"
 import { useLanguageRegistry } from "@/hooks/useLanguageRegistry"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
@@ -456,7 +456,7 @@ export const LanguageSwitcher = ({
               <span className="text-xs font-semibold text-base-content/70">
                 {t("language.previewSampleLabel")}
               </span>
-              <ul className="list-disc pl-5 text-sm text-base-content/80">
+              <ul className="list-disc ps-5 text-sm text-base-content/80">
                 {preview.sample.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}
@@ -524,7 +524,7 @@ const AccordionSection = ({
       onClick={(e) => onToggle(e, section)}
     >
       <ChevronRight
-        className={`size-4 transition-transform ${open ? "rotate-90" : ""}`}
+        className={`size-4 transition-transform ${rtlFlip} ${open ? "rotate-90" : ""}`}
         aria-hidden="true"
       />
       {title}

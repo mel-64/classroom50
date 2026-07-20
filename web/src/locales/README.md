@@ -16,9 +16,9 @@ file or pasting a URL to it.
 
 An LLM does this well. Use the ready-made prompt in
 [`TRANSLATION_PROMPT.md`](./TRANSLATION_PROMPT.md) — it is language-agnostic and
-encodes the rules that matter here (keys/placeholders preserved, concatenated
-`_prefix`/`_suffix` fragments reassembled for the target word order, GitHub UI
-labels kept findable, consistent terminology).
+encodes the rules that matter here (keys/placeholders preserved, inline
+`<tag>…</tag>` markup kept verbatim while reordering for the target word order,
+GitHub UI labels kept findable, consistent terminology).
 
 ### Example: translating with an agent
 
@@ -40,8 +40,8 @@ The agent should then:
 
    Do not ship a pack that does not print `RESULT: PASS`. The checker
    ([`verify_locale.py`](./verify_locale.py)) flags any dropped/added/renamed
-   key, non-string value, or placeholder mismatch — the failure modes that
-   silently break a pack. It mirrors the installer's own validation, so a
+   key, non-string value, placeholder mismatch, or markup-tag mismatch — the
+   failure modes that silently break a pack. It mirrors the installer's own validation, so a
    passing pack also installs cleanly.
 
 ### Writing translatable strings
@@ -69,10 +69,10 @@ app for coverage problems:
 
 ```bash
 python web/src/locales/audit_i18n.py            # report
-python web/src/locales/audit_i18n.py --strict   # also fail on dead/hardcoded
+python web/src/locales/audit_i18n.py --strict   # also fail on dead/physical/hardcoded
 ```
 
-It reports three things:
+It reports five things:
 
 - **MISSING keys** — a `t("...")` in code whose key isn't in `en.json` (renders
   the raw key; always a bug). Fails the run. Recognizes double/single-quoted and
@@ -85,6 +85,17 @@ It reports three things:
   string constant (`labelKey`/`titleKey`/`what`/`why`/…) or a dynamic
   ``t(`prefix.${x}`)`` prefix. These waste translator effort — every pack
   translates a string that never renders. Warning; fails only under `--strict`.
+- **SPLIT keys** — keys using the retired `_prefix`/`_suffix`/`_1…` fragment
+  convention that stitched sentences together in JSX (forces English word
+  order on every language and breaks RTL; sentences are single keys with
+  `{{placeholders}}` and `<tag>` markers instead). camelCase tails
+  (`fooPrefix`/`fooSuffix`) are the same disease with different casing and are
+  flagged too. Always fails the run.
+- **PHYSICAL directional classes** — Tailwind utilities pinning a physical
+  edge (`ml-`/`pr-`/`left-`/`text-left`/…) that don't mirror under
+  `dir="rtl"`; the CI backstop behind the eslint rule in
+  `web/src/eslint/directionalClassRule.ts`. A same-line `physical-ok` comment
+  exempts a deliberate physical edge. Warning; fails only under `--strict`.
 - **HARDCODED strings** — user-facing literals that bypass i18n entirely
   (prose in `aria-label`/`alt`/`title`/`placeholder`, or `setError`/`toast`
   calls), so **no pack can ever translate them.** Heuristic; warning, fails
@@ -155,7 +166,7 @@ until you delete them there by hand. To fully retire a language, remove it from
 
 Because CI only ever touches the keys whose English changed, **hand edits to a
 published pack survive verbatim.** Anyone can open a PR against the translations
-repo to fix a wording, adjust a fragment, or add a plural variant; once merged,
+repo to fix a wording, reorder a tagged span, or add a plural variant; once merged,
 CI will never overwrite that key on later runs — it only re-touches a key if its
 **English source** later changes (a reworded `en.json` value), and only adds
 keys that are genuinely new. This makes the translations repo the place to

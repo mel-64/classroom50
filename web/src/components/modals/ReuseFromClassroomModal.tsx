@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
@@ -8,7 +8,7 @@ import {
   ReuseModalShell,
   reuseSlugStatus,
 } from "@/components/modals/ReuseModalShell"
-import { FormField, Input, Select } from "@/components/ui"
+import { EmphasisLtr, FormField, Input, Select } from "@/components/ui"
 
 // Reuse an assignment FROM any classroom INTO the current one — the "pull"
 // counterpart to the per-row "push" reuse on the assignments table. Opened from
@@ -90,13 +90,13 @@ export const ReuseFromClassroomModal = ({
       dialogRef={dialogRef}
       title={t("components.modals.reuseFromClassroom.title")}
       description={
-        <>
-          {t("components.modals.reuseFromClassroom.description_prefix", {
-            org,
-          })}{" "}
-          <span className="font-semibold text-base-content">{classroom}</span>
-          {t("components.modals.reuseFromClassroom.description_suffix")}
-        </>
+        <Trans
+          i18nKey="components.modals.reuseFromClassroom.description"
+          values={{ org, classroom }}
+          components={{
+            classroom: <EmphasisLtr className="text-base-content" />,
+          }}
+        />
       }
       isPending={reuse.isPending}
       warning={reuse.warning}

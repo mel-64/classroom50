@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { ExternalLink, Send, UserPlus, X } from "lucide-react"
 
 import Avatar from "@/components/avatar"
@@ -33,7 +33,7 @@ import {
   STATE_BADGE_TONE,
   STATE_LABEL_KEY,
 } from "@/util/classroomRoleUI"
-import { Badge, Button, Modal, Select } from "@/components/ui"
+import { Badge, Button, EmphasisLtr, Modal, Select } from "@/components/ui"
 
 // Roster-owned detail modal (single native <dialog>), opened by clicking a
 // roster row. Shares the identity header with the Org Members modal; everything
@@ -627,13 +627,14 @@ const RosterMemberModal = ({
             {confirmingUnenroll ? (
               <div className="flex flex-col gap-3 rounded-box border border-error/30 bg-error/5 p-4 text-sm">
                 <p className="text-base-content/80">
-                  {t("students.unenrollBodyPrefix")}{" "}
-                  <span className="font-semibold text-base-content">
-                    {label}
-                  </span>{" "}
-                  {t("students.unenrollBodyFrom")}{" "}
-                  <span className="font-semibold text-base-content">{org}</span>{" "}
-                  {t("students.unenrollBodySuffix", { classroom })}
+                  <Trans
+                    i18nKey="students.unenrollBody"
+                    values={{ label, org, classroom }}
+                    components={{
+                      label: <EmphasisLtr className="text-base-content" />,
+                      org: <EmphasisLtr className="text-base-content" />,
+                    }}
+                  />
                 </p>
                 <div className="flex justify-end gap-2">
                   <Button

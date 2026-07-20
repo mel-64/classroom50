@@ -1,10 +1,16 @@
 import { AlertTriangle, UserPlus } from "lucide-react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { GitHubAPIError } from "@/github-core/errors"
 import { isDefiniteOutageError } from "@/lib/githubHealth"
 import { GitHubStatusNote } from "@/components/GitHubStatusNote"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
-import { Card, CopyableDetails, Button, Badge } from "@/components/ui"
+import {
+  Card,
+  CopyableDetails,
+  Button,
+  Badge,
+  EmphasisLtr,
+} from "@/components/ui"
 import type { BadgeTone } from "@/components/ui"
 
 // Distinct membership-failure causes the student flow (onboarding + accept) can
@@ -170,17 +176,17 @@ export const MembershipError = ({
         <h1 className="mt-6 text-2xl font-bold">{t(titleKey)}</h1>
         <p className="mt-2 text-base text-base-content/70">
           {cause === "ssoWithUrl" || cause === "ssoUrlless" ? (
-            <>
-              {t("membership.ssoRequired.body_prefix")}{" "}
-              <span className="font-bold">{org}</span>{" "}
-              {t("membership.ssoRequired.body_suffix")}
-            </>
+            <Trans
+              i18nKey="membership.ssoRequired.body"
+              values={{ org }}
+              components={{ org: <EmphasisLtr className="font-bold" /> }}
+            />
           ) : cause === "notAMember" ? (
-            <>
-              {t("membership.notAMember.body_prefix")}{" "}
-              <span className="font-bold">{org}</span>{" "}
-              {t("membership.notAMember.body_suffix")}
-            </>
+            <Trans
+              i18nKey="membership.notAMember.body"
+              values={{ org }}
+              components={{ org: <EmphasisLtr className="font-bold" /> }}
+            />
           ) : (
             t("membership.generic.body")
           )}

@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router"
 import { ChevronDown, Copy, Plus } from "lucide-react"
 import { useMemo, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
 import AssignmentsToolbar from "@/pages/assignments/AssignmentsToolbar"
@@ -12,7 +12,7 @@ import {
   type AssignmentFilters,
   type AssignmentSort,
 } from "@/pages/assignments/assignmentList"
-import { Badge, Button } from "@/components/ui"
+import { Badge, Button, EmphasisLtr } from "@/components/ui"
 import { NoSearchResults } from "@/components/list"
 import Breadcrumb from "@/components/breadcrumb"
 import PageHeader from "@/components/PageHeader"
@@ -58,7 +58,7 @@ const NewAssignmentButton = ({
           <Button
             variant="primary"
             tabIndex={0}
-            className="join-item h-full border-l border-primary-content/20 px-2"
+            className="join-item h-full border-s border-primary-content/20 px-2"
             aria-label={t("assignments.newButton.moreOptions")}
           >
             <ChevronDown aria-hidden="true" className="size-4" />
@@ -177,15 +177,18 @@ export const TeacherAssignmentsView = ({
       />
       {archived ? (
         <ArchivedClassroomNotice>
-          {t("assignments.archivedNotice_prefix")}{" "}
-          <Link
-            className="link"
-            to="/$org/$classroom/edit"
-            params={{ org, classroom }}
-          >
-            {t("assignments.archivedNotice_link")}
-          </Link>{" "}
-          {t("assignments.archivedNotice_suffix")}
+          <Trans
+            i18nKey="assignments.archivedNotice"
+            components={{
+              settingsLink: (
+                <Link
+                  className="link"
+                  to="/$org/$classroom/edit"
+                  params={{ org, classroom }}
+                />
+              ),
+            }}
+          />
         </ArchivedClassroomNotice>
       ) : emptyRoster.show ? (
         <EmptyRosterNotice
@@ -241,11 +244,11 @@ const StudentAssignmentsView = ({
       <PageHeader
         title={t("assignments.studentHeading")}
         subtitle={
-          <>
-            {t("assignments.studentViewAll_prefix")}{" "}
-            <span className="font-bold">{classroom}</span>{" "}
-            {t("assignments.studentViewAll_suffix")}
-          </>
+          <Trans
+            i18nKey="assignments.studentViewAll"
+            values={{ classroom }}
+            components={{ classroom: <EmphasisLtr className="font-bold" /> }}
+          />
         }
       />
       <StudentAssignmentList org={org} classroom={classroom} />

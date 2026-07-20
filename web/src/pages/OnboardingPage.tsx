@@ -7,7 +7,14 @@ import {
   UserPlus,
 } from "lucide-react"
 import { Spinner } from "@/components/Spinner"
-import { Badge, Button, Card, RouterButton } from "@/components/ui"
+import {
+  Badge,
+  Button,
+  Card,
+  EmphasisLtr,
+  RouterButton,
+  rtlFlip,
+} from "@/components/ui"
 import {
   MembershipError,
   classifyMembershipError,
@@ -15,7 +22,7 @@ import {
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { Link, useParams, useSearch, useRouter } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { useAcceptAndVerifyMembership } from "@/hooks/mutations/useAcceptAndVerifyMembership"
@@ -31,7 +38,7 @@ const OnboardNavbar = () => {
         <div className="flex p-6 text-lg font-bold">
           <GraduationCap
             aria-hidden="true"
-            className="size-8 text-primary mr-2"
+            className="size-8 text-primary me-2"
           />{" "}
           {t("nav.appName")}
         </div>
@@ -79,9 +86,13 @@ const NotInvited = ({
             {t("getStarted.notInvited.title")}
           </h1>
           <p className="mt-2 text-base text-base-content/70">
-            {t("getStarted.notInvited.body_prefix")}{" "}
-            <span className="font-semibold text-base-content">{org}</span>{" "}
-            {t("getStarted.notInvited.body_suffix")}
+            <Trans
+              i18nKey="getStarted.notInvited.body"
+              values={{ org }}
+              components={{
+                org: <EmphasisLtr className="text-base-content" />,
+              }}
+            />
           </p>
         </div>
 
@@ -95,11 +106,13 @@ const NotInvited = ({
                 {t("getStarted.notInvited.waitingTitle")}
               </h2>
               <p className="mt-2 leading-5 text-sm text-base-content/70">
-                {t("getStarted.notInvited.waitingBody_prefix")}{" "}
-                <span className="font-semibold text-base-content">
-                  {classroom}
-                </span>
-                {t("getStarted.notInvited.waitingBody_suffix")}
+                <Trans
+                  i18nKey="getStarted.notInvited.waitingBody"
+                  values={{ classroom }}
+                  components={{
+                    classroom: <EmphasisLtr className="text-base-content" />,
+                  }}
+                />
               </p>
             </div>
           </div>
@@ -165,7 +178,7 @@ const AllSet = ({
               className="w-full"
             >
               {t("getStarted.active.goToClassroom")}
-              <ArrowRight aria-hidden="true" className="size-4" />
+              <ArrowRight aria-hidden="true" className={`size-4 ${rtlFlip}`} />
             </RouterButton>
           )
         )}

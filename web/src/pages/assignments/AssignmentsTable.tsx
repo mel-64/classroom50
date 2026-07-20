@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import {
   Copy,
   Eye,
@@ -23,7 +23,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useDeleteAssignment } from "@/hooks/mutations/useDeleteAssignment"
 import type { Assignment } from "@/types/classroom"
 import { EnterDiv } from "@/lib/motionComponents"
-import { Badge, Button } from "@/components/ui"
+import { Badge, Button, EmphasisLtr } from "@/components/ui"
 
 const DeleteAssignmentButton = ({
   org,
@@ -62,17 +62,17 @@ const DeleteAssignmentButton = ({
         open={open}
         title={t("assignments.table.deleteTitle")}
         description={
-          <>
-            {t("assignments.table.deleteDescription_1")}{" "}
-            <span className="font-semibold text-base-content">
-              {assignment.name || assignment.slug}
-            </span>{" "}
-            {t("assignments.table.deleteDescription_2")}{" "}
-            <span className="font-semibold text-base-content">
-              {org}/{classroom}
-            </span>{" "}
-            {t("assignments.table.deleteDescription_3")}
-          </>
+          <Trans
+            i18nKey="assignments.table.deleteDescription"
+            values={{
+              assignment: assignment.name || assignment.slug,
+              classroom: `${org}/${classroom}`,
+            }}
+            components={{
+              assignment: <EmphasisLtr className="text-base-content" />,
+              classroom: <EmphasisLtr className="text-base-content" />,
+            }}
+          />
         }
         confirmText={assignment.slug}
         confirmLabel={t("assignments.table.deleteConfirm")}
@@ -195,7 +195,7 @@ const SkeletonRows = ({ rows = 4 }: { rows?: number }) => (
           <div className="skeleton skeleton-shimmer h-4 w-56" />
         </td>
         <td>
-          <div className="skeleton skeleton-shimmer ml-auto h-8 w-16" />
+          <div className="skeleton skeleton-shimmer ms-auto h-8 w-16" />
         </td>
       </tr>
     ))}
