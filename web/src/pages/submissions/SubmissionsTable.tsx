@@ -26,6 +26,7 @@ import {
   EmphasisLtr,
   Modal,
   MonoLtr,
+  Spinner,
   rtlFlip,
 } from "@/components/ui"
 import { scoreTone } from "@/pages/submissions/dashboard"
@@ -411,6 +412,8 @@ const SubmissionsTable = ({
   filtered = false,
   onClearFilters,
   emptyRepo = false,
+  initialLoading = false,
+  nonSubmittersLoading = false,
 }: {
   scores: SubmissionRow[]
   students: Student[]
@@ -441,6 +444,14 @@ const SubmissionsTable = ({
   // empty_repo assignment: never autogrades, so score badges and the
   // Feedback-PR/regrade actions are hidden (repos + accept state stay useful).
   emptyRepo?: boolean
+  // Core data (snapshot + roster) is still loading on first paint; render a
+  // loading state rather than the "no submissions" empty state, which would
+  // otherwise flash before data arrives.
+  initialLoading?: boolean
+  // The "not submitted" list is still resolving from the live/group fan-outs;
+  // render a resolving affordance instead of prematurely listing students who
+  // may reclassify to submitted/pending.
+  nonSubmittersLoading?: boolean
 }) => {
   const { t } = useTranslation()
   const passBar = thresholdFraction ?? null
@@ -493,9 +504,23 @@ const SubmissionsTable = ({
             </tr>
           </thead>
           <tbody>
-            {!scores?.length &&
+            {initialLoading && (
+              <tr>
+                <td colSpan={5} className="py-10 text-center">
+                  <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                    <Spinner size="md" />
+                    <p className="text-sm text-base-content/70">
+                      {t("submissions.table.loading")}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!initialLoading &&
+              !scores?.length &&
               !nonSubmitters.length &&
-              !unsubmittedGroupRepos.length && (
+              !unsubmittedGroupRepos.length &&
+              !nonSubmittersLoading && (
                 <tr>
                   <td colSpan={5} className="py-10 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
@@ -622,6 +647,13 @@ const SubmissionsTable = ({
                           >
                             —
                           </span>
+                        ) : rest.pending ? (
+                          <Badge
+                            ghost
+                            title={t("submissions.table.pendingGradeTitle")}
+                          >
+                            {t("submissions.table.pendingGrade")}
+                          </Badge>
                         ) : (
                           <ScoreBadge
                             score={score}
@@ -759,6 +791,19 @@ const SubmissionsTable = ({
                 onManage={() => setManageOwner(owner)}
               />
             ))}
+            {nonSubmittersLoading && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="py-4 text-center text-sm text-base-content/60"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner size="xs" />
+                    {t("submissions.table.resolvingNonSubmitters")}
+                  </span>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </EnterDiv>

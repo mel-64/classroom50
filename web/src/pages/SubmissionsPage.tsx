@@ -31,6 +31,7 @@ import {
   filterAndSortRows,
   filterNonSubmitters,
   hasAccepted,
+  mergeLiveRows,
   reconcileNonSubmitters,
   rosterScopedRows,
   rowInSection,
@@ -41,6 +42,7 @@ import {
   type SubmissionSort,
 } from "@/pages/submissions/dashboard"
 import useGetScores from "@/hooks/useGetScores"
+import useLiveSubmissions, { LIVE_PAGE_SIZE } from "@/hooks/useLiveSubmissions"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
@@ -199,18 +201,13 @@ const SubmissionsPageContent = () => {
   // Gate on a resolved roster so a transient load/permission failure falls back
   // to unscoped rows rather than blanking a populated gradebook.
   const rosterReady = !rosterLoading && !rosterError
-  const scoresInfo = useMemo(() => {
-    const rows = scoresData?.submissions?.[assignment ?? ""] || []
-    return rosterReady ? rosterScopedRows(rows, students) : rows
-  }, [scoresData, assignment, rosterReady, students])
+  const snapshotRows = useMemo(() => {
+    return scoresData?.submissions?.[assignment ?? ""] || []
+  }, [scoresData, assignment])
 
   // Org repo list drives repo-existence signals (individual acceptance below and
   // group-repo enumeration here).
   const { data: orgRepos } = useGetOrgRepos(org ?? "")
-
-  // Repos whose latest submission landed after the deadline. `late` is computed
-  // upstream (collect_scores.py) from push time, not grade time.
-  const lateCount = scoresInfo.filter((row) => row.late).length
 
   // Due-date presentation: absolute date + a relative countdown ("in 3 days" /
   // "2 hours ago"). Past due flips the badge to error and the label to overdue.
@@ -243,12 +240,78 @@ const SubmissionsPageContent = () => {
         : [],
     [isGroupAssignment, orgRepos, classroom, assignment, siblingSlugs],
   )
+
+  // Live submission presence for THIS assignment, read directly from student
+  // repos' submit/* releases — so a student who pushed but hasn't been collected
+  // yet still shows as submitted (issue #347). Owners: roster logins for
+  // individual assignments, group-founder logins for group assignments. Paginated
+  // (50/page) so a large class doesn't fan out every repo at once; empty_repo
+  // assignments never autograde, so the fan-out is disabled there.
+  const [livePage, setLivePage] = useState(0)
+  const liveRepoOwners = useMemo(
+    () =>
+      isGroupAssignment
+        ? groupRepoList.map((repo) => repo.owner)
+        : students.map((s) => s.username).filter(Boolean),
+    [isGroupAssignment, groupRepoList, students],
+  )
+  // Clamp the requested page to the last valid page for the CURRENT owner set.
+  // The page component isn't remounted across assignment navigation, so a
+  // leftover offset from a longer assignment would otherwise slice past a
+  // shorter one's owners and show an empty window (#347 review). Clamping in the
+  // derived value (rather than a setState-in-effect) keeps the reset render-pure.
+  const lastLivePage =
+    liveRepoOwners.length > 0
+      ? Math.ceil(liveRepoOwners.length / LIVE_PAGE_SIZE) - 1
+      : 0
+  const effectiveLivePage = Math.min(livePage, lastLivePage)
+  const {
+    submissions: liveSubmissions,
+    errorCount: liveErrorCount,
+    isFetching: liveFetching,
+    isPending: livePending,
+    hasNextPage: liveHasNextPage,
+    refetch: refetchLive,
+  } = useLiveSubmissions({
+    org,
+    classroom,
+    assignment,
+    repoOwners: liveRepoOwners,
+    page: effectiveLivePage,
+    pageSize: LIVE_PAGE_SIZE,
+    enabled: !isEmptyRepoAssignment,
+  })
+
+  // Merge live presence over the snapshot (snapshot wins per owner; live adds a
+  // pending row for an as-yet-uncollected submitter), then roster-scope as
+  // before. Gate roster-scoping on a resolved roster so a transient failure
+  // falls back to unscoped rows rather than blanking a populated gradebook.
+  const scoresInfo = useMemo(() => {
+    const merged = mergeLiveRows(
+      snapshotRows,
+      liveSubmissions.map((s) => ({
+        owner: s.owner,
+        datetime: s.submittedAt,
+        release: s.releaseUrl,
+      })),
+    )
+    return rosterReady ? rosterScopedRows(merged, students) : merged
+  }, [snapshotRows, liveSubmissions, rosterReady, students])
+
+  // Repos whose latest submission landed after the deadline. `late` is computed
+  // upstream (collect_scores.py) from push time, not grade time.
+  const lateCount = scoresInfo.filter((row) => row.late).length
+
+  // Live-only rows: submitted (submit/* release exists) but not yet in the
+  // collected snapshot — the #347 lag the live view closes.
+  const livePendingCount = scoresInfo.filter((row) => row.pending).length
   // Members of every existing group repo, fetched (bounded) and reconciled so
   // the "no group" list is accurate on load: the union of founders (known from
   // the repo name) plus each repo's collaborators means a teammate on a
   // formed-but-unsubmitted group isn't also listed as "no group" (#245). The
   // fetch is throttled and shares the collaborators cache with the rows/modal.
-  const groupRepoMembers = useGroupRepoMemberLogins(org ?? "", groupRepoList)
+  const { logins: groupRepoMembers, isPending: groupMembersPending } =
+    useGroupRepoMemberLogins(org ?? "", groupRepoList)
   const groupRepoFounders = useMemo(
     () =>
       new Set([
@@ -268,11 +331,20 @@ const SubmissionsPageContent = () => {
   // group's row (#245), so listing them as "no group" too would double-count
   // them. Gated on scores having loaded — until then scoresInfo is empty and
   // would flag the whole roster.
+  // Hold the "not submitted" list until every source that can still reclassify
+  // a student settles (snapshot, live fan-out, group-member reconciliation) —
+  // else a submitter flashes "not submitted" before resolving to Pending.
   const scoresLoaded = scoresData !== undefined
+  // Empty rows before the snapshot+roster land mean "loading", not "empty" —
+  // gate the empty state on this so it doesn't flash on first paint. A
+  // background refetch keeps scoresLoaded true, so Refresh never blanks the table.
+  const initialLoading = !scoresLoaded || rosterLoading
+  const nonSubmittersReady =
+    scoresLoaded && !livePending && !groupMembersPending
   const nonSubmitters = useMemo(() => {
-    if (!scoresLoaded) return []
+    if (!nonSubmittersReady) return []
     return reconcileNonSubmitters(students, scoresInfo, groupRepoFounders)
-  }, [scoresLoaded, scoresInfo, students, groupRepoFounders])
+  }, [nonSubmittersReady, scoresInfo, students, groupRepoFounders])
 
   // Dashboard controls — all client-side over already-loaded data.
   const [query, setQuery] = useState("")
@@ -604,15 +676,22 @@ const SubmissionsPageContent = () => {
                 variant="ghost"
                 size="xs"
                 shape="circle"
-                disabled={scoresFetching}
-                onClick={() => refetchScores()}
+                disabled={scoresFetching || liveFetching}
+                onClick={() => {
+                  // Refresh both sources the page shows — snapshot alone would
+                  // leave the live "Pending" rows stale.
+                  refetchScores()
+                  refetchLive()
+                }}
                 aria-label={t("submissions.refresh")}
                 title={t("submissions.refresh")}
               >
                 <RefreshCw
                   aria-hidden="true"
                   size={12}
-                  className={scoresFetching ? "animate-spin" : ""}
+                  className={
+                    scoresFetching || liveFetching ? "animate-spin" : ""
+                  }
                 />
               </Button>
             </span>
@@ -653,6 +732,51 @@ const SubmissionsPageContent = () => {
           )}
         </p>
       </div>
+
+      {/* Live-submission strip: presence read directly from student repos'
+          submit/* releases, so a just-pushed student shows before the next
+          collect (issue #347). Hidden for empty_repo assignments (never
+          autograded). "Show next" pages the fan-out in LIVE_PAGE_SIZE windows so
+          a large class isn't read all at once. */}
+      {!isEmptyRepoAssignment && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/70"
+          role="status"
+        >
+          {liveFetching && (
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner size="xs" />
+              {t("submissions.live.checking")}
+            </span>
+          )}
+          {livePendingCount > 0 && (
+            <Badge tone="info" size="sm">
+              {t("submissions.live.pending", { count: livePendingCount })}
+            </Badge>
+          )}
+          {liveHasNextPage && (
+            <Button
+              variant="ghost"
+              size="xs"
+              disabled={liveFetching}
+              onClick={() => setLivePage(effectiveLivePage + 1)}
+            >
+              {t("submissions.live.showNext", { count: LIVE_PAGE_SIZE })}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* When some repos couldn't be read, the live presence view is
+          known-incomplete: a student who submitted to an unreadable repo won't
+          get a Pending row and would read as not-submitted. Mark the derived
+          counts/lists provisional so a transient failure can't be mistaken for
+          an authoritative "not submitted". */}
+      {!isEmptyRepoAssignment && liveErrorCount > 0 && (
+        <Alert tone="warning" role="status">
+          {t("submissions.live.incomplete", { count: liveErrorCount })}
+        </Alert>
+      )}
 
       {/* Live status strip. Full phase mapping: dispatching stays a quiet
           neutral line (transient); running/completed/failed/timeout become an
@@ -795,6 +919,12 @@ const SubmissionsPageContent = () => {
         filtered={hasActiveFilter}
         onClearFilters={clearFilters}
         emptyRepo={isEmptyRepoAssignment}
+        initialLoading={initialLoading}
+        nonSubmittersLoading={
+          !nonSubmittersReady &&
+          students.length > 0 &&
+          showsNonSubmitters(effectiveFilters)
+        }
       />
       <ConfirmModal
         open={regradeConfirmOpen}

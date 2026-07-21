@@ -38,7 +38,51 @@ export function rosterScopedRows(
   return rows.filter((row) => rowOnRoster(row, rosterLogins))
 }
 
-// `thresholdFraction` is the passing bar as a fraction of max, or `null` when
+// Fold live submission presence (submit/* releases read directly from student
+// repos) into the collected snapshot rows. `scores.json` stays the source of
+// record: a snapshot row always wins for an owner it already covers (it carries
+// the graded score; live presence carries none yet — see the plan's U2 spike).
+// Live adds a row ONLY for an owner absent from the snapshot — a student who
+// pushed but hasn't been collected yet (the #347 lag). Such a row is marked
+// `pending` (no grade) so the table shows "submitted, not yet collected" rather
+// than a fake 0/0. Owner match is case-insensitive; the union preserves snapshot
+// order, then appends live-only rows newest-first.
+export type LiveSubmissionPresence = {
+  owner: string
+  datetime: string
+  release: string
+}
+
+export function mergeLiveRows(
+  snapshotRows: SubmissionRow[],
+  liveRows: LiveSubmissionPresence[],
+): SubmissionRow[] {
+  const snapshotOwners = new Set(
+    snapshotRows.map((row) => row.owner.trim().toLowerCase()),
+  )
+
+  const liveOnly = liveRows
+    .filter((live) => !snapshotOwners.has(live.owner.trim().toLowerCase()))
+    .sort(
+      (a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+    )
+    .map<SubmissionRow>((live) => ({
+      usernames: [live.owner],
+      owner: live.owner,
+      datetime: live.datetime,
+      commit: "",
+      release: live.release,
+      review: "",
+      score: 0,
+      "max-score": 0,
+      submissionCount: 1,
+      pending: true,
+      submissions: [],
+    }))
+
+  return [...snapshotRows, ...liveOnly]
+}
+
 // the assignment sets no threshold — then every row is "ungraded" (as is an
 // ungraded/zero-max row).
 export type PassState = "passing" | "failing" | "ungraded"
@@ -121,9 +165,13 @@ export function computeStats(
 
 // Mean of the numeric scores, rounded to 2 decimals, or null when none is finite
 // (rendered "N/A"). Avoids the old `sum/length || 1` bug where an empty/NaN
-// result showed "1" (`/` binds before `||`).
+// result showed "1" (`/` binds before `||`). Pending live rows (a submit/*
+// release the collector hasn't ingested yet) carry a placeholder 0/0 and no
+// real grade, so they're excluded — otherwise every uncollected submitter would
+// drag the average toward 0, the opposite of the intended presence signal.
 export function classAverage(rows: SubmissionRow[]): number | null {
   const numericScores = rows
+    .filter((row) => !row.pending)
     .map((row) => Number(row["score"]))
     .filter((n) => Number.isFinite(n))
   if (numericScores.length === 0) return null
@@ -528,7 +576,7 @@ export function filterNonSubmitters(
 // contract downstream sheets rely on — keep them stable.
 export type ScoresCsvRow = {
   usernames: string
-  score: number
+  score: number | string
   max_score: number | string
   submissions: number
   submitted_at: string
@@ -548,8 +596,11 @@ export function buildScoresCsvRows(
     )
     .map(({ usernames, score, datetime, submissionCount, late, ...rest }) => ({
       usernames: usernames.join(", "),
-      score,
-      max_score: rest["max-score"],
+      // A pending live row (submitted, not yet collected) has no real grade —
+      // export a blank score, not a 0, so importing the CSV can't record a
+      // graded zero for a student who actually submitted.
+      score: rest.pending ? "" : score,
+      max_score: rest.pending ? "" : rest["max-score"],
       submissions: submissionCount,
       submitted_at: new Date(datetime).toISOString(),
       late: late ? "yes" : "no",
