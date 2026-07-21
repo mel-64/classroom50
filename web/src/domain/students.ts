@@ -7,6 +7,7 @@
 // sub-module, not here.
 export {
   resolveTeamIdForRoleRead,
+  resendClassroomInvite,
   resolveClassroomPendingInvite,
   matchesRosterRow,
   normalizeGithubUsername,
@@ -42,12 +43,16 @@ export {
   writeClassroomRoles,
   applyClassroomRoleChange,
   assignRosterMemberRole,
+  addClassroomStaffMember,
+  removeClassroomStaffMember,
   resolveRosterUploadPreflight,
   type WriteClassroomRolesInput,
   type ApplyClassroomRoleChangeInput,
   type ApplyClassroomRoleChangeResult,
   type AssignRosterMemberRoleInput,
   type AssignRosterMemberRoleResult,
+  type AddClassroomStaffMemberInput,
+  type RemoveClassroomStaffMemberInput,
   type ResolveRosterUploadPreflightInput,
 } from "./students/roleWrites"
 export {

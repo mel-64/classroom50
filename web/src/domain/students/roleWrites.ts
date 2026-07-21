@@ -14,6 +14,7 @@ import { getErrorMessage } from "@/github-core/errorMessage"
 import { withGitConflictRetry, assertClassroomNotArchived } from "../classrooms"
 import {
   getRawFileWithFallbackSource,
+  getUser,
   listAllOrgMembers,
   listOrgAdmins,
   listTeamMembers,
@@ -44,11 +45,13 @@ import {
 } from "@/util/rosterUploadPreflight"
 import {
   log,
+  normalizeGithubUsername,
   rosterWriteTree,
   resolveClassroomTeamSlug,
   resolveClassroomTeamSlugs,
   RosterCsvMalformedError,
 } from "./rosterPrimitives"
+import type { StaffRole } from "@/types/classroom"
 
 export type WriteClassroomRolesInput = {
   org: string
@@ -421,4 +424,101 @@ export async function assignRosterMemberRole(
 
   await addUserToTeam(client, { org, teamSlug, username, role: "member" })
   return { state: "assigned", role }
+}
+
+export type AddClassroomStaffMemberInput = {
+  org: string
+  classroom: string
+  username: string
+  role: StaffRole
+}
+
+// Add a staff member (teacher / head TA / TA) to a classroom's role team. The
+// deliberate counterpart to assignRosterMemberRole: that refuses a non-member
+// (the roster routes them to a separate org-invite affordance), whereas the
+// Settings staff flow's whole purpose is "type a username -> put them on the
+// staff team", so this team-adds UNCONDITIONALLY — GitHub turns a team-add of a
+// non-member into a team invitation, which is exactly the pending-staff state
+// the section renders.
+//
+// Steps: verify the account exists (a clear error vs. a confusing team 422) ->
+// ensure-and-grant the role team (self-healing preflight) -> strip the
+// auto-added creator on a freshly-created team (GitHub adds the CREATOR as
+// maintainer; adding a TA must not also make the acting teacher a TA) -> add the
+// target. Idempotent (PUT membership).
+export async function addClassroomStaffMember(
+  client: GitHubClient,
+  input: AddClassroomStaffMemberInput,
+): Promise<{ username: string; role: StaffRole }> {
+  const { org, classroom, role } = input
+  const username = normalizeGithubUsername(input.username)
+  await assertClassroomNotArchived(client, org, classroom)
+  if (!username) throw new Error("A username is required")
+
+  // Verify the account exists first so a typo surfaces as "no such user"
+  // instead of a confusing team-membership 422 later.
+  await getUser(client, username)
+
+  const team = await ensureClassroomRoleTeam(client, org, classroom, role)
+  await grantTeamConfigRepoAccess(client, org, team.slug, role)
+
+  // GitHub auto-adds the team CREATOR as maintainer. If this call just created
+  // the team, drop the acting user unless they're the target — best-effort, the
+  // actor can remove themselves via the same UI. Resolve the actor fresh (as
+  // applyClassroomRoleChange does) rather than trusting a cached identity.
+  if (team.created) {
+    try {
+      const actor = await getAuthenticatedUser(client)
+      if (actor.login && actor.login.toLowerCase() !== username.toLowerCase()) {
+        await removeUserFromTeam(client, {
+          org,
+          teamSlug: team.slug,
+          username: actor.login,
+        })
+      }
+    } catch {
+      // Non-fatal: leave the creator on the team; they can self-remove.
+    }
+  }
+
+  await addUserToTeam(client, {
+    org,
+    teamSlug: team.slug,
+    username,
+    role: "member",
+  })
+  return { username, role }
+}
+
+export type RemoveClassroomStaffMemberInput = {
+  org: string
+  teamSlug: string
+  username: string
+  // The role the team represents, so a self-removal from the TEACHER team can be
+  // refused (it revokes the acting owner's own owner-level classroom access).
+  role: StaffRole
+}
+
+// Remove a staff member from a classroom's role team. Refuses a teacher removing
+// THEMSELVES from the teacher team: like the roster's self-demote guard, that
+// would revoke the acting owner's own owner-level access to the classroom — an
+// unrecoverable-in-place action they must have another owner perform. Other
+// removals (a different member, or self off a non-teacher team) pass through to
+// the idempotent team-drop.
+export async function removeClassroomStaffMember(
+  client: GitHubClient,
+  input: RemoveClassroomStaffMemberInput,
+): Promise<void> {
+  const { org, teamSlug, username, role } = input
+  if (isTeacherRole(role)) {
+    const viewer = await getAuthenticatedUser(client)
+    if (isSameGitHubUser(viewer, { username })) {
+      throw new Error(
+        `You can't remove yourself from the teacher team — it would revoke ` +
+          `your own owner-level access to this classroom. Ask another ` +
+          `organization owner to remove you.`,
+      )
+    }
+  }
+  await removeUserFromTeam(client, { org, teamSlug, username })
 }
