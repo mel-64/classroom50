@@ -6,8 +6,7 @@ import {
 } from "react"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useClassroomRole } from "@/hooks/useClassroomRole"
-import { useTeacherTeamMigration } from "@/hooks/useTeacherTeamMigration"
-import { useTeamDescriptionBackfill } from "@/hooks/useTeamDescriptionBackfill"
+import { useClassroomReconcile } from "@/hooks/useClassroomReconcile"
 import { isTeacherRole, type ResolvedRole } from "@/authz"
 
 // The single authoritative effective-role signal for the current classroom,
@@ -51,19 +50,12 @@ function useClassroomRoleResolution(
     user?.login,
   )
 
-  // Self-heal the instructor -> teacher team rename on classroom entry, for the
-  // whole classroom subtree rather than only the settings page. Gated on the
-  // viewer being an org owner (the resolved teacher role) since the migration
-  // creates/deletes teams and commits config; use actualRole so a teacher
-  // previewing as a lower role still triggers the (idempotent) heal.
-  useTeacherTeamMigration(org, classroom, isTeacherRole(actualRole))
-
-  // Backfill the classroom50/team/v1 bootstrap record onto the student team's
-  // description (the web mirror of the CLI's write-at-create), so classrooms
-  // created via the GUI or before this feature converge on any owner entry.
-  // Same gate/rationale as the migration above: an org-owner PATCH, keyed on
-  // actualRole so a preview still triggers the idempotent reconcile.
-  useTeamDescriptionBackfill(org, classroom, isTeacherRole(actualRole))
+  // Centralized best-effort self-check on classroom entry. Keyed on actualRole
+  // (not the preview-clamped role) so a teacher previewing as a lower role still
+  // triggers the idempotent heal. Passes the acting owner so the reconcile can
+  // drop them off any non-teacher team its create POST auto-joined them to. See
+  // reconcileClassroom for the resource set.
+  useClassroomReconcile(org, classroom, isTeacherRole(actualRole), user?.login)
 
   const roleResolved = role !== "unresolved"
 
