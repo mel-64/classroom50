@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 
 import {
   addFounderCollaborator,
@@ -13,6 +15,8 @@ import {
   preserveUnmanagedAssignmentKeys,
   resolveAutograderWorkflow,
   resolveTemplate,
+  resolveTemplateGrant,
+  TEMPLATE_READ_STAFF_ROLES,
   verifyTemplateAccess,
 } from "./assignments"
 import type { GitHubClient } from "@/github-core/client"
@@ -848,7 +852,7 @@ describe("editAssignment (preserved-entry integration)", () => {
   })
 })
 
-describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
+describe("grantTeamTemplateRead (student + HTA/TA staff team eager grant)", () => {
   const ORG = "cs50"
   const CLASSROOM = "cs50"
   const SLUG = "hw1"
@@ -961,10 +965,41 @@ describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
       mode: "individual",
       max_group_size: 0,
       tests: [],
+      // These tests exercise the owner-only template read-grant, which the
+      // write path now performs only when the caller holds manageOrg.
+      canGrantTemplateAccess: true,
     } as unknown as Parameters<typeof editAssignment>[1]
   }
 
-  it("grants both the student team and the TA staff team on a private in-org template", async () => {
+  it("grants the student team plus the HTA and TA staff teams on a private in-org template", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: {
+          hta: { id: 8, slug: "classroom50-cs50-hta" },
+          ta: { id: 9, slug: "classroom50-cs50-ta" },
+        },
+      },
+    })
+
+    const result = await editAssignment(client, editInput())
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual([
+      "classroom50-cs50",
+      "classroom50-cs50-hta",
+      "classroom50-cs50-ta",
+    ])
+  })
+
+  it("warns (not silently) when a non-owner author skips the owner-only grant", async () => {
+    // A head-TA edit carries a stored in-org private template but no owner
+    // rights; the write path must not attempt addRepositoryToTeam (it would
+    // 403). The edit succeeds, no grant fires — but it must NOT silently return
+    // undefined, or students 404 on accept with no signal. Surface an
+    // owner-required warning instead so a teacher/owner can grant it.
     const { client, grants } = makeGrantClient({
       classroomJson: {
         schema: "classroom50/classroom/v1",
@@ -974,13 +1009,22 @@ describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
       },
     })
 
-    const result = await editAssignment(client, editInput())
+    // A non-owner input simply omits canGrantTemplateAccess (the mutation hook
+    // sets it from can("manageOrg")); build one without the flag.
+    const nonOwner = editInput("tmpl-v2") as Record<string, unknown>
+    delete nonOwner.canGrantTemplateAccess
+    const result = await editAssignment(
+      client,
+      nonOwner as unknown as Parameters<typeof editAssignment>[1],
+    )
 
-    expect(result.templateGrantWarning).toBeUndefined()
-    expect(grants()).toEqual(["classroom50-cs50", "classroom50-cs50-ta"])
+    // No owner-only grant fired, but the author is told an owner must act.
+    expect(grants()).toEqual([])
+    expect(result.templateGrantWarning).toBeDefined()
+    expect(result.templateGrantWarning).toContain("organization owner")
   })
 
-  it("grants only the student team when no TA team is recorded", async () => {
+  it("grants only the student team when no staff teams are recorded", async () => {
     const { client, grants } = makeGrantClient({
       classroomJson: {
         schema: "classroom50/classroom/v1",
@@ -995,22 +1039,26 @@ describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
     expect(grants()).toEqual(["classroom50-cs50"])
   })
 
-  it("keeps the edit successful when the TA grant fails (non-blocking)", async () => {
+  it("keeps the edit successful when a staff grant fails (non-blocking)", async () => {
     const { client, grants } = makeGrantClient({
       classroomJson: {
         schema: "classroom50/classroom/v1",
         short_name: CLASSROOM,
         team: { id: 7, slug: "classroom50-cs50" },
-        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+        teams: {
+          hta: { id: 8, slug: "classroom50-cs50-hta" },
+          ta: { id: 9, slug: "classroom50-cs50-ta" },
+        },
       },
       taGrantThrows: true,
     })
 
     const result = await editAssignment(client, editInput())
 
-    // Student grant landed; TA failure did not surface as a save warning.
+    // Student + HTA grants landed; the TA failure did not surface as a save
+    // warning and did not abort the loop.
     expect(result.templateGrantWarning).toBeUndefined()
-    expect(grants()).toEqual(["classroom50-cs50"])
+    expect(grants()).toEqual(["classroom50-cs50", "classroom50-cs50-hta"])
   })
 
   it("re-affirms the grant on an UNCHANGED in-org private template ref", async () => {
@@ -1019,16 +1067,23 @@ describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
         schema: "classroom50/classroom/v1",
         short_name: CLASSROOM,
         team: { id: 7, slug: "classroom50-cs50" },
-        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+        teams: {
+          hta: { id: 8, slug: "classroom50-cs50-hta" },
+          ta: { id: 9, slug: "classroom50-cs50-ta" },
+        },
       },
     })
 
     // Same owner/repo/branch as the stored template (tmpl) — the unchanged-ref
-    // branch. It must still re-affirm both teams so a dropped grant is repaired.
+    // branch. It must still re-affirm every team so a dropped grant is repaired.
     const result = await editAssignment(client, editInput("tmpl"))
 
     expect(result.templateGrantWarning).toBeUndefined()
-    expect(grants()).toEqual(["classroom50-cs50", "classroom50-cs50-ta"])
+    expect(grants()).toEqual([
+      "classroom50-cs50",
+      "classroom50-cs50-hta",
+      "classroom50-cs50-ta",
+    ])
   })
 
   it("does not grant on an unchanged PUBLIC template ref", async () => {
@@ -1046,6 +1101,209 @@ describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
 
     expect(result.templateGrantWarning).toBeUndefined()
     expect(grants()).toEqual([])
+  })
+
+  // Reuse path (copyAssignmentToClassroom) shares the same canGrantTemplateAccess
+  // guard as create/edit; exercise both the owner (grants fire) and non-owner
+  // (grants skipped, owner-required warning) branches through the grant client.
+  function reuseSource(): Assignment {
+    return {
+      slug: "hw1",
+      name: "Homework 1",
+      mode: "individual",
+      autograder: "default",
+      feedback_pr: true,
+      // In-org private template (served by makeGrantClient's `tmpl` route).
+      template: { owner: ORG, repo: "tmpl", branch: "main" },
+    }
+  }
+
+  it("reuse: owner grants student + HTA + TA teams on a private in-org template", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: {
+          hta: { id: 8, slug: "classroom50-cs50-hta" },
+          ta: { id: 9, slug: "classroom50-cs50-ta" },
+        },
+      },
+    })
+
+    const result = await copyAssignmentToClassroom(client, {
+      org: ORG,
+      source: reuseSource(),
+      targetClassroom: CLASSROOM,
+      targetSlug: "hw1-copy",
+      canGrantTemplateAccess: true,
+    })
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual([
+      "classroom50-cs50",
+      "classroom50-cs50-hta",
+      "classroom50-cs50-ta",
+    ])
+  })
+
+  it("reuse: non-owner author warns (no grant) instead of silently skipping", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+      },
+    })
+
+    const result = await copyAssignmentToClassroom(client, {
+      org: ORG,
+      source: reuseSource(),
+      targetClassroom: CLASSROOM,
+      targetSlug: "hw1-copy",
+      // canGrantTemplateAccess omitted => non-owner (fail-closed).
+    })
+
+    expect(grants()).toEqual([])
+    expect(result.templateGrantWarning).toBeDefined()
+    expect(result.templateGrantWarning).toContain("organization owner")
+  })
+
+  // resolveTemplateGrant is the single grant-decision recipe shared verbatim by
+  // createAssignment, editAssignment, and copyAssignmentToClassroom. Testing it
+  // directly covers the create entry point's owner/non-owner branch (create
+  // builds a full form input the grant-suite mock above doesn't model) without
+  // duplicating the whole create write path. Nested here to reuse makeGrantClient
+  // and the ORG/CLASSROOM fixtures the mock hardcodes.
+  describe("resolveTemplateGrant (shared create/edit/reuse grant decision)", () => {
+    const template = { owner: ORG, repo: "tmpl", branch: "main" }
+
+    it("owner (canGrant true) attempts the grant: student + HTA + TA", async () => {
+      const { client, grants } = makeGrantClient({
+        classroomJson: {
+          schema: "classroom50/classroom/v1",
+          short_name: CLASSROOM,
+          team: { id: 7, slug: "classroom50-cs50" },
+          teams: {
+            hta: { id: 8, slug: "classroom50-cs50-hta" },
+            ta: { id: 9, slug: "classroom50-cs50-ta" },
+          },
+        },
+      })
+
+      const warning = await resolveTemplateGrant(
+        client,
+        ORG,
+        CLASSROOM,
+        "hw1",
+        template,
+        true,
+      )
+
+      expect(warning).toBeUndefined()
+      expect(grants()).toEqual([
+        "classroom50-cs50",
+        "classroom50-cs50-hta",
+        "classroom50-cs50-ta",
+      ])
+    })
+
+    it("confirmed non-owner (canGrant false) warns and fires no grant", async () => {
+      const { client, grants } = makeGrantClient({
+        classroomJson: {
+          schema: "classroom50/classroom/v1",
+          short_name: CLASSROOM,
+          team: { id: 7, slug: "classroom50-cs50" },
+        },
+      })
+
+      const warning = await resolveTemplateGrant(
+        client,
+        ORG,
+        CLASSROOM,
+        "hw1",
+        template,
+        false,
+      )
+
+      expect(grants()).toEqual([])
+      expect(warning).toBeDefined()
+      expect(warning).toContain("organization owner")
+    })
+
+    it("undefined flag is treated as non-owner (fail-closed): warns, no grant", async () => {
+      const { client, grants } = makeGrantClient({
+        classroomJson: {
+          schema: "classroom50/classroom/v1",
+          short_name: CLASSROOM,
+          team: { id: 7, slug: "classroom50-cs50" },
+        },
+      })
+
+      const warning = await resolveTemplateGrant(
+        client,
+        ORG,
+        CLASSROOM,
+        "hw1",
+        template,
+        undefined,
+      )
+
+      expect(grants()).toEqual([])
+      expect(warning).toContain("organization owner")
+    })
+  })
+})
+
+// The TS non-owner staff-team read set is a hand-mirror of the Go source of
+// truth (configrepo.TemplateReadStaffRoles). Parse the Go literal and assert the
+// two agree, so adding a role on the Go side without updating the TS grant fails
+// here — a visible, required edit rather than a silent drop from the web grant.
+describe("TEMPLATE_READ_STAFF_ROLES parity with Go TemplateReadStaffRoles", () => {
+  // Go role-constant -> wire string (configrepo team.go: RoleHeadTA="hta", etc.).
+  const GO_ROLE_VALUES: Record<string, string> = {
+    RoleTeacher: "teacher",
+    RoleInstructor: "instructor",
+    RoleHeadTA: "hta",
+    RoleTA: "ta",
+  }
+
+  it("matches the Go non-owner staff role set", () => {
+    // web/ is process.cwd() in vitest; the Go source is a sibling under cli/.
+    const teamGo = readFileSync(
+      path.join(
+        process.cwd(),
+        "..",
+        "cli",
+        "gh-teacher",
+        "internal",
+        "configrepo",
+        "team.go",
+      ),
+      "utf8",
+    )
+    const match = teamGo.match(
+      /var TemplateReadStaffRoles = \[\]StaffRole\{([^}]*)\}/,
+    )
+    expect(
+      match,
+      "TemplateReadStaffRoles literal not found in team.go",
+    ).toBeTruthy()
+    const goRoles = match![1]
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((constName) => {
+        const value = GO_ROLE_VALUES[constName]
+        expect(
+          value,
+          `unknown Go StaffRole constant ${constName}; add it to GO_ROLE_VALUES`,
+        ).toBeTruthy()
+        return value
+      })
+
+    expect([...TEMPLATE_READ_STAFF_ROLES]).toEqual(goRoles)
   })
 })
 

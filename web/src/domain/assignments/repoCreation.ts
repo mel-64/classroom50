@@ -227,6 +227,13 @@ export type CreateAssignmentInput = {
   allowed_files?: string
   pass_threshold?: number
   tests: AssignmentTestDraft[]
+  // Whether the write path may attempt the owner-only template read-grant
+  // (addRepositoryToTeam). Set from useCanAttemptTemplateGrant at the call site
+  // (true unless the org role is a confirmed non-owner). When false the save
+  // skips the grant and returns an owner-required warning instead of firing the
+  // owner-only call — the grant is best-effort and an owner re-affirms it later.
+  // GitHub is the real enforcer regardless.
+  canGrantTemplateAccess?: boolean
 }
 export async function createAssignmentWithConflictRetry(
   client: GitHubClient,

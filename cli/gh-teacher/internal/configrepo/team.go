@@ -68,21 +68,32 @@ const (
 
 // StaffTeamRepoPermissions maps a staff role to the repo permission a staff
 // team gets on each student assignment repo and on private in-org templates.
-// The TA-team template read is applied at TWO points: eagerly at assignment
-// add/reuse and classroom migrate (see grantStaffTeamTemplateRead / migrate.go),
-// and again as an idempotent re-affirm at collect-scores. The eager sites use
-// this map only as a presence gate and hardcode read (GrantTeamRepoRead);
-// collect-scores reads the value. Source of truth for the collector's
-// hand-mirrored STAFF_TEAM_PERMISSIONS (collect_scores.py) — keep in lockstep.
+// The head-TA/TA-team template read is applied at TWO points: eagerly at
+// assignment add/reuse and classroom migrate (see grantStaffTeamTemplateRead /
+// migrate.go), and again as an idempotent re-affirm at collect-scores. The eager
+// sites use this map only as a presence gate and hardcode read
+// (GrantTeamRepoRead); collect-scores reads the value. Source of truth for the
+// collector's hand-mirrored STAFF_TEAM_PERMISSIONS (collect_scores.py) — keep in
+// lockstep.
 //
-// A role absent from this map is granted nothing (the teacher team already
-// gets its access at classroom setup, so only the TA team needs a grant today).
+// A role absent from this map is granted nothing here. The teacher team is
+// omitted (its members are org owners with repo access via ownership); head-TA
+// and TA are plain members that need an explicit read grant.
 // Adding a future non-read staff permission is a one-line addition here and in
 // the mirror, but would also need the eager sites to consume the value instead
 // of hardcoding read.
 var StaffTeamRepoPermissions = map[StaffRole]string{
-	RoleTA: "pull",
+	RoleHeadTA: "pull",
+	RoleTA:     "pull",
 }
+
+// TemplateReadStaffRoles is the ordered set of non-owner staff roles that get an
+// eager read grant on a private in-org template (head-TA, then TA; teacher
+// omitted per StaffTeamRepoPermissions above). Single-sources the loops in
+// grantStaffTeamTemplateRead (reuse.go) and migrate.go so a future non-owner
+// staff role is one line here. Still presence-gated against
+// StaffTeamRepoPermissions at each call site.
+var TemplateReadStaffRoles = []StaffRole{RoleHeadTA, RoleTA}
 
 // ConfigRepoPermission is the permission a staff role's team gets on the org's
 // `classroom50` config repo. Teacher (and its legacy instructor alias) and the
@@ -113,6 +124,25 @@ type StaffTeamsRef struct {
 	Instructor *TeamRef `json:"instructor,omitempty"`
 	HeadTA     *TeamRef `json:"hta,omitempty"`
 	TA         *TeamRef `json:"ta,omitempty"`
+}
+
+// RefForRole returns the persisted staff-team ref for a canonical staff role
+// (teacher/hta/ta), or nil when absent. Lets callers iterate a role set (e.g.
+// TemplateReadStaffRoles) instead of hand-matching each struct field. The
+// legacy instructor alias resolves to the teacher ref.
+func (r *StaffTeamsRef) RefForRole(role StaffRole) *TeamRef {
+	if r == nil {
+		return nil
+	}
+	switch role {
+	case RoleTeacher, RoleInstructor:
+		return r.Teacher
+	case RoleHeadTA:
+		return r.HeadTA
+	case RoleTA:
+		return r.TA
+	}
+	return nil
 }
 
 // ResolveClassroomTeam reads the persisted team ref from the classroom's

@@ -26,6 +26,8 @@ type reuseFixture struct {
 	grantedRepo string
 	// grantedTATeam records a PUT TA-staff-team repo grant target, if any.
 	grantedTATeam string
+	// grantedHTATeam records a PUT head-TA-staff-team repo grant target, if any.
+	grantedHTATeam string
 }
 
 // reuseServerConfig parameterizes the mock: the source/target classroom
@@ -42,6 +44,10 @@ type reuseServerConfig struct {
 	// the default 204 (success). Set to e.g. 500 to exercise the
 	// grant-fails-after-the-copy-landed path.
 	grantStatus int
+	// grantRateLimited, when set, makes the classroom-team grant PUT return a
+	// 403 WITH a Retry-After header — GitHub's secondary-rate-limit shape, which
+	// must stay fatal (distinct from a plain permission 403, which is benign).
+	grantRateLimited bool
 	// templateOwner overrides the template repo owner (default "o", the
 	// org). Set to a different owner to exercise the out-of-org private
 	// template branch (warn, no grant). The source assignments body must
@@ -103,6 +109,11 @@ func newReuseServer(t *testing.T, cfg reuseServerConfig) (*httptest.Server, *reu
 			// 404 => not yet granted, so GrantTeamRepoRead will PUT.
 			w.WriteHeader(http.StatusNotFound)
 		case http.MethodPut:
+			if cfg.grantRateLimited {
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			if cfg.grantStatus != 0 {
 				w.WriteHeader(cfg.grantStatus)
 				return
@@ -127,6 +138,20 @@ func newReuseServer(t *testing.T, cfg reuseServerConfig) (*httptest.Server, *reu
 			}
 			fix.mu.Lock()
 			fix.grantedTATeam = "o/hello-template"
+			fix.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+
+	// Head-TA-staff-team grant: GET probe + PUT grant. Fires only when the target
+	// classroom.json records a `teams.hta` block (older classrooms skip it).
+	mux.HandleFunc("/orgs/o/teams/classroom50-dst-hta/repos/o/hello-template", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			fix.mu.Lock()
+			fix.grantedHTATeam = "o/hello-template"
 			fix.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -224,9 +249,9 @@ func targetClassroomBody(active *bool) string {
 	return string(b)
 }
 
-// targetClassroomBodyWithTA is targetClassroomBody plus a recorded TA staff
-// team, so the reuse grant path also grants the TA team read on a private
-// in-org template.
+// targetClassroomBodyWithTA is targetClassroomBody plus recorded head-TA and TA
+// staff teams, so the reuse grant path also grants those non-owner staff teams
+// read on a private in-org template.
 func targetClassroomBodyWithTA() string {
 	doc := map[string]any{
 		"schema":     "classroom50/classroom/v1",
@@ -236,7 +261,8 @@ func targetClassroomBodyWithTA() string {
 		"org":        "o",
 		"team":       map[string]any{"id": 7, "slug": "classroom50-dst"},
 		"teams": map[string]any{
-			"ta": map[string]any{"id": 9, "slug": "classroom50-dst-ta"},
+			"hta": map[string]any{"id": 8, "slug": "classroom50-dst-hta"},
+			"ta":  map[string]any{"id": 9, "slug": "classroom50-dst-ta"},
 		},
 	}
 	b, _ := json.Marshal(doc)
@@ -600,6 +626,65 @@ func TestRunAssignmentReuse_GrantFailureAfterCommit(t *testing.T) {
 	}
 }
 
+// TestRunAssignmentReuse_GrantForbiddenIsNonFatal: the classroom-team grant PUT
+// is org-owner-only, so a non-owner author (head-TA) gets a 403. Since the copy
+// already committed, the reuse must NOT fail — it warns with owner-required
+// guidance on stderr and returns nil (an owner re-affirms it; collect-scores
+// also does). Distinct from GrantFailureAfterCommit, where a non-403 error stays
+// fatal.
+func TestRunAssignmentReuse_GrantForbiddenIsNonFatal(t *testing.T) {
+	server, fix := newReuseServer(t, reuseServerConfig{
+		sourceAssignments: sourceAssignmentsBody(),
+		targetAssignments: emptyAssignmentsBody(),
+		targetClassroom:   targetClassroomBody(nil),
+		templatePrivate:   true,
+		grantStatus:       http.StatusForbidden,
+	})
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	if err := runAssignmentReuse(client, &out, &errOut, baseReuseParams()); err != nil {
+		t.Fatalf("a 403 on the owner-only grant must not fail the reuse, got %v", err)
+	}
+	if !strings.Contains(errOut.String(), "organization owner") {
+		t.Errorf("expected an owner-required warning on stderr, got %q", errOut.String())
+	}
+	// The copy still landed.
+	fix.mu.Lock()
+	committed := fix.committed
+	fix.mu.Unlock()
+	if committed == nil {
+		t.Errorf("copy should have been committed even when the grant 403s")
+	}
+}
+
+// TestRunAssignmentReuse_GrantRateLimitedStaysFatal: a 403 carrying a Retry-After
+// header is GitHub's secondary-rate-limit shape, not a permission denial — it must
+// stay FATAL (a transient throttle reported as "needs an organization owner" +
+// exit 0 would hide the real cause). Distinct from GrantForbiddenIsNonFatal.
+func TestRunAssignmentReuse_GrantRateLimitedStaysFatal(t *testing.T) {
+	server, _ := newReuseServer(t, reuseServerConfig{
+		sourceAssignments: sourceAssignmentsBody(),
+		targetAssignments: emptyAssignmentsBody(),
+		targetClassroom:   targetClassroomBody(nil),
+		templatePrivate:   true,
+		grantRateLimited:  true,
+	})
+	client := githubtest.NewTestClient(t, server)
+
+	var out, errOut bytes.Buffer
+	err := runAssignmentReuse(client, &out, &errOut, baseReuseParams())
+	if err == nil {
+		t.Fatalf("a rate-limited (Retry-After) 403 must fail the reuse, got nil error")
+	}
+	if !strings.Contains(err.Error(), "failed") {
+		t.Errorf("expected the fatal grant-failure error, got %v", err)
+	}
+	if strings.Contains(errOut.String(), "organization owner") {
+		t.Errorf("a rate-limit 403 must NOT surface owner-required guidance, got %q", errOut.String())
+	}
+}
+
 // TestRunAssignmentReuse_JSONOutput: --json emits the resolved copy with the
 // FINAL (auto-suffixed) slug on stdout, the machine-readable contract an
 // agent reads instead of scraping the human summary.
@@ -696,10 +781,13 @@ func TestRunAssignmentReuse_GrantsTATeam(t *testing.T) {
 		t.Fatalf("runAssignmentReuse: %v", err)
 	}
 	fix.mu.Lock()
-	student, ta := fix.grantedRepo, fix.grantedTATeam
+	student, ta, hta := fix.grantedRepo, fix.grantedTATeam, fix.grantedHTATeam
 	fix.mu.Unlock()
 	if student != "o/hello-template" {
 		t.Errorf("student team grant = %q, want o/hello-template", student)
+	}
+	if hta != "o/hello-template" {
+		t.Errorf("head-TA team grant = %q, want o/hello-template", hta)
 	}
 	if ta != "o/hello-template" {
 		t.Errorf("TA team grant = %q, want o/hello-template", ta)
@@ -723,13 +811,16 @@ func TestRunAssignmentReuse_NoTATeamSkips(t *testing.T) {
 		t.Fatalf("runAssignmentReuse: %v", err)
 	}
 	fix.mu.Lock()
-	student, ta := fix.grantedRepo, fix.grantedTATeam
+	student, ta, hta := fix.grantedRepo, fix.grantedTATeam, fix.grantedHTATeam
 	fix.mu.Unlock()
 	if student != "o/hello-template" {
 		t.Errorf("student team grant = %q, want o/hello-template", student)
 	}
 	if ta != "" {
 		t.Errorf("no TA grant expected, got %q", ta)
+	}
+	if hta != "" {
+		t.Errorf("no head-TA grant expected, got %q", hta)
 	}
 }
 
@@ -756,7 +847,7 @@ func TestRunAssignmentReuse_TAGrantFailureIsNonFatal(t *testing.T) {
 	if student != "o/hello-template" {
 		t.Errorf("student team grant = %q, want o/hello-template", student)
 	}
-	if !strings.Contains(errOut.String(), "TA staff team") {
+	if !strings.Contains(errOut.String(), "could not grant ta staff team") {
 		t.Errorf("expected a TA-grant warning on stderr, got %q", errOut.String())
 	}
 }

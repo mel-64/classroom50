@@ -36,6 +36,18 @@ vi.mock("@/domain/assignments", () => ({
 vi.mock("@/context/github/GitHubProvider", () => ({
   useGitHubClient: () => ({ request: vi.fn() }),
 }))
+// The assignment mutation hooks inject canGrantTemplateAccess from the org-role
+// verdict; mock it deterministically (attemptable) so the forwarded-input
+// assertions are stable.
+vi.mock("@/context/githubOrgRole/useIsOrgOwner", () => ({
+  useIsOrgOwner: () => ({
+    isOwner: true,
+    isPending: false,
+    isError: false,
+    retry: vi.fn(),
+  }),
+  useCanAttemptTemplateGrant: () => true,
+}))
 
 import { useCreateClassroom } from "./useCreateClassroom"
 import { useEditClassroom } from "./useEditClassroom"
@@ -138,6 +150,7 @@ describe("useCreateAssignment", () => {
     expect(createAssignment).toHaveBeenCalledWith(expect.anything(), {
       slug: "hw1",
       name: "HW1",
+      canGrantTemplateAccess: true,
     })
     expect(onWrite).toHaveBeenCalledWith(
       { newCommitSha: "sha-a" },
@@ -160,7 +173,7 @@ describe("useEditAssignment", () => {
 
     expect(editAssignmentWithConflictRetry).toHaveBeenCalledWith(
       expect.anything(),
-      { slug: "hw1", name: "HW1" },
+      { slug: "hw1", name: "HW1", canGrantTemplateAccess: true },
     )
     expect(onWrite).toHaveBeenCalledWith(
       { newCommitSha: "sha-ea" },

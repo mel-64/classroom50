@@ -239,12 +239,13 @@ export async function editAssignment(
   // implies a resolved template, so the guard just narrows the type.
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && preservedEntry.template) {
-    templateGrantWarning = await tryGrantTeamTemplateRead(
+    templateGrantWarning = await resolveTemplateGrant(
       client,
       input.org,
       input.classroom,
       input.slug,
       preservedEntry.template,
+      input.canGrantTemplateAccess,
     )
   }
 
@@ -543,6 +544,15 @@ async function buildAssignmentEntry(
   return { entry, needsTeamGrant }
 }
 
+// The NON-OWNER staff roles that get an eager read grant on a private in-org
+// template (head-TA, then TA). Single-sources the slug set below so the web
+// grant can't silently omit a role. Mirror of the Go source of truth
+// configrepo.TemplateReadStaffRoles ([RoleHeadTA, RoleTA]) — the two are
+// hand-synced; a parity test pins this list so a Go-side addition forces a
+// visible TS edit here rather than silently dropping from the web grant. The
+// teacher team is omitted (owners have repo access via ownership).
+export const TEMPLATE_READ_STAFF_ROLES = ["hta", "ta"] as const
+
 // Grant the classroom team read on an in-org private template so rostered
 // students can generate from it (mirrors the CLI's assignment add). The slug
 // comes from classroom.json (authoritative). A genuinely teamless classroom
@@ -557,11 +567,16 @@ async function grantTeamTemplateRead(
   template: NonNullable<Assignment["template"]>,
 ) {
   let teamSlug: string | undefined
-  let taTeamSlug: string | undefined
+  let staffTeamSlugs: string[] = []
   try {
     const classroomJson = await getClassroomJson(client, { org, classroom })
     teamSlug = classroomJson.team?.slug
-    taTeamSlug = classroomJson.teams?.ta?.slug
+    // Non-owner staff teams (TEMPLATE_READ_STAFF_ROLES) need an explicit read on
+    // a private template; the teacher team is omitted (owners have it via
+    // ownership).
+    staffTeamSlugs = TEMPLATE_READ_STAFF_ROLES.map(
+      (role) => classroomJson.teams?.[role]?.slug,
+    ).filter((s): s is string => Boolean(s))
   } catch (err) {
     // 404 = no classroom.json (pre-feature) is a genuine "no team"; fall
     // through. Anything else is transient and must not be misread as "no team".
@@ -588,25 +603,23 @@ async function grantTeamTemplateRead(
     permission: "pull",
   })
 
-  // Best-effort: grant the TA staff team the same read so a base-permission-
-  // `none` TA can read the private template without waiting for collect-scores
-  // (mirrors the CLI). Non-blocking — the student grant above is what gates
-  // `student accept`; a TA-grant failure only warns and collect-scores
-  // re-affirms it. A classroom with no recorded TA team is a clean skip.
-  if (taTeamSlug) {
+  // Best-effort staff-team grants (mirrors the CLI): non-blocking, since the
+  // student grant above is what gates `student accept` and collect-scores
+  // re-affirms these. The list is already filtered to present slugs.
+  for (const staffTeamSlug of staffTeamSlugs) {
     try {
       await addRepositoryToTeam(client, {
         org,
-        teamSlug: taTeamSlug,
+        teamSlug: staffTeamSlug,
         owner: template.owner,
         repo: template.repo,
         permission: "pull",
       })
     } catch (err) {
-      log.warn("granting TA staff team template read failed (non-fatal)", {
+      log.warn("granting staff team template read failed (non-fatal)", {
         org,
         classroom,
-        taTeamSlug,
+        staffTeamSlug,
         template: `${template.owner}/${template.repo}`,
         err,
       })
@@ -641,6 +654,41 @@ export async function tryGrantTeamTemplateRead(
       `directly in GitHub (Settings -> Collaborators and teams), then students can accept.`
     )
   }
+}
+
+// The warning returned (not undefined) when a non-owner author saves an
+// assignment whose private in-org template needs the owner-only team read-grant.
+// Returning undefined would read as "clean" and 404 students on accept with no
+// signal; this points them at an owner instead.
+export function templateGrantOwnerRequiredWarning(
+  classroom: string,
+  slug: string,
+  template: NonNullable<Assignment["template"]>,
+): string {
+  return (
+    `Assignment "${slug}" was saved, but its private template ${template.owner}/${template.repo} ` +
+    `needs the ${classroomTeamSlug(classroom)} team granted read — a step only an organization owner can do. ` +
+    `Students can't accept it until an owner opens this classroom (which grants it automatically) or grants ` +
+    `the team read on ${template.owner}/${template.repo} directly in GitHub (Settings -> Collaborators and teams).`
+  )
+}
+
+// The one grant-decision recipe shared by create / edit / reuse: attempt the
+// owner-only team read-grant when canGrantTemplateAccess is set, else return the
+// owner-required warning rather than silently skipping (a silent skip would 404
+// students on accept). Single-sourced so the three write paths can't drift; the
+// flag's tri-state derivation lives in useCanAttemptTemplateGrant.
+export async function resolveTemplateGrant(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+  slug: string,
+  template: NonNullable<Assignment["template"]>,
+  canGrantTemplateAccess: boolean | undefined,
+): Promise<string | undefined> {
+  return canGrantTemplateAccess
+    ? tryGrantTeamTemplateRead(client, org, classroom, slug, template)
+    : templateGrantOwnerRequiredWarning(classroom, slug, template)
 }
 
 // Refuse a write into an archived classroom (active: false). The UI hides the
@@ -719,12 +767,13 @@ export async function createAssignment(
 
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && assignmentBody.template) {
-    templateGrantWarning = await tryGrantTeamTemplateRead(
+    templateGrantWarning = await resolveTemplateGrant(
       client,
       input.org,
       input.classroom,
       input.slug,
       assignmentBody.template,
+      input.canGrantTemplateAccess,
     )
   }
 

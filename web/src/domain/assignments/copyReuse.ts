@@ -22,10 +22,7 @@ import {
   classifyPrivateFork,
   crossOrgPrivateForkError,
 } from "./accessPrimitives"
-import {
-  tryGrantTeamTemplateRead,
-  type CreateAssignmentResult,
-} from "./createEdit"
+import { resolveTemplateGrant, type CreateAssignmentResult } from "./createEdit"
 
 export type CopyAssignmentInput = {
   org: string
@@ -38,6 +35,8 @@ export type CopyAssignmentInput = {
   // Default to the source slug/name; the slug must be unique in the target.
   targetSlug?: string
   targetName?: string
+  // See CreateAssignmentInput.canGrantTemplateAccess — same owner-only grant gate.
+  canGrantTemplateAccess?: boolean
 }
 
 // First slug not in `taken`, suffixing `-2`, `-3`, … A base ending in `-<n>`
@@ -239,12 +238,13 @@ export async function copyAssignmentToClassroom(
 
   let templateGrantWarning: string | undefined
   if (needsTeamGrant && entry.template) {
-    templateGrantWarning = await tryGrantTeamTemplateRead(
+    templateGrantWarning = await resolveTemplateGrant(
       client,
       org,
       targetClassroom,
       entry.slug,
       entry.template,
+      input.canGrantTemplateAccess,
     )
   }
 

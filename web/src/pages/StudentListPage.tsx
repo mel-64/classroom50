@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader"
 import PageShell from "@/components/PageShell"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import EnrolledStudents from "@/pages/students/EnrolledStudents"
+import CsvRosterView from "@/pages/students/CsvRosterView"
 import UploadRoster from "@/pages/students/UploadRoster"
 import InviteLinksModal from "@/pages/students/InviteLinksModal"
 import { GitHubLink } from "@/components/GitHubLink"
@@ -17,6 +18,7 @@ import { useSuppressedLogins } from "@/hooks/useSuppressedLogins"
 import { invalidateInviteQueries } from "@/github-core/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireRole from "@/components/RequireRole"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import { useIsOrgOwner } from "@/context/githubOrgRole/useIsOrgOwner"
 import { CONFIG_REPO, DEFAULT_BRANCH } from "@/util/configRepo"
 import { toStudent } from "@/util/roster"
@@ -25,7 +27,10 @@ import { Badge } from "@/components/ui"
 import { ROLE_BADGE_TONE } from "@/util/classroomRoleUI"
 import { useTranslation } from "react-i18next"
 
-const StudentListContent = ({
+// The team-driven roster: live GitHub membership, pending/failed invites, and
+// every management action. Owner-only — it calls useTeamRoster (whose
+// student-team read 403s for a non-owner) and the owner-only invite reads.
+const TeamRosterContent = ({
   org,
   classroom,
 }: {
@@ -201,6 +206,57 @@ const StudentListContent = ({
         </>
       ) : null}
     </>
+  )
+}
+
+// The CSV roster wrapper for a non-owner staffer — fires no team-membership or
+// invite reads (so nothing 403s). See CsvRosterView for the roster.csv rationale.
+const CsvRosterContent = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
+  const { t } = useTranslation()
+  const { students } = useGetStudents(org, classroom)
+
+  return (
+    <>
+      <PageHeader
+        title={t("nav.roster")}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <GitHubLink
+              href={`https://github.com/${org}/${CONFIG_REPO}/blob/${DEFAULT_BRANCH}/${rosterPath(classroom)}`}
+              label={t("students.viewCsvOnGitHub")}
+              title={t("students.viewCsvOnGitHub")}
+            />
+          </span>
+        }
+      />
+      <CsvRosterView students={students} />
+    </>
+  )
+}
+
+// Branch the roster experience on org ownership: a teacher (org owner) gets the
+// team-driven roster with management; a TA/head TA gets the read-only CSV
+// roster. Split so the owner-only useTeamRoster reads only run for an owner (a
+// non-owner can't render TeamRosterContent without 403s).
+const StudentListContent = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
+  const { isOwner, isPending } = useIsOrgOwner()
+  if (isPending) return <RoleResolvingFallback />
+  return isOwner ? (
+    <TeamRosterContent org={org} classroom={classroom} />
+  ) : (
+    <CsvRosterContent org={org} classroom={classroom} />
   )
 }
 

@@ -253,17 +253,20 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 		}
 	}
 
-	// The private migrated template grants read to BOTH the student classroom
-	// team and the TA staff team (eager grant at migrate, not only at
-	// collect-scores).
+	// The private migrated template grants read to the student classroom team
+	// plus the non-owner staff teams (HTA + TA) — the eager grant at migrate, not
+	// only at collect-scores.
 	if got := state.templateGrants["classroom50-classroom50test"]; got != "cs50-fall-2026/readability" {
 		t.Errorf("student team template grant = %q, want cs50-fall-2026/readability", got)
+	}
+	if got := state.templateGrants["classroom50-classroom50test-hta"]; got != "cs50-fall-2026/readability" {
+		t.Errorf("HTA team template grant = %q, want cs50-fall-2026/readability", got)
 	}
 	if got := state.templateGrants["classroom50-classroom50test-ta"]; got != "cs50-fall-2026/readability" {
 		t.Errorf("TA team template grant = %q, want cs50-fall-2026/readability", got)
 	}
-	// Only the TA staff team is eagerly granted (StaffTeamRepoPermissions gate);
-	// the teacher team must NOT get template read.
+	// Only the non-owner staff teams are eagerly granted (StaffTeamRepoPermissions
+	// gate); the teacher team must NOT get template read (owners have it already).
 	if got, ok := state.templateGrants["classroom50-classroom50test-teacher"]; ok {
 		t.Errorf("teacher team must not be granted template read, got %q", got)
 	}
@@ -312,7 +315,7 @@ func TestRunMigrate_NonDryRun_TAGrantFailureIsNonFatal(t *testing.T) {
 	if state.commitsCreated != 1 {
 		t.Errorf("commits created = %d, want 1 (migration still completes)", state.commitsCreated)
 	}
-	if !strings.Contains(stderr.String(), "could not grant TA staff team") {
+	if !strings.Contains(stderr.String(), "could not grant ta staff team") {
 		t.Errorf("expected a TA-grant warning on stderr, got:\n%s", stderr.String())
 	}
 }

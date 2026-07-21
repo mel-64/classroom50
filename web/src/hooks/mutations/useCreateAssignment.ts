@@ -7,6 +7,7 @@ import {
 import { githubKeys } from "@/github-core/queries"
 import { GitHubAPIError } from "@/github-core/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useCanAttemptTemplateGrant } from "@/context/githubOrgRole/useIsOrgOwner"
 import { CONFIG_REPO } from "@/util/configRepo"
 
 // Create an assignment. The hook owns the assignments.json listing invalidate
@@ -25,13 +26,17 @@ export function useCreateAssignment(
 ) {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  // Attempt the owner-only template read-grant unless the org role is a
+  // confirmed non-owner (see useCanAttemptTemplateGrant).
+  const canGrantTemplateAccess = useCanAttemptTemplateGrant()
 
   return useMutation<
     CreateAssignmentResult,
     GitHubAPIError,
     CreateAssignmentInput
   >({
-    mutationFn: (input) => createAssignment(client, input),
+    mutationFn: (input) =>
+      createAssignment(client, { ...input, canGrantTemplateAccess }),
     onSuccess: (result, input) => {
       void queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(

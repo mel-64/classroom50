@@ -316,11 +316,16 @@ type grantContext struct {
 // and reuse; the caller decides WHEN and supplies the wording. A classroom with
 // no team yields an actionable error, not a 404 on a guessed slug.
 //
-// After the student grant it best-effort grants the classroom's TA staff team
-// the same read, so a base-permission-`none` TA (an org member on the TA team)
-// can read the private template without waiting for a collect-scores run. That
-// grant is non-blocking: its failure warns to errOut but never fails an
-// operation that already succeeded for students (collect-scores re-affirms it).
+// The student-team grant is org-owner-only. A non-owner author (head-TA) gets a
+// 403; since the commit already landed, that is NOT fatal — it warns with
+// owner-required guidance and returns nil. A rate-limit/abuse 403 stays fatal
+// (transient, not a permission denial); any other error is fatal too.
+//
+// After the student grant it best-effort grants the classroom's non-owner staff
+// teams (head-TA, TA) the same read, so a base-permission-`none` head-TA/TA can
+// read the private template without waiting for collect-scores. That grant is
+// non-blocking: its failure warns to errOut but never fails an operation that
+// already succeeded for students.
 func grantClassroomTeamTemplateRead(client githubapi.Client, out, errOut io.Writer, org, classroom, branch, slug, tmplOwner, tmplRepo string, ctx grantContext) error {
 	team, ok, err := configrepo.ResolveClassroomTeam(client, org, classroom, branch)
 	if err != nil {
@@ -332,6 +337,16 @@ func grantClassroomTeamTemplateRead(client githubapi.Client, out, errOut io.Writ
 	}
 	granted, err := configrepo.GrantTeamRepoRead(client, org, team.Slug, tmplOwner, tmplRepo)
 	if err != nil {
+		// A 403 is the expected non-owner-author case (see the doc comment): warn
+		// with owner-required guidance and return nil. But a rate-limit/abuse 403
+		// (Retry-After / x-ratelimit-remaining) is transient, not a permission
+		// denial — keep it fatal so a throttle stays a loud, non-zero-exit failure
+		// rather than misleading owner guidance. Only a non-rate-limited 403 is benign.
+		if cliutil.IsHTTPStatus(err, http.StatusForbidden) && !cliutil.IsRateLimited(err) {
+			_, _ = fmt.Fprintf(errOut, "Warning: assignment %s, but granting the %s team read on the private template %s/%s needs an organization owner (a non-owner can't grant repo access at GitHub). Students can't `gh student accept` until an owner grants it — re-run this command as an owner%s, open the classroom in the web app (which grants it automatically), or grant the %s team read on %s/%s directly in GitHub (Settings -> Collaborators and teams).\n",
+				ctx.verb, ctx.classroomNoun, tmplOwner, tmplRepo, ctx.rerunHint, team.Slug, tmplOwner, tmplRepo)
+			return nil
+		}
 		return fmt.Errorf("assignment %s, but granting the %s team read on the private template %s/%s failed: %w", ctx.verb, ctx.classroomNoun, tmplOwner, tmplRepo, err)
 	}
 	if granted {
@@ -341,29 +356,33 @@ func grantClassroomTeamTemplateRead(client githubapi.Client, out, errOut io.Writ
 	return nil
 }
 
-// grantStaffTeamTemplateRead best-effort grants the classroom's TA staff team
-// read on a private, org-owned template (see grantClassroomTeamTemplateRead for
-// the non-blocking rationale). StaffTeamRepoPermissions is a presence gate here:
-// grant the TA team read only when the role is mapped.
+// grantStaffTeamTemplateRead best-effort grants the classroom's non-owner staff
+// teams (TemplateReadStaffRoles: head-TA, TA) read on a private, org-owned
+// template — see grantClassroomTeamTemplateRead for the non-blocking rationale
+// and TemplateReadStaffRoles for why the teacher team is omitted.
 func grantStaffTeamTemplateRead(client githubapi.Client, out, errOut io.Writer, org, classroom, branch, tmplOwner, tmplRepo string) {
-	if _, ok := configrepo.StaffTeamRepoPermissions[configrepo.RoleTA]; !ok {
-		return
-	}
-	taTeam, ok, err := configrepo.ResolveClassroomStaffTeam(client, org, classroom, branch, configrepo.RoleTA)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "Warning: could not read the TA staff team to grant read on private template %s/%s (%v); TAs get read at the next collect-scores run.\n", tmplOwner, tmplRepo, err)
-		return
-	}
-	if !ok {
-		return // no TA team recorded (older classroom) — clean skip
-	}
-	granted, err := configrepo.GrantTeamRepoRead(client, org, taTeam.Slug, tmplOwner, tmplRepo)
-	if err != nil {
-		_, _ = fmt.Fprintf(errOut, "Warning: could not grant TA staff team %s read on private template %s/%s (%v); TAs get read at the next collect-scores run.\n", taTeam.Slug, tmplOwner, tmplRepo, err)
-		return
-	}
-	if granted {
-		_, _ = fmt.Fprintf(out, "%s: granted TA staff team %s read on private template %s/%s\n", org, taTeam.Slug, tmplOwner, tmplRepo)
+	for _, role := range configrepo.TemplateReadStaffRoles {
+		// StaffTeamRepoPermissions is a presence gate: grant read only for a role
+		// mapped to a student-repo/template permission.
+		if _, ok := configrepo.StaffTeamRepoPermissions[role]; !ok {
+			continue
+		}
+		team, ok, err := configrepo.ResolveClassroomStaffTeam(client, org, classroom, branch, role)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "Warning: could not read the %s staff team to grant read on private template %s/%s (%v); staff get read at the next collect-scores run.\n", role, tmplOwner, tmplRepo, err)
+			continue
+		}
+		if !ok {
+			continue // no team recorded (older classroom) — clean skip
+		}
+		granted, err := configrepo.GrantTeamRepoRead(client, org, team.Slug, tmplOwner, tmplRepo)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "Warning: could not grant %s staff team %s read on private template %s/%s (%v); staff get read at the next collect-scores run.\n", role, team.Slug, tmplOwner, tmplRepo, err)
+			continue
+		}
+		if granted {
+			_, _ = fmt.Fprintf(out, "%s: granted %s staff team %s read on private template %s/%s\n", org, role, team.Slug, tmplOwner, tmplRepo)
+		}
 	}
 }
 
