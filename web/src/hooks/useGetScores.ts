@@ -70,9 +70,9 @@ export type SubmissionRow = {
   late?: boolean
   // Last (re-)graded instant of the latest submission (mirrors submissions[0]).
   gradedAt?: string
-  // A live-only row: the student has a submit/* release the collector hasn't
-  // ingested yet, so it carries presence (datetime/release) but no grade.
-  // Rendered as "submitted, not yet collected" rather than a 0/0 score.
+  // A row with a submission the collector recorded as present but not graded
+  // (no score yet) — rendered as "submitted, not yet collected" rather than a
+  // 0/0 score. Excluded from graded stats/average and the CSV score column.
   pending?: boolean
   // The row's `submissionCount` was raised above the collected history by live
   // release data: the student has pushed more `submit/*` releases than

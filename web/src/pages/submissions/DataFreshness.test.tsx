@@ -4,18 +4,14 @@ import { render, screen, cleanup } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // t returns the key (plus the interpolated `when` when present) so assertions
-// can distinguish the live/static/never provenance lines without the full pack.
+// can distinguish the provenance lines without the full pack.
 vi.mock("react-i18next", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-i18next")>()
   return {
     ...actual,
     useTranslation: () => ({
-      t: (key: string, opts?: { when?: string; count?: number }) =>
-        opts?.when
-          ? `${key}:${opts.when}`
-          : opts?.count !== undefined
-            ? `${key}:${opts.count}`
-            : key,
+      t: (key: string, opts?: { when?: string }) =>
+        opts?.when ? `${key}:${opts.when}` : key,
     }),
   }
 })
@@ -26,122 +22,71 @@ afterEach(cleanup)
 
 const base = {
   lastCollectedLabel: "18 hours ago",
-  fetching: false,
-  errorCount: 0,
+  stale: false,
+  collecting: false,
   onRefresh: () => {},
 }
 
 describe("DataFreshness", () => {
   it("shows the empty-repo note instead of freshness for empty_repo assignments", () => {
-    render(<DataFreshness mode="static" {...base} emptyRepo />)
+    render(<DataFreshness {...base} emptyRepo />)
     expect(screen.getByText("submissions.emptyRepoNote")).not.toBeNull()
-    expect(screen.queryByText("submissions.freshness.staticChip")).toBeNull()
+    expect(
+      screen.queryByText("submissions.freshness.collected:18 hours ago"),
+    ).toBeNull()
   })
 
-  it("static mode: static chip + 'Collected {when}' (the true data age, not the fetch time)", () => {
-    render(<DataFreshness mode="static" {...base} />)
-    expect(screen.getByText("submissions.freshness.staticChip")).not.toBeNull()
+  it("leads with 'Collected {when}' (the true data age, not the fetch time)", () => {
+    render(<DataFreshness {...base} />)
     expect(
-      screen.getByText("submissions.freshness.staticCollected:18 hours ago"),
+      screen.getByText("submissions.freshness.collected:18 hours ago"),
     ).not.toBeNull()
   })
 
-  it("static mode with no collection yet: never-collected line", () => {
-    render(<DataFreshness mode="static" {...base} lastCollectedLabel={null} />)
+  it("shows the never-collected line when nothing has been collected", () => {
+    render(<DataFreshness {...base} lastCollectedLabel={null} />)
     expect(
-      screen.getByText("submissions.freshness.staticNeverCollected"),
+      screen.getByText("submissions.freshness.neverCollected"),
     ).not.toBeNull()
   })
 
-  it("live mode: live chip + names both sources (presence now, scores from last collection)", () => {
-    render(
-      <DataFreshness
-        mode="live"
-        {...base}
-        liveCapable
-        onViewModeChange={() => {}}
-      />,
-    )
-    expect(screen.getByText("submissions.freshness.liveChip")).not.toBeNull()
-    expect(
-      screen.getByText("submissions.freshness.liveScores:18 hours ago"),
-    ).not.toBeNull()
+  it("shows the warning 'Sync submissions now' button when out of sync, else 'Refresh'", () => {
+    const { rerender } = render(<DataFreshness {...base} stale={false} />)
+    expect(screen.getByText("submissions.freshness.refresh")).not.toBeNull()
+    expect(screen.queryByText("submissions.freshness.sync")).toBeNull()
+    rerender(<DataFreshness {...base} stale />)
+    expect(screen.getByText("submissions.freshness.sync")).not.toBeNull()
+    expect(screen.queryByText("submissions.freshness.refresh")).toBeNull()
   })
 
-  it("live mode with no collection yet: not-collected line", () => {
-    render(
-      <DataFreshness
-        mode="live"
-        {...base}
-        liveCapable
-        onViewModeChange={() => {}}
-        lastCollectedLabel={null}
-      />,
-    )
-    expect(
-      screen.getByText("submissions.freshness.liveNoScores"),
-    ).not.toBeNull()
-  })
-
-  it("labels the refresh button by mode (live data vs snapshot)", () => {
+  it("triggers collect when the button is clicked (in sync or out of sync)", async () => {
+    const onRefresh = vi.fn()
     const { rerender } = render(
-      <DataFreshness
-        mode="live"
-        {...base}
-        liveCapable
-        onViewModeChange={() => {}}
-      />,
+      <DataFreshness {...base} onRefresh={onRefresh} />,
     )
-    expect(
-      screen.getByLabelText("submissions.freshness.refreshLive"),
-    ).not.toBeNull()
-    rerender(<DataFreshness mode="static" {...base} />)
-    expect(
-      screen.getByLabelText("submissions.freshness.refreshStatic"),
-    ).not.toBeNull()
+    await userEvent.click(screen.getByText("submissions.freshness.refresh"))
+    rerender(<DataFreshness {...base} stale onRefresh={onRefresh} />)
+    await userEvent.click(screen.getByText("submissions.freshness.sync"))
+    expect(onRefresh).toHaveBeenCalledTimes(2)
   })
 
-  it("surfaces the degraded-read warning only in live mode when repos failed", () => {
-    const { rerender } = render(
-      <DataFreshness
-        mode="live"
-        {...base}
-        liveCapable
-        onViewModeChange={() => {}}
-        errorCount={3}
-      />,
-    )
-    expect(screen.getByText("submissions.live.incomplete:3")).not.toBeNull()
-    // Static mode never shows the live incomplete warning, even with a stray count.
-    rerender(<DataFreshness mode="static" {...base} errorCount={3} />)
-    expect(screen.queryByText("submissions.live.incomplete:3")).toBeNull()
+  it("disables the button and shows 'Collecting…' while a collect is in flight", () => {
+    render(<DataFreshness {...base} stale collecting />)
+    const btn = screen.getByText("submissions.freshness.refreshing")
+    expect((btn.closest("button") as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("disables refresh while fetching", () => {
-    render(<DataFreshness mode="static" {...base} fetching />)
-    const btn = screen.getByLabelText("submissions.freshness.refreshStatic")
-    expect((btn as HTMLButtonElement).disabled).toBe(true)
+  it("omits the button entirely when no onRefresh is provided", () => {
+    render(<DataFreshness {...base} stale onRefresh={undefined} />)
+    expect(screen.queryByText("submissions.freshness.sync")).toBeNull()
+    expect(screen.queryByText("submissions.freshness.refresh")).toBeNull()
+    expect(screen.queryByText("submissions.freshness.refreshing")).toBeNull()
   })
 
-  it("renders a mode switch and flips the view when live-capable", async () => {
-    const onViewModeChange = vi.fn()
-    render(
-      <DataFreshness
-        mode="live"
-        {...base}
-        liveCapable
-        onViewModeChange={onViewModeChange}
-      />,
-    )
-    const toggle = screen.getByRole("checkbox")
-    expect((toggle as HTMLInputElement).checked).toBe(true)
-    await userEvent.click(toggle)
-    expect(onViewModeChange).toHaveBeenCalledWith("static")
-  })
-
-  it("shows a non-interactive Static chip when the viewer can't go live", () => {
-    render(<DataFreshness mode="static" {...base} liveCapable={false} />)
-    expect(screen.queryByRole("checkbox")).toBeNull()
-    expect(screen.getByText("submissions.freshness.staticChip")).not.toBeNull()
+  it("shows a degraded-read warning when some repos couldn't be read", () => {
+    const { rerender } = render(<DataFreshness {...base} errorCount={0} />)
+    expect(screen.queryByText(/submissions\.live\.incomplete/)).toBeNull()
+    rerender(<DataFreshness {...base} errorCount={3} />)
+    expect(screen.getByText(/submissions\.live\.incomplete/)).not.toBeNull()
   })
 })

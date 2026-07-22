@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { Share2 } from "lucide-react"
 
 import { Button, Toolbar } from "@/components/ui"
 import type {
@@ -17,9 +18,10 @@ import {
 // Controlled by SubmissionsPage; emits filter/sort/query changes. The
 // not-submitted filter is hidden for group assignments; passing/accepted selects
 // appear only when available. `leading` hosts the left-aligned DataFreshness
-// widget (mode toggle + recency + refresh); `trailing` hosts the Actions menu
-// (Share, Metrics, Collect, Regrade, CSV) — so freshness, search + filters, and
-// actions share one bar, keeping the roster high on the page.
+// widget (freshness line + Sync/Refresh button); a standalone Share button sits
+// by the search bar; `trailing` hosts the Actions menu (Metrics, Collect,
+// Regrade, CSV) — so freshness, search + filters, and actions share one bar,
+// keeping the roster high on the page.
 const SubmissionsControls = ({
   query,
   onQueryChange,
@@ -31,8 +33,8 @@ const SubmissionsControls = ({
   acceptedAvailable = false,
   passingAvailable = false,
   sections = [],
-  liveCapable = false,
-  viewMode = "static",
+  hideSortAndStatus = false,
+  onShare,
   leading,
   trailing,
 }: {
@@ -46,27 +48,23 @@ const SubmissionsControls = ({
   acceptedAvailable?: boolean
   passingAvailable?: boolean
   sections?: string[]
-  // Whether a live view is active. In live mode the snapshot-only controls
-  // (Sort, Status/Passing) are hidden, since live is a fixed name-ordered,
-  // unfiltered view. The Live/Static toggle itself lives in the header's
-  // DataFreshness widget, passed here via `leading`.
-  liveCapable?: boolean
-  viewMode?: "live" | "static"
+  // When live data is shown the view is a fixed name-ordered, unfiltered
+  // presence view (the page-scoped fan-out can only align to that), so Sort and
+  // the Status/Passing selects are HIDDEN — not just disabled — to keep the
+  // toolbar honest. Search + Section still apply (they don't reorder the spine).
+  hideSortAndStatus?: boolean
+  // Opens the Share (accept-link) modal. Rendered as a prominent button next to
+  // the search bar (the most common non-grading action), not buried in Actions.
+  onShare?: () => void
   // Left-aligned lead content (the DataFreshness widget). Search + filters +
   // sort + actions sit on the right.
   leading?: ReactNode
   trailing?: ReactNode
 }) => {
   const { t } = useTranslation()
-  // Live view is a fixed name-ordered, unfiltered presence view (the
-  // page-scoped fan-out can only align to that), so the snapshot-only controls
-  // (Sort, Status/Passing) are HIDDEN in live mode — not just disabled — to keep
-  // the toolbar uncluttered. They return in static view.
-  const liveOn = liveCapable && viewMode === "live"
-  // In live view only search + section apply (status/passing are hidden and
-  // neutralized), so the Clear affordance must ignore the latent status/passing
-  // values a prior static session may have left set.
-  const hasActiveFilter = liveOn
+  // In live mode only search + section apply, so the Clear affordance must
+  // ignore the latent status/passing values (hidden, not user-editable here).
+  const hasActiveFilter = hideSortAndStatus
     ? filters.section !== "all" || query.trim() !== ""
     : filters.submission !== "all" ||
       filters.passing !== "all" ||
@@ -76,10 +74,12 @@ const SubmissionsControls = ({
 
   const clearAll = () => {
     onQueryChange("")
-    // Preserve the current status/passing/accepted axes in live mode (they're
-    // hidden, not user-editable here); clear only what live exposes.
+    // Preserve the hidden status/passing/accepted axes in live mode; clear only
+    // what's exposed (search + section).
     onFiltersChange(
-      liveOn ? { ...filters, section: "all" } : { ...DEFAULT_FILTERS },
+      hideSortAndStatus
+        ? { ...filters, section: "all" }
+        : { ...DEFAULT_FILTERS },
     )
   }
 
@@ -108,6 +108,13 @@ const SubmissionsControls = ({
           ariaLabel={t("submissions.filters.searchAria")}
         />
 
+        {onShare && (
+          <Button variant="outline" size="sm" onClick={onShare}>
+            <Share2 aria-hidden="true" className="size-4" />
+            {t("submissions.menu.share")}
+          </Button>
+        )}
+
         {sections.length > 0 && (
           <Toolbar.FilterSelect
             label={t("submissions.filters.sectionLabel")}
@@ -127,7 +134,7 @@ const SubmissionsControls = ({
           </Toolbar.FilterSelect>
         )}
 
-        {!liveOn && (
+        {!hideSortAndStatus && (
           <Toolbar.FilterSelect
             label={t("submissions.filters.submissionLabel")}
             value={statusValue}
@@ -166,7 +173,7 @@ const SubmissionsControls = ({
           </Toolbar.FilterSelect>
         )}
 
-        {!liveOn && passingAvailable && (
+        {!hideSortAndStatus && passingAvailable && (
           <Toolbar.FilterSelect
             label={t("submissions.filters.passingLabel")}
             value={filters.passing}
@@ -187,7 +194,7 @@ const SubmissionsControls = ({
           </Toolbar.FilterSelect>
         )}
 
-        {!liveOn && (
+        {!hideSortAndStatus && (
           <Toolbar.FilterSelect
             label={t("submissions.filters.sortLabel")}
             value={sort}
