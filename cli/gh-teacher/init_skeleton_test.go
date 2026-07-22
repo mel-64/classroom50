@@ -330,18 +330,20 @@ func TestSkeletonFiles_AutogradeRunner(t *testing.T) {
 		}
 	}
 
-	// Toolchain steps gated on matching setup outputs.
+	// Toolchain steps gated on matching setup outputs AND a hosted runner
+	// (`runner.environment != 'self-hosted'`); see the workflow comment / #369.
 	for _, want := range []string{
-		"if: needs.setup.outputs.python != ''",
+		"if: needs.setup.outputs.python != '' && runner.environment != 'self-hosted'",
 		"actions/setup-python@v6",
-		"if: needs.setup.outputs.node != ''",
+		"if: needs.setup.outputs.node != '' && runner.environment != 'self-hosted'",
 		"actions/setup-node@v6",
-		"if: needs.setup.outputs.java != ''",
+		"if: needs.setup.outputs.java != '' && runner.environment != 'self-hosted'",
 		"actions/setup-java@v5",
-		"if: needs.setup.outputs.go != ''",
+		"if: needs.setup.outputs.go != '' && runner.environment != 'self-hosted'",
 		"actions/setup-go@v6",
-		"if: needs.setup.outputs.rust != ''",
+		"if: needs.setup.outputs.rust != '' && runner.environment != 'self-hosted'",
 		"dtolnay/rust-toolchain@master",
+		"if: needs.setup.outputs.apt != '' && runner.os == 'Linux' && runner.environment != 'self-hosted'",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("autograde-runner.yaml missing toolchain dispatch %q", want)
@@ -531,6 +533,68 @@ printf '%s\n' "$*" >> "$GH_LOG"
 	}
 	if !strings.Contains(body, `gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest=true`) {
 		t.Errorf("set-latest job missing forward-only latest pointer flip")
+	}
+}
+
+// TestAutogradeRunnerSelfHostedSkipsToolchains pins the issue #369 fix (see
+// the workflow's grade-step block comment for the why): every managed setup
+// step must gate on `runner.environment != 'self-hosted'`, and the fragile
+// label-string detection / `self-hosted` output must stay gone.
+func TestAutogradeRunnerSelfHostedSkipsToolchains(t *testing.T) {
+	files, err := skeletonFiles("main")
+	if err != nil {
+		t.Fatalf("skeletonFiles: %v", err)
+	}
+	body, ok := files[".github/workflows/autograde-runner.yaml"]
+	if !ok {
+		t.Fatal("autograde-runner.yaml missing from skeleton")
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("parse autograde-runner.yaml: %v", err)
+	}
+
+	// Detection must NOT be a setup-time label heuristic: a self-hosted
+	// runner isn't guaranteed to carry the `self-hosted` label (registered
+	// with --no-default-labels, or selected by a runner group / custom
+	// label). Assert the fragile output and label-string detection are gone.
+	if _, ok := nested(doc, "jobs", "setup", "outputs", "self-hosted"); ok {
+		t.Error("setup.outputs.self-hosted must be removed: detection moved to runner.environment on the grade runner (issue #369)")
+	}
+	if strings.Contains(body, `"self-hosted" in runs_on_labels`) {
+		t.Error("inline label-string self-hosted detection must be removed in favor of runner.environment (misses --no-default-labels / runner-group targeting)")
+	}
+
+	const guard = "runner.environment != 'self-hosted'"
+	grade, ok := nested(doc, "jobs", "grade")
+	if !ok {
+		t.Fatal("grade job missing")
+	}
+	managed := 0
+	for _, step := range workflowSteps(grade) {
+		uses, _ := step["uses"].(string)
+		run, _ := step["run"].(string)
+		isSetupAction := strings.HasPrefix(uses, "actions/setup-") ||
+			strings.HasPrefix(uses, "dtolnay/rust-toolchain")
+		isApt := strings.Contains(run, "apt-get install")
+		if !isSetupAction && !isApt {
+			continue
+		}
+		managed++
+		cond, _ := step["if"].(string)
+		if !strings.Contains(cond, guard) {
+			label := uses
+			if label == "" {
+				label = "apt-install"
+			}
+			t.Errorf("grade managed setup step %q if: %q is missing the self-hosted skip guard %q (issue #369)", label, cond, guard)
+		}
+	}
+	// python/node/java/go/rust/apt — regression guard against a step that
+	// stops being recognized (and thus silently skips the guard check).
+	if managed != 6 {
+		t.Errorf("recognized %d managed setup steps in grade, want 6 (python/node/java/go/rust/apt)", managed)
 	}
 }
 

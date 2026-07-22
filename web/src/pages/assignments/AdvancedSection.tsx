@@ -4,6 +4,7 @@ import { Input, Textarea } from "@/components/ui"
 import { parseAllowedFiles } from "@/util/allowedFiles"
 import { parseReleaseAssets } from "@/util/releaseAssets"
 import { RUNTIME_LANGUAGES } from "@/util/runtime"
+import { isSelfHostedRunnerValue } from "@/util/runners"
 import {
   FieldLabel,
   HelpTooltip,
@@ -95,26 +96,43 @@ export const AdvancedSection = ({
         }
       </form.Subscribe>
 
-      <div className="mt-4">
-        <FieldLabel
-          label={t("assignments.form.runtime.languagesHeading")}
-          help={t("assignments.form.runtime.languagesTip")}
-        />
-        <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
-          {RUNTIME_LANGUAGES.map((language) => (
-            <LanguageVersionField
-              key={language}
-              form={form}
-              language={language}
-            />
-          ))}
-        </div>
-      </div>
+      <form.Subscribe selector={(state) => state.values.runs_on}>
+        {(runsOn) => {
+          const selfHosted = isSelfHostedRunnerValue(runsOn)
+          return (
+            <>
+              <div className="mt-4">
+                <FieldLabel
+                  label={t("assignments.form.runtime.languagesHeading")}
+                  help={t("assignments.form.runtime.languagesTip")}
+                />
+                {selfHosted && (
+                  <p className="mb-3 text-sm text-warning">
+                    {t("assignments.form.runtime.selfHostedDisabled")}
+                  </p>
+                )}
+                <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                  {RUNTIME_LANGUAGES.map((language) => (
+                    <LanguageVersionField
+                      key={language}
+                      form={form}
+                      language={language}
+                      disabled={selfHosted}
+                    />
+                  ))}
+                </div>
+              </div>
 
-      <form.Subscribe selector={(state) => state.values.runtime_env}>
-        {(runtimeEnv) =>
-          runtimeEnv === "container" ? null : <AptField form={form} />
-        }
+              <form.Subscribe selector={(state) => state.values.runtime_env}>
+                {(runtimeEnv) =>
+                  runtimeEnv === "container" ? null : (
+                    <AptField form={form} disabled={selfHosted} />
+                  )
+                }
+              </form.Subscribe>
+            </>
+          )
+        }}
       </form.Subscribe>
 
       {/* Grading-only settings: a bare repo never autogrades, so the setup

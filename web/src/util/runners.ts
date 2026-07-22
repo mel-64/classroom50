@@ -164,3 +164,17 @@ export function verifyRunnerLabels(
 
   return { kind: "unknown", labels }
 }
+
+// Whether the typed runner value targets a self-hosted runner, matching the
+// RunnerField's "self-hosted" verdict (verifyRunnerLabels(...).kind). Advisory
+// only — used to disable the built-in toolchain options in the form and to
+// strip them on serialize (the runtime ignores them on self-hosted; see #369).
+// Uses the no-org-access path so the decision is synchronous (no runner API
+// call) and stays in lockstep with the field's own note; a lone custom label
+// reads as unknown, not self-hosted, so the options fail open (stay enabled).
+export function isSelfHostedRunnerValue(raw: string): boolean {
+  return (
+    verifyRunnerLabels(raw, { available: false, reason: "no-access" }).kind ===
+    "self-hosted"
+  )
+}

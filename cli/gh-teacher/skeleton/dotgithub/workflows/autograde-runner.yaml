@@ -629,27 +629,35 @@ jobs:
           persist-credentials: false
 
       # === Language toolchains (driven by `runtime:` in assignments.json) ===
+      # All gated on a hosted runner: `runner.environment` is resolved on the
+      # actual runner at step time and is 'self-hosted' | 'github-hosted'. A
+      # self-hosted runner supplies its own prebuilt toolchains (and their
+      # dependencies), so layering setup-* / apt on top would shadow the
+      # runner's environment and break autograders that import preinstalled
+      # packages (see issue #369). Keyed on the runner itself — not the
+      # `runs-on` label — so it also covers self-hosted runners registered
+      # with --no-default-labels or selected by a runner group.
       - name: Set up Python
-        if: needs.setup.outputs.python != ''
+        if: needs.setup.outputs.python != '' && runner.environment != 'self-hosted'
         uses: actions/setup-python@v6
         with:
           python-version: ${{ needs.setup.outputs.python }}
 
       - name: Set up Node
-        if: needs.setup.outputs.node != ''
+        if: needs.setup.outputs.node != '' && runner.environment != 'self-hosted'
         uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.setup.outputs.node }}
 
       - name: Set up Java
-        if: needs.setup.outputs.java != ''
+        if: needs.setup.outputs.java != '' && runner.environment != 'self-hosted'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ needs.setup.outputs.java }}
 
       - name: Set up Go
-        if: needs.setup.outputs.go != ''
+        if: needs.setup.outputs.go != '' && runner.environment != 'self-hosted'
         uses: actions/setup-go@v6
         with:
           go-version: ${{ needs.setup.outputs.go }}
@@ -658,13 +666,13 @@ jobs:
       # standard. Pinned to @master with an explicit `toolchain:` input
       # (its @rev-derived default can't read a version from a SHA pin).
       - name: Set up Rust
-        if: needs.setup.outputs.rust != ''
+        if: needs.setup.outputs.rust != '' && runner.environment != 'self-hosted'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.setup.outputs.rust }}
 
       - name: Install apt packages
-        if: needs.setup.outputs.apt != '' && runner.os == 'Linux'
+        if: needs.setup.outputs.apt != '' && runner.os == 'Linux' && runner.environment != 'self-hosted'
         run: |
           set -euo pipefail
           sudo apt-get update -qq
