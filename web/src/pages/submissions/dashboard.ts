@@ -6,7 +6,7 @@ import type { SubmissionRow } from "@/hooks/useGetScores"
 import type { GitHubRepo } from "@/github-core/types"
 import type { Student } from "@/types/classroom"
 import type { BadgeTone } from "@/components/ui"
-import { getName } from "@/util/students"
+import { getName, nameFromParts } from "@/util/students"
 import { studentRepoName } from "@/util/studentRepo"
 
 // Whether a row's grade still belongs to a current roster member. A row is
@@ -40,23 +40,54 @@ export function rosterScopedRows(
 
 // Fold live submission presence (submit/* releases read directly from student
 // repos) into the collected snapshot rows. `scores.json` stays the source of
-// record: a snapshot row always wins for an owner it already covers (it carries
-// the graded score; live presence carries none yet — see the plan's U2 spike).
-// Live adds a row ONLY for an owner absent from the snapshot — a student who
-// pushed but hasn't been collected yet (the #347 lag). Such a row is marked
-// `pending` (no grade) so the table shows "submitted, not yet collected" rather
-// than a fake 0/0. Owner match is case-insensitive; the union preserves snapshot
-// order, then appends live-only rows newest-first.
+// record for GRADES: a snapshot row keeps its graded score, history, and
+// review link. Live data contributes two things on top:
+//
+//   - COUNT: a snapshot row's `submissionCount` is raised to the live count
+//     when the student has pushed more submit/* releases than the last collect
+//     ingested (the #347 lag). The row is flagged `staleCount` so the table can
+//     hint that the newest push isn't graded yet. Live never LOWERS a count
+//     (a live read is one page / a lower bound; the snapshot may legitimately
+//     hold more), so the merged count is max(snapshot, live).
+//   - PRESENCE: live adds a row ONLY for an owner absent from the snapshot — a
+//     student who pushed but hasn't been collected yet. Such a row is `pending`
+//     (no grade) with the live count, so the table shows "submitted, not yet
+//     collected" rather than a fake 0/0.
+//
+// Owner match is case-insensitive; the union preserves snapshot order (with
+// counts updated in place), then appends live-only rows newest-first.
 export type LiveSubmissionPresence = {
   owner: string
   datetime: string
   release: string
+  // Live submit/* release count for the repo (a lower bound; see LiveSubmission).
+  submissionCount: number
 }
 
 export function mergeLiveRows(
   snapshotRows: SubmissionRow[],
   liveRows: LiveSubmissionPresence[],
 ): SubmissionRow[] {
+  const liveByOwner = new Map<string, LiveSubmissionPresence>()
+  for (const live of liveRows) {
+    liveByOwner.set(live.owner.trim().toLowerCase(), live)
+  }
+
+  const merged = snapshotRows.map((row) => {
+    const live = liveByOwner.get(row.owner.trim().toLowerCase())
+    // Live is a lower bound (one page), so it can only reveal MORE submissions
+    // than the snapshot captured, never fewer. Only bump + flag when it does,
+    // and carry the live push time so the table can show the true latest push
+    // (later than the graded datetime) without moving the graded submission.
+    if (!live || live.submissionCount <= row.submissionCount) return row
+    return {
+      ...row,
+      submissionCount: live.submissionCount,
+      staleCount: true,
+      liveLatestAt: live.datetime,
+    }
+  })
+
   const snapshotOwners = new Set(
     snapshotRows.map((row) => row.owner.trim().toLowerCase()),
   )
@@ -75,12 +106,13 @@ export function mergeLiveRows(
       review: "",
       score: 0,
       "max-score": 0,
-      submissionCount: 1,
+      // At least 1 (the release we just saw); use the live count when higher.
+      submissionCount: Math.max(1, live.submissionCount),
       pending: true,
       submissions: [],
     }))
 
-  return [...snapshotRows, ...liveOnly]
+  return [...merged, ...liveOnly]
 }
 
 // the assignment sets no threshold — then every row is "ungraded" (as is an
@@ -236,8 +268,6 @@ export function studentInSection(student: Student, section: string): boolean {
 }
 
 export type SubmissionSort = "recent" | "oldest" | "name-asc" | "name-desc"
-
-export const DEFAULT_SORT: SubmissionSort = "recent"
 
 // Who has accepted an INDIVIDUAL assignment, derived from the org repo list: a
 // student accepted iff `<classroom>-<assignment>-<username>` exists. Independent
@@ -639,4 +669,322 @@ export function selectActiveWorkflowAction(
   if (!collect.idle) return "collect"
   if (!regrade.idle) return "regrade"
   return null
+}
+
+// Client-side table pagination over the combined display list. For an
+// INDIVIDUAL assignment the list is one row per roster student in name order
+// (the roster is pre-sorted by sortStudentsByName): a student with a submission
+// renders as a "row", otherwise as a "nonSubmitter" — submitters and
+// non-submitters interleave by name rather than grouping. For a GROUP
+// assignment the unit is the repo, not the student, so submitted group rows
+// come first (name-ordered) then unsubmitted group repos. Pagination spans the
+// whole list as one sequence, and the current page's owners drive the live
+// fan-out (so it reads only the repos on the page you're viewing).
+export type DisplayItem =
+  | { kind: "row"; row: SubmissionRow }
+  | { kind: "nonSubmitter"; student: Student }
+  | { kind: "groupRepo"; repo: GroupRepo }
+
+// The default and offered "Show N entries" page sizes (mirrors the reference
+// gradebook UI). Default is the first entry.
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
+export const DEFAULT_PAGE_SIZE: number = PAGE_SIZE_OPTIONS[0]
+
+// Build the ordered display list for an INDIVIDUAL assignment: one item per
+// roster student, in the roster's (name-sorted) order, each resolved to the
+// student's submission row when one exists (owner match, case-insensitive) or a
+// non-submitter item otherwise. `rows` are the already filtered/sorted submitted
+// rows; `nonSubmitters` the already filtered non-submitter students. A student
+// present in neither filtered set (filtered out) is omitted. Interleaving by
+// the roster spine — rather than concatenating the two groups — is what makes a
+// page a clean deterministic slice of the roster.
+export function buildRosterDisplayItems(
+  roster: Student[],
+  rows: SubmissionRow[],
+  nonSubmitters: Student[],
+): DisplayItem[] {
+  const rowByOwner = new Map<string, SubmissionRow>()
+  for (const row of rows) rowByOwner.set(row.owner.trim().toLowerCase(), row)
+  const nonSubmitterLogins = new Set(
+    nonSubmitters.map((s) => s.username.trim().toLowerCase()),
+  )
+
+  const items: DisplayItem[] = []
+  const seen = new Set<string>()
+  for (const student of roster) {
+    const login = student.username.trim().toLowerCase()
+    seen.add(login)
+    const row = rowByOwner.get(login)
+    if (row) {
+      items.push({ kind: "row", row })
+    } else if (nonSubmitterLogins.has(login)) {
+      items.push({ kind: "nonSubmitter", student })
+    }
+    // A student in neither filtered set was filtered out — omit.
+  }
+  // A submitted row whose owner isn't on the roster (an unenrolled student still
+  // in scores.json, a group founder, a stray repo) won't appear via the roster
+  // walk. rosterScopedRows already drops off-roster rows for individual
+  // assignments, so this is defensive: append any leftover rows in their given
+  // order so a real submission is never hidden.
+  for (const row of rows) {
+    if (!seen.has(row.owner.trim().toLowerCase())) {
+      items.push({ kind: "row", row })
+    }
+  }
+  return items
+}
+
+// Build the display list for a GROUP assignment in the name-ordered live view:
+// one item per group founder, name-sorted, resolved to the founder's submitted
+// row when one exists (owner match) else an unsubmitted group-repo row. This is
+// the group analog of buildRosterDisplayItems and pages in the SAME order as
+// pageRepoOwnerSpine's group branch, so the live fan-out and the rendered page
+// line up. `rows` are the (filtered) submitted group rows; `groupRepos` the
+// unsubmitted group repos.
+export function buildGroupRosterDisplayItems(
+  rows: SubmissionRow[],
+  groupRepos: GroupRepo[],
+  students: Student[],
+): DisplayItem[] {
+  const submitted = rows.map<DisplayItem>((row) => ({ kind: "row", row }))
+  const unsubmitted = groupRepos.map<DisplayItem>((repo) => ({
+    kind: "groupRepo",
+    repo,
+  }))
+  // Precompute the name map once so the comparator is O(1) per compare (getName
+  // would re-scan the roster each call). ownerSortKey matches pageRepoOwnerSpine's
+  // group ordering, keeping the rendered page and the fan-out spine aligned.
+  const names = buildNameKeyLookup(students)
+  return [...submitted, ...unsubmitted].sort((a, b) =>
+    ownerSortKey(displayItemOwner(a), names).localeCompare(
+      ownerSortKey(displayItemOwner(b), names),
+    ),
+  )
+}
+
+// Build the ordered display list for a GROUP assignment under a non-name sort (a
+// static snapshot view): submitted group rows first (in the caller's sort
+// order), then unsubmitted group repos.
+export function buildGroupDisplayItems(
+  rows: SubmissionRow[],
+  groupRepos: GroupRepo[],
+): DisplayItem[] {
+  return [
+    ...rows.map<DisplayItem>((row) => ({ kind: "row", row })),
+    ...groupRepos.map<DisplayItem>((repo) => ({ kind: "groupRepo", repo })),
+  ]
+}
+
+// Build the display list for an INDIVIDUAL assignment under a non-name sort (a
+// static snapshot view — live is off then, so there's no roster-spine coupling
+// to preserve): the already-sorted submitted rows first, then non-submitters.
+// Preserves the caller's chosen sort for the submitted rows rather than forcing
+// the roster's name order.
+export function buildSortedDisplayItems(
+  rows: SubmissionRow[],
+  nonSubmitters: Student[],
+): DisplayItem[] {
+  return [
+    ...rows.map<DisplayItem>((row) => ({ kind: "row", row })),
+    ...nonSubmitters.map<DisplayItem>((student) => ({
+      kind: "nonSubmitter",
+      student,
+    })),
+  ]
+}
+
+export type PageBounds = {
+  // 0-based page clamped to [0, pageCount-1]; 0 when the list is empty.
+  page: number
+  pageCount: number
+  // 1-based inclusive range of items shown, for the "N to M of T" label; both 0
+  // when the list is empty.
+  from: number
+  to: number
+  total: number
+}
+
+// Clamp a requested page to the valid range for a list of `total` items at
+// `pageSize`. Pure so the page/label math is unit-testable and shared between
+// the footer and the slice.
+export function pageBounds(
+  total: number,
+  pageSize: number,
+  requestedPage: number,
+): PageBounds {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.min(Math.max(0, requestedPage), pageCount - 1)
+  if (total === 0) {
+    return { page: 0, pageCount, from: 0, to: 0, total: 0 }
+  }
+  const from = page * pageSize + 1
+  const to = Math.min(total, (page + 1) * pageSize)
+  return { page, pageCount, from, to, total }
+}
+
+// The slice of display items for the clamped current page.
+export function paginateDisplayItems(
+  items: DisplayItem[],
+  pageSize: number,
+  requestedPage: number,
+): DisplayItem[] {
+  const { page } = pageBounds(items.length, pageSize, requestedPage)
+  const start = page * pageSize
+  return items.slice(start, start + pageSize)
+}
+
+// The repo-owner login for a display item, so the live fan-out can read exactly
+// the repos on the current page. Submitted/pending rows and group repos are
+// keyed by `owner`; a non-submitter by its roster username. Empty string is
+// filtered by the caller.
+export function displayItemOwner(item: DisplayItem): string {
+  switch (item.kind) {
+    case "row":
+      return item.row.owner
+    case "nonSubmitter":
+      return item.student.username
+    case "groupRepo":
+      return item.repo.owner
+  }
+}
+
+// A `login (lowercased) -> display name (lowercased)` map for the roster, built
+// once so the group name-ordering and search don't call getName (an O(n) roster
+// scan) inside a comparator or filter — which turns an O(n log n) sort into
+// O(n^2). The value mirrors getName exactly: the display name, or "" when the
+// login isn't on the roster or the row has no name. Shared by the fan-out spine
+// and the group display-item builder so their orderings can't drift.
+export function buildNameKeyLookup(students: Student[]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const student of students) {
+    const login = student.username.trim().toLowerCase()
+    if (!login) continue
+    map.set(
+      login,
+      nameFromParts(student.first_name, student.last_name).toLowerCase(),
+    )
+  }
+  return map
+}
+
+// A single owner's group SORT key from the precomputed name map: display name
+// when the founder is on the roster with a name, else the login — lowercased.
+// (Mirrors the prior `getName(owner) || owner`.)
+function ownerSortKey(owner: string, names: Map<string, string>): string {
+  return names.get(owner.trim().toLowerCase()) || owner.toLowerCase()
+}
+
+// An owner's display name for SEARCH matching (name only, "" when off-roster or
+// nameless) — mirrors the prior `getName(owner).toLowerCase()`, so the login is
+// matched separately by the caller, not folded in here.
+function ownerSearchName(owner: string, names: Map<string, string>): string {
+  return names.get(owner.trim().toLowerCase()) ?? ""
+}
+
+// The full, deterministic, name-ordered owner list the live fan-out pages over
+// — filtered by search + section ONLY (NOT submitted/passing status). Those
+// status axes depend on live presence, so using them here would make the owner
+// set depend on the very data we're fetching; search/section are live-
+// independent, so the spine is stable across the live merge and the fan-out
+// doesn't loop. For groups the unit is the founder/repo owner. This is the
+// single source both the fan-out slice (pageRepoOwners) and the page-count
+// clamp read, so the fanned-out page can't drift from a page the user can see.
+export function pageRepoOwnerSpine({
+  isGroup,
+  roster,
+  groupRepos,
+  query,
+  section,
+  sectionByUsername,
+  students,
+}: {
+  isGroup: boolean
+  roster: Student[]
+  groupRepos: GroupRepo[]
+  query: string
+  section: string
+  sectionByUsername: Map<string, string>
+  students: Student[]
+}): string[] {
+  const q = query.trim().toLowerCase()
+  const names = buildNameKeyLookup(students)
+  if (isGroup) {
+    // Page the group founders in the SAME order the table renders them: by
+    // founder display name (the name-asc live view). Match search against the
+    // founder login or roster display name. Section isn't a group concept.
+    return [...groupRepos]
+      .sort((a, b) =>
+        ownerSortKey(a.owner, names).localeCompare(
+          ownerSortKey(b.owner, names),
+        ),
+      )
+      .filter((repo) => {
+        if (!q) return true
+        if (repo.owner.toLowerCase().includes(q)) return true
+        const name = ownerSearchName(repo.owner, names)
+        return name.length > 0 && name.includes(q)
+      })
+      .map((repo) => repo.owner)
+  }
+  return roster
+    .filter((student) => {
+      if (
+        section !== "all" &&
+        sectionByUsername.get(student.username.trim().toLowerCase()) !== section
+      ) {
+        return false
+      }
+      if (!q) return true
+      const login = student.username.toLowerCase()
+      if (login.includes(q)) return true
+      const name = ownerSearchName(student.username, names)
+      return name.length > 0 && name.includes(q)
+    })
+    .map((student) => student.username)
+    .filter(Boolean)
+}
+
+// The repo owners the live fan-out should read for the current page — a
+// page-scoped slice of pageRepoOwnerSpine so a large class is read a page at a
+// time (each page's owner-set is cached by react-query), not all at once.
+export function pageRepoOwners(args: {
+  isGroup: boolean
+  roster: Student[]
+  groupRepos: GroupRepo[]
+  query: string
+  section: string
+  sectionByUsername: Map<string, string>
+  students: Student[]
+  page: number
+  pageSize: number
+}): string[] {
+  const owners = pageRepoOwnerSpine(args)
+  const { page: clamped } = pageBounds(owners.length, args.pageSize, args.page)
+  const start = clamped * args.pageSize
+  return owners.slice(start, start + args.pageSize)
+}
+
+// The compact list of page numbers to render, with `null` marking an ellipsis
+// gap. Always shows first/last, the current page, and one neighbor each side;
+// collapses the rest. Keeps the nav to at most ~7 controls regardless of count.
+export function paginationRange(
+  page: number,
+  pageCount: number,
+): (number | null)[] {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_, i) => i)
+  }
+  const pages = new Set<number>([0, pageCount - 1, page, page - 1, page + 1])
+  const sorted = [...pages]
+    .filter((p) => p >= 0 && p < pageCount)
+    .sort((a, b) => a - b)
+  const out: (number | null)[] = []
+  let prev = -1
+  for (const p of sorted) {
+    if (prev >= 0 && p - prev > 1) out.push(null)
+    out.push(p)
+    prev = p
+  }
+  return out
 }
