@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { getPendingOrgInvite } from "@/github-core/mutations"
 import { githubKeys } from "@/github-core/queries"
-import { retryTransientGitHubError } from "@/github-core/errors"
+import {
+  GitHubAPIError,
+  isDefinitiveGitHubStatus,
+  retryTransientGitHubError,
+} from "@/github-core/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 // Reads the authenticated user's OWN membership in `org` (GET
@@ -19,6 +23,18 @@ const useGetOwnOrgMembership = (org: string | undefined) => {
     queryFn: () => getPendingOrgInvite(client, org ?? ""),
     staleTime: 10 * 60 * 1000,
     retry: retryTransientGitHubError,
+    // A definitive cached error (401/403/404) must survive a fresh observer's
+    // mount. OrgLayout toggles a full-screen spinner on this query's isLoading,
+    // unmounting the subtree that also reads it; refetching the definitive error
+    // on remount flips isLoading back to true — a spinner->unmount->remount->
+    // refetch loop that pinned non-members on an endless spinner. Transient
+    // 5xx/429/network errors still refetch on remount (documented self-heal);
+    // only definitive statuses (the loop driver, unchangeable by a retry) don't.
+    retryOnMount: (query) =>
+      !(
+        query.state.error instanceof GitHubAPIError &&
+        isDefinitiveGitHubStatus(query.state.error.status)
+      ),
     enabled: Boolean(org),
   })
 }
