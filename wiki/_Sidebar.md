@@ -1,8 +1,11 @@
 - [Home](Home)
-- **Web Interface**
+- [How Classroom 50 Works](How-Classroom-50-Works)
+- [Glossary](Glossary)
+- [FAQ](FAQ)
+- **Web app**
   - [Web Teacher Guide](Web-Teacher-Guide)
   - [Web Student Guide](Web-Student-Guide)
-- **Command-Line Interface**
+- **Command line**
   - [Installation](Installation)
   - [CLI Teacher Guide](CLI-Teacher-Guide)
   - [CLI Student Guide](CLI-Student-Guide)
